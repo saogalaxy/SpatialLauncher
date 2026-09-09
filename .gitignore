@@ -1,0 +1,12 @@
+.DS_Store
+*.iml
+.gradle/
+build/
+.idea/
+local.properties
+.cxx/
+*.apk
+*.ap_
+*.dex
+captures/
+.externalNativeBuild/

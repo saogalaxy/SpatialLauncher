@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Same fill and corner radius as bg_dock_pill so the cast window and icon bar share
+     one frosted-glass style instead of a darker framed card around the stream. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <solid android:color="@color/dock_pill_bg" />
+    <corners android:radius="32dp" />
+</shape>

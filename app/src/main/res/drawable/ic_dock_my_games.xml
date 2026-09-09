@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Clean, flat "folder" glyph for the My Games dock entry. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="48dp"
+    android:height="48dp"
+    android:viewportWidth="48"
+    android:viewportHeight="48">
+    <path
+        android:fillColor="#5AC8FA"
+        android:pathData="M6,14 C6,12.34 7.34,11 9,11 L18,11 L21,15 L39,15 C40.66,15 42,16.34 42,18 L42,34 C42,35.66 40.66,37 39,37 L9,37 C7.34,37 6,35.66 6,34 Z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:fillAlpha="0.18"
+        android:pathData="M6,18 L42,18 L42,20 L6,20 Z" />
+</vector>

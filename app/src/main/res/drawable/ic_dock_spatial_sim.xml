@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Outlined isometric cube glyph (Spatial_Sim). -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="48dp"
+    android:height="48dp"
+    android:viewportWidth="48"
+    android:viewportHeight="48">
+    <path
+        android:fillColor="#1EE6C4"
+        android:pathData="M24,4 L42,14 L42,34 L24,44 L6,34 L6,14 Z" />
+    <path
+        android:fillColor="#0F8C79"
+        android:pathData="M24,4 L42,14 L24,24 L6,14 Z" />
+    <path
+        android:fillColor="#14A891"
+        android:pathData="M24,24 L42,14 L42,34 L24,44 Z" />
+</vector>

@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Simple "+" glyph for the Add New Game dock entry. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="48dp"
+    android:height="48dp"
+    android:viewportWidth="48"
+    android:viewportHeight="48">
+    <path
+        android:fillColor="#3A3F4E"
+        android:pathData="M10,4 L38,4 C40.21,4 42,5.79 42,8 L42,40 C42,42.21 40.21,44 38,44 L10,44 C7.79,44 6,42.21 6,40 L6,8 C6,5.79 7.79,4 10,4 Z" />
+    <path
+        android:fillColor="#B9C0D4"
+        android:pathData="M21,12 L27,12 L27,21 L36,21 L36,27 L27,27 L27,36 L21,36 L21,27 L12,27 L12,21 L21,21 Z" />
+</vector>

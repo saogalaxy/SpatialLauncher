@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Continuous TTS on — accent fill. -->
+<ripple xmlns:android="http://schemas.android.com/apk/res/android"
+    android:color="#88FFFFFF">
+    <item>
+        <shape android:shape="oval">
+            <solid android:color="@color/tts_loop_bg" />
+        </shape>
+    </item>
+</ripple>

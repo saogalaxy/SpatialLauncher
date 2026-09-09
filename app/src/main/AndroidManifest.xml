@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
+
+    <!-- Package-visibility (API 30+): needed to enumerate installed launchable apps for
+         "Add Game" — without this <queries> block, PackageManager.queryIntentActivities()
+         silently returns nothing for most packages on modern Android/Horizon OS. -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
+    </queries>
+
+    <application
+        android:allowBackup="false"
+        android:label="@string/app_name"
+        android:icon="@mipmap/ic_launcher"
+        android:theme="@style/Theme.SpatialLauncher.Panel"
+        android:hardwareAccelerated="true"
+        android:resizeableActivity="true"
+        android:maxAspectRatio="10.0"
+        tools:targetApi="34">
+
+        <activity
+            android:name=".ui.PanelMainActivity"
+            android:label="@string/app_name"
+            android:exported="true"
+            android:launchMode="singleTask"
+            android:resizeableActivity="true"
+            android:maxAspectRatio="10.0"
+            android:minAspectRatio="0.2"
+            android:configChanges="density|screenSize|screenLayout|smallestScreenSize|orientation|keyboardHidden|keyboard|navigation|uiMode">
+
+            <!-- Horizon OS's own window-sizing hints for a floating 2D panel: initial and
+                 minimum dashboard-window size. See "Panel Sizing" in Meta's docs. -->
+            <layout
+                android:defaultWidth="1024dp"
+                android:defaultHeight="640dp"
+                android:minWidth="480dp"
+                android:minHeight="320dp" />
+
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <!-- The real Meta manifest tag for a floating 2D/spatial panel activity.
+                     Note: com.oculus.intent.category.PANEL_APP is not a category Meta
+                     documents or recognizes anywhere in the current Horizon OS manifest
+                     spec/hybrid-apps docs — com.oculus.intent.category.2D is the actual
+                     tag that tells the OS "spawn this as a floating dashboard panel, not
+                     a full-screen immersive space" (the counterpart tag for an immersive
+                     OpenXR activity is com.oculus.intent.category.VR). Using the real tag
+                     here so the app actually gets panel treatment on-device. -->
+                <category android:name="com.oculus.intent.category.2D" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!-- Isolated PoC only — not a production launcher entry. -->
+        <activity
+            android:name=".sandbox.VirtualSandboxTestActivity"
+            android:label="@string/sandbox_open"
+            android:exported="false"
+            android:resizeableActivity="true"
+            android:configChanges="density|screenSize|screenLayout|smallestScreenSize|orientation|keyboardHidden|keyboard|navigation|uiMode" />
+
+        <!-- Satisfies the MediaProjection foreground-service requirement — see
+             MirrorCaptureService's doc comment for the exact crash this fixes. -->
+        <service
+            android:name=".ui.MirrorCaptureService"
+            android:exported="false"
+            android:foregroundServiceType="mediaProjection" />
+    </application>
+</manifest>

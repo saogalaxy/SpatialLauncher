@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Same round-button shape as bg_circle_button, but filled with the accent color —
+     used to show a toggle button's "on" state at a glance (no text needed). -->
+<ripple xmlns:android="http://schemas.android.com/apk/res/android"
+    android:color="@color/panel_bg_solid">
+    <item>
+        <shape android:shape="oval">
+            <solid android:color="@color/accent" />
+        </shape>
+    </item>
+</ripple>

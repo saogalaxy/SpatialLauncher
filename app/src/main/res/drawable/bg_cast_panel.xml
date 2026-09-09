@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Used while a cast is running so letterbox/pillarbox around the stream is black
+     instead of the idle frosted-glass fill, which otherwise reads as a bright frame. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <solid android:color="@color/cast_chrome" />
+    <corners android:radius="32dp" />
+</shape>

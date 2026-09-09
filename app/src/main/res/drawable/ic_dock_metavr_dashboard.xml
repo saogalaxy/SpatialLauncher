@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Hex badge with "M" mark (MetaVR Dashboard). -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="48dp"
+    android:height="48dp"
+    android:viewportWidth="48"
+    android:viewportHeight="48">
+    <path
+        android:fillColor="#7C6BFF"
+        android:pathData="M24,3 L42,13.5 L42,34.5 L24,45 L6,34.5 L6,13.5 Z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M15,17 L20,17 L24,27 L28,17 L33,17 L33,31 L29,31 L29,22 L25.5,31 L22.5,31 L19,22 L19,31 L15,31 Z" />
+</vector>
