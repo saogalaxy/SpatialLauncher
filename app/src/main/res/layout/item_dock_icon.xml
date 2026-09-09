@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- One pinned-game slot in the bottom dock. Plain View + normal click/long-click
+     listeners (set up in PanelMainActivity) — the OS's panel input framework delivers
+     standard MotionEvents/pointer input to this like any other Android View, so there's
+     no custom hit-testing or coordinate math to get wrong. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="88dp"
+    android:layout_height="wrap_content"
+    android:layout_marginEnd="8dp"
+    android:orientation="vertical"
+    android:gravity="center"
+    android:background="@drawable/bg_dock_icon"
+    android:padding="8dp"
+    android:clickable="true"
+    android:focusable="true">
+
+    <ImageView
+        android:id="@+id/dock_item_icon"
+        android:layout_width="48dp"
+        android:layout_height="48dp"
+        android:contentDescription="@null" />
+
+    <TextView
+        android:id="@+id/dock_item_label"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="4dp"
+        android:ellipsize="end"
+        android:gravity="center"
+        android:maxLines="1"
+        android:textColor="@color/text_primary"
+        android:textSize="11sp" />
+</LinearLayout>

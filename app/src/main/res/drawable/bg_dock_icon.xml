@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Ripple-on-tap feedback for dock icons and the settings gear, using the OS's normal
+     touch/click handling — no custom hit-testing math, no coordinate inversions. -->
+<ripple xmlns:android="http://schemas.android.com/apk/res/android"
+    android:color="@color/accent">
+    <item>
+        <shape android:shape="rectangle">
+            <solid android:color="@color/dock_icon_bg" />
+            <corners android:radius="20dp" />
+        </shape>
+    </item>
+</ripple>

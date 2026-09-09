@@ -1,0 +1,67 @@
+apply plugin: 'com.android.application'
+
+android {
+    namespace "com.spatiallauncher.app"
+    compileSdk 34
+
+    defaultConfig {
+        applicationId "com.spatiallauncher.app"
+        minSdk 29
+        targetSdk 32
+        versionCode 1
+        versionName "0.1.0"
+    }
+
+    sourceSets {
+        main {
+            manifest.srcFile 'src/main/AndroidManifest.xml'
+            java.srcDirs = ['src/main/java']
+            res.srcDirs = ['src/main/res']
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_1_8
+        targetCompatibility JavaVersion.VERSION_1_8
+    }
+
+    aaptOptions {
+        noCompress "tflite"
+    }
+
+    buildTypes {
+        debug {
+            debuggable true
+        }
+        release {
+            debuggable false
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+        }
+    }
+}
+
+dependencies {
+    // Plain Android panel app UI — no native/OpenXR dependency anymore. This is a real
+    // Horizon OS 2D panel Activity (see AndroidManifest's com.oculus.intent.category.2D),
+    // so standard Views/Material widgets are all that's needed; the OS's own panel
+    // framework handles window placement, resizing, and pointer/hand input for us.
+    implementation 'androidx.core:core:1.12.0'
+    implementation 'androidx.annotation:annotation:1.7.1'
+    implementation 'androidx.appcompat:appcompat:1.6.1'
+    implementation 'com.google.android.material:material:1.11.0'
+
+    // On-device monocular depth estimation (MiDaS v2.1, bundled as assets/midas_depth.tflite)
+    // — used to replace the luminance-guess pixel shift with real per-pixel depth-based
+    // reprojection for the stereo mirror. See DepthEstimator.java.
+    implementation 'org.tensorflow:tensorflow-lite:2.14.0'
+    implementation 'org.tensorflow:tensorflow-lite-support:0.4.4'
+
+    // On-device OCR for Step 2 (dialogue/text from captured frames). Bundled Latin
+    // model — no Google Play Services required on Quest.
+    implementation 'com.google.mlkit:text-recognition:16.0.1'
+
+    // On-device Piper (VITS) via sherpa-onnx. Voice files download on first TTS enable.
+    implementation 'com.github.k2-fsa.sherpa-onnx:sherpa-onnx:v1.13.5'
+    implementation 'org.apache.commons:commons-compress:1.26.2'
+}

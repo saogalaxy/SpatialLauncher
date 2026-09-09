@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Minimal "A" monogram (Project Aethel) inside a rounded square badge. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="48dp"
+    android:height="48dp"
+    android:viewportWidth="48"
+    android:viewportHeight="48">
+    <path
+        android:fillColor="#2B2E3A"
+        android:pathData="M8,4 L40,4 C42.21,4 44,5.79 44,8 L44,40 C44,42.21 42.21,44 40,44 L8,44 C5.79,44 4,42.21 4,40 L4,8 C4,5.79 5.79,4 8,4 Z" />
+    <path
+        android:fillColor="#FF6B6B"
+        android:pathData="M24,10 L36,34 L30,34 L27.6,29 L20.4,29 L18,34 L12,34 Z M24,17.5 L21.6,23.5 L26.4,23.5 Z" />
+</vector>

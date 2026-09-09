@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Tap-to-speak mode — green so it reads as “press to talk”. -->
+<ripple xmlns:android="http://schemas.android.com/apk/res/android"
+    android:color="#88FFFFFF">
+    <item>
+        <shape android:shape="oval">
+            <solid android:color="@color/tts_once_bg" />
+        </shape>
+    </item>
+</ripple>

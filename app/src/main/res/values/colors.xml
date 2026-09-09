@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Same frosted white-on-charcoal as the dock pill so the cast area and icon bar
+         read as one panel, not a dark framed window sitting above a lighter bar. -->
+    <color name="panel_bg">#66FFFFFF</color>
+    <color name="panel_bg_solid">#2A2A32</color>
+    <color name="panel_glass_top">#40FFFFFF</color>
+    <color name="panel_glass_bottom">#102A2A32</color>
+    <color name="panel_border">#3DFFFFFF</color>
+    <color name="cast_chrome">#FF000000</color>
+    <color name="settings_drawer_cast">#F2111114</color>
+    <color name="dock_pill_bg">#66FFFFFF</color>
+    <color name="dock_pill_bg_cast">#2EFFFFFF</color>
+    <color name="dock_icon_bg">#33FFFFFF</color>
+    <color name="text_primary">#FFE8ECF6</color>
+    <color name="text_secondary">#99C4C9DA</color>
+    <!-- Cool slate — matches frosted dock chips, not Material purple. -->
+    <color name="accent">#FF8A93A8</color>
+    <color name="control_tint">#FF9AABB8</color>
+    <color name="tts_once_bg">#FF16A34A</color>
+    <color name="tts_loop_bg">#FF2563EB</color>
+    <color name="divider">#22FFFFFF</color>
+</resources>
