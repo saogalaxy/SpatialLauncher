@@ -10,6 +10,9 @@ import com.google.mlkit.vision.common.InputImage;
 import com.google.mlkit.vision.text.Text;
 import com.google.mlkit.vision.text.TextRecognition;
 import com.google.mlkit.vision.text.TextRecognizer;
+import com.google.mlkit.vision.text.chinese.ChineseTextRecognizerOptions;
+import com.google.mlkit.vision.text.japanese.JapaneseTextRecognizerOptions;
+import com.google.mlkit.vision.text.korean.KoreanTextRecognizerOptions;
 import com.google.mlkit.vision.text.latin.TextRecognizerOptions;
 
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -70,6 +73,12 @@ final class DialogueTextExtractor {
     private final Context appContext;
     private final TextRecognizer recognizer =
             TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS);
+    private TextRecognizer japaneseRecognizer;
+    private TextRecognizer chineseRecognizer;
+    private TextRecognizer koreanRecognizer;
+    private final OnDeviceTranslator translator;
+    private volatile boolean translateToEnglish;
+    private volatile boolean cjkOcr;
     private final Handler main = new Handler(Looper.getMainLooper());
     private final AtomicBoolean busy = new AtomicBoolean(false);
     private final DialogueDeduper deduper = new DialogueDeduper();
@@ -84,11 +93,23 @@ final class DialogueTextExtractor {
     DialogueTextExtractor(Context context) {
         appContext = context.getApplicationContext();
         visionRuntime = new QuantizedVisionRuntime(appContext);
+        translator = OnDeviceTranslator.get(appContext);
         Log.i(TAG, "Option A crop→VLM backend=" + visionRuntime.backend());
     }
 
     void setMode(ReadingStepMode mode) {
         this.mode = mode != null ? mode : ReadingStepMode.OPTION_A_ON_DEVICE_VLM;
+    }
+
+    void setTranslateToEnglish(boolean enabled) {
+        translateToEnglish = enabled;
+        if (enabled) {
+            translator.ensureReady(ok -> { });
+        }
+    }
+
+    void setCjkOcr(boolean enabled) {
+        cjkOcr = enabled;
     }
 
     long recommendedCaptureIntervalMs() {
@@ -183,43 +204,96 @@ final class DialogueTextExtractor {
     private void processCopiedFrame(Bitmap copy, boolean forceEmit) {
         InputImage image = InputImage.fromBitmap(copy, 0);
         recognizer.process(image)
-                .addOnSuccessListener(text -> {
-                    String parsed = parseDialogue(text);
-                    if (parsed.isEmpty()) {
+                .addOnSuccessListener(latin -> {
+                    String parsed = parseDialogue(latin);
+                    if (!cjkOcr) {
+                        finishParsed(copy, parsed, forceEmit);
                         return;
                     }
-                    if (!forceEmit && !deduper.wouldBeNew(parsed)) {
-                        return;
-                    }
-                    String out = parsed;
-                    boolean gpuBusy = deferHeavyVision != null && deferHeavyVision.getAsBoolean();
-                    if (mode == ReadingStepMode.OPTION_A_ON_DEVICE_VLM && !gpuBusy) {
-                        String vlm = visionRuntime.infer(copy, OPTION_A_PROMPT);
-                        if (vlm != null && !vlm.trim().isEmpty()) {
-                            out = vlm.trim();
-                        }
-                    }
-                    if (forceEmit) {
-                        emitForced(out);
-                    } else {
-                        emitIfNew(out);
-                    }
+                    japanese().process(image)
+                            .addOnSuccessListener(jp -> {
+                                String merged = pickRicher(parsed, parseDialogue(jp));
+                                chinese().process(image)
+                                        .addOnSuccessListener(zh -> {
+                                            String withZh = pickRicher(merged, parseDialogue(zh));
+                                            korean().process(image)
+                                                    .addOnSuccessListener(ko -> {
+                                                        finishParsed(
+                                                                copy,
+                                                                pickRicher(withZh, parseDialogue(ko)),
+                                                                forceEmit);
+                                                    })
+                                                    .addOnFailureListener(e ->
+                                                            finishParsed(copy, withZh, forceEmit));
+                                        })
+                                        .addOnFailureListener(e -> finishParsed(copy, merged, forceEmit));
+                            })
+                            .addOnFailureListener(e -> finishParsed(copy, parsed, forceEmit));
                 })
-                .addOnFailureListener(e -> Log.w(TAG, "OCR trigger failed", e))
-                .addOnCompleteListener(task -> {
-                    copy.recycle();
-                    Bitmap nextForced;
-                    synchronized (this) {
-                        nextForced = pendingForcedFrame;
-                        pendingForcedFrame = null;
-                    }
-                    if (nextForced != null) {
-                        // Stay busy and process the queued tap immediately.
-                        processCopiedFrame(nextForced, true);
+                .addOnFailureListener(e -> {
+                    Log.w(TAG, "OCR trigger failed", e);
+                    finishFrame(copy);
+                });
+    }
+
+    private void finishParsed(Bitmap copy, String parsed, boolean forceEmit) {
+        try {
+            if (parsed == null || parsed.isEmpty()) {
+                return;
+            }
+            if (!forceEmit && !deduper.wouldBeNew(parsed)) {
+                return;
+            }
+            String out = parsed;
+            boolean gpuBusy = deferHeavyVision != null && deferHeavyVision.getAsBoolean();
+            if (mode == ReadingStepMode.OPTION_A_ON_DEVICE_VLM && !gpuBusy) {
+                String vlm = visionRuntime.infer(copy, OPTION_A_PROMPT);
+                if (vlm != null && !vlm.trim().isEmpty()) {
+                    out = vlm.trim();
+                }
+            }
+            if (translateToEnglish && !OnDeviceTranslator.looksPrimarilyEnglish(out)) {
+                final boolean forced = forceEmit;
+                translator.toEnglish(out, en -> {
+                    if (forced) {
+                        emitForced(en);
                     } else {
-                        busy.set(false);
+                        emitIfNew(en);
                     }
                 });
+                return;
+            }
+            if (forceEmit) {
+                emitForced(out);
+            } else {
+                emitIfNew(out);
+            }
+        } finally {
+            finishFrame(copy);
+        }
+    }
+
+    private void finishFrame(Bitmap copy) {
+        copy.recycle();
+        Bitmap nextForced;
+        synchronized (this) {
+            nextForced = pendingForcedFrame;
+            pendingForcedFrame = null;
+        }
+        if (nextForced != null) {
+            processCopiedFrame(nextForced, true);
+        } else {
+            busy.set(false);
+        }
+    }
+
+    private static String pickRicher(String a, String b) {
+        String left = a == null ? "" : a.trim();
+        String right = b == null ? "" : b.trim();
+        if (right.length() > left.length()) {
+            return right;
+        }
+        return left;
     }
 
     private boolean emitIfNew(String raw) {
@@ -254,9 +328,42 @@ final class DialogueTextExtractor {
         }
     }
 
+    private synchronized TextRecognizer japanese() {
+        if (japaneseRecognizer == null) {
+            japaneseRecognizer = TextRecognition.getClient(
+                    new JapaneseTextRecognizerOptions.Builder().build());
+        }
+        return japaneseRecognizer;
+    }
+
+    private synchronized TextRecognizer chinese() {
+        if (chineseRecognizer == null) {
+            chineseRecognizer = TextRecognition.getClient(
+                    new ChineseTextRecognizerOptions.Builder().build());
+        }
+        return chineseRecognizer;
+    }
+
+    private synchronized TextRecognizer korean() {
+        if (koreanRecognizer == null) {
+            koreanRecognizer = TextRecognition.getClient(
+                    new KoreanTextRecognizerOptions.Builder().build());
+        }
+        return koreanRecognizer;
+    }
+
     void close() {
         listener = null;
         recognizer.close();
+        if (japaneseRecognizer != null) {
+            japaneseRecognizer.close();
+        }
+        if (chineseRecognizer != null) {
+            chineseRecognizer.close();
+        }
+        if (koreanRecognizer != null) {
+            koreanRecognizer.close();
+        }
     }
 
     static String parseDialogue(Text visionText) {

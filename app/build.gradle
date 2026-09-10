@@ -26,7 +26,14 @@ android {
     }
 
     aaptOptions {
-        noCompress "tflite"
+        noCompress "tflite", "onnx", "bz2"
+    }
+
+    packagingOptions {
+        pickFirst 'lib/arm64-v8a/libonnxruntime.so'
+        pickFirst 'lib/armeabi-v7a/libonnxruntime.so'
+        pickFirst 'lib/x86/libonnxruntime.so'
+        pickFirst 'lib/x86_64/libonnxruntime.so'
     }
 
     buildTypes {
@@ -57,11 +64,95 @@ dependencies {
     implementation 'org.tensorflow:tensorflow-lite:2.14.0'
     implementation 'org.tensorflow:tensorflow-lite-support:0.4.4'
 
-    // On-device OCR for Step 2 (dialogue/text from captured frames). Bundled Latin
-    // model — no Google Play Services required on Quest.
+    // On-device OCR for Step 2 (dialogue/text from captured frames). Bundled models —
+    // no Google Play Services required on Quest.
     implementation 'com.google.mlkit:text-recognition:16.0.1'
+    implementation 'com.google.mlkit:text-recognition-japanese:16.0.1'
+    implementation 'com.google.mlkit:text-recognition-chinese:16.0.1'
+    implementation 'com.google.mlkit:text-recognition-korean:16.0.1'
 
-    // On-device Piper (VITS) via sherpa-onnx. Voice files download on first TTS enable.
+    // Bundled OPUS-MT (ja→en, zh→en) via ONNX Runtime — no Play Services.
+    implementation 'com.microsoft.onnxruntime:onnxruntime-android:1.17.3'
+
+    // On-device Piper (VITS) via sherpa-onnx. Low voices are packed in the APK.
     implementation 'com.github.k2-fsa.sherpa-onnx:sherpa-onnx:v1.13.5'
     implementation 'org.apache.commons:commons-compress:1.26.2'
 }
+
+def translateAssets = file("src/main/assets/translate")
+def piperAssets = file("src/main/assets/models/piper")
+def asrAssets = file("src/main/assets/models/asr")
+
+def downloadTo = { String url, File dest ->
+    if (dest.exists() && dest.length() > 1024) {
+        return
+    }
+    dest.parentFile.mkdirs()
+    logger.lifecycle("Downloading ${url}")
+    dest.withOutputStream { out ->
+        def conn = new URL(url).openConnection()
+        conn.setInstanceFollowRedirects(true)
+        conn.connectTimeout = 30000
+        conn.readTimeout = 180000
+        conn.inputStream.withStream { ins ->
+            byte[] buf = new byte[8192]
+            int n
+            while ((n = ins.read(buf)) >= 0) {
+                out.write(buf, 0, n)
+            }
+        }
+    }
+}
+
+tasks.register("downloadOfflineModels") {
+    description = "Pack Piper, SenseVoice, and OPUS-MT into assets. Headset never downloads models."
+    doLast {
+        [
+                "vits-piper-en_US-amy-low",
+                "vits-piper-en_US-ryan-low"
+        ].each { name ->
+            downloadTo(
+                    "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/${name}.tar.bz2",
+                    new File(piperAssets, "${name}.tar.bz2"))
+        }
+        downloadTo(
+                "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17.tar.bz2",
+                new File(asrAssets, "sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17.tar.bz2"))
+
+        def pairs = [
+                [id: "jaen", repo: "Xenova/opus-mt-ja-en"],
+                [id: "zhen", repo: "Xenova/opus-mt-zh-en"]
+        ]
+        pairs.each { pair ->
+            def dir = new File(translateAssets, pair.id)
+            dir.mkdirs()
+            def hf = "https://huggingface.co/${pair.repo}/resolve/main"
+            [
+                    ["onnx/encoder_model_quantized.onnx", "encoder.onnx"],
+                    ["onnx/decoder_model_quantized.onnx", "decoder.onnx"],
+                    ["config.json", "config.json"]
+            ].each { mapping ->
+                downloadTo("${hf}/${mapping[0]}", new File(dir, mapping[1]))
+            }
+            def tok = new File(dir, "tokenizer.json")
+            def pieces = new File(dir, "pieces.tsv")
+            if (!pieces.exists() || pieces.length() < 10) {
+                downloadTo("${hf}/tokenizer.json", tok)
+                def json = new groovy.json.JsonSlurper().parse(tok)
+                pieces.withWriter("UTF-8") { w ->
+                    json.model.vocab.each { row ->
+                        String piece = String.valueOf(row[0]).replace("\\", "\\\\").replace("\t", "\\t")
+                        w.writeLine(piece + "\t" + row[1])
+                    }
+                }
+                logger.lifecycle("Wrote ${pieces}")
+            }
+            if (tok.exists()) {
+                tok.delete()
+            }
+        }
+    }
+}
+
+preBuild.dependsOn downloadOfflineModels
+

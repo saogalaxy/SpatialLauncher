@@ -26,6 +26,7 @@ public class UserSettingsStore {
     private static final String KEY_TTS_MANUAL = "tts_manual_mode";
     private static final String KEY_TTS_MALE = "tts_male_voice";
     private static final String KEY_TTS_TONE_PERCENT = "tts_tone_percent";
+    private static final String KEY_ASSIST_MODE = "assist_mode";
     private static final String KEY_SESSION_MODE = "session_mode";
     private static final String KEY_SESSION_APP = "session_app_package";
     static final String SESSION_IDLE = "idle";
@@ -235,6 +236,16 @@ public class UserSettingsStore {
 
     public void setTtsTonePercent(int percent) {
         prefs.edit().putInt(KEY_TTS_TONE_PERCENT, Math.max(0, Math.min(100, percent))).apply();
+    }
+
+    /** Current OCR→Piper pipeline. Extra modes: on-screen translate, listen, share overlay. */
+    public AssistMode getAssistMode() {
+        return AssistMode.fromPref(prefs.getString(KEY_ASSIST_MODE, AssistMode.DEFAULT.prefKey));
+    }
+
+    public void setAssistMode(AssistMode mode) {
+        AssistMode next = mode == null ? AssistMode.DEFAULT : mode;
+        prefs.edit().putString(KEY_ASSIST_MODE, next.prefKey).apply();
     }
 
     public String getSessionMode() {

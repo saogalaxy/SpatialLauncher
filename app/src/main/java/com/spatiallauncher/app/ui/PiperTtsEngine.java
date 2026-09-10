@@ -15,16 +15,7 @@ import com.k2fsa.sherpa.onnx.OfflineTtsConfig;
 import com.k2fsa.sherpa.onnx.OfflineTtsModelConfig;
 import com.k2fsa.sherpa.onnx.OfflineTtsVitsModelConfig;
 
-import org.apache.commons.compress.archivers.tar.TarArchiveEntry;
-import org.apache.commons.compress.archivers.tar.TarArchiveInputStream;
-import org.apache.commons.compress.compressors.bzip2.BZip2CompressorInputStream;
-
-import java.io.BufferedInputStream;
 import java.io.File;
-import java.io.FileOutputStream;
-import java.io.InputStream;
-import java.net.HttpURLConnection;
-import java.net.URL;
 import java.util.ArrayDeque;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
@@ -37,8 +28,6 @@ import java.util.concurrent.atomic.AtomicBoolean;
  */
 final class PiperTtsEngine {
     private static final String TAG = "PiperTts";
-    private static final String BASE_URL =
-            "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/";
     private static final String FEMALE_DIR = "vits-piper-en_US-amy-low";
     private static final String FEMALE_ONNX = "en_US-amy-low.onnx";
     private static final String MALE_DIR = "vits-piper-en_US-ryan-low";
@@ -178,7 +167,8 @@ final class PiperTtsEngine {
                 File dir = new File(modelsRoot, dirName);
                 File onnx = new File(dir, onnxName);
                 if (!onnx.isFile()) {
-                    downloadAndExtract(dirName, dir);
+                    BundledArchive.extractTarBz2(
+                            app, "models/piper/" + dirName + ".tar.bz2", modelsRoot);
                 }
                 File tokens = new File(dir, "tokens.txt");
                 File dataDir = new File(dir, "espeak-ng-data");
@@ -708,49 +698,5 @@ final class PiperTtsEngine {
             track.stop();
         } catch (Throwable ignored) {
         }
-    }
-
-    private void downloadAndExtract(String dirName, File destDir) throws Exception {
-        destDir.getParentFile().mkdirs();
-        File archive = new File(modelsRoot, dirName + ".tar.bz2");
-        String url = BASE_URL + dirName + ".tar.bz2";
-        Log.i(TAG, "Downloading Piper voice… " + dirName);
-        HttpURLConnection conn = (HttpURLConnection) new URL(url).openConnection();
-        conn.setConnectTimeout(30000);
-        conn.setReadTimeout(120000);
-        conn.setInstanceFollowRedirects(true);
-        try (InputStream in = new BufferedInputStream(conn.getInputStream());
-             FileOutputStream out = new FileOutputStream(archive)) {
-            byte[] buf = new byte[8192];
-            int n;
-            while ((n = in.read(buf)) >= 0) {
-                out.write(buf, 0, n);
-            }
-        } finally {
-            conn.disconnect();
-        }
-        modelsRoot.mkdirs();
-        try (InputStream raw = new BufferedInputStream(new java.io.FileInputStream(archive));
-             BZip2CompressorInputStream bz = new BZip2CompressorInputStream(raw);
-             TarArchiveInputStream tar = new TarArchiveInputStream(bz)) {
-            TarArchiveEntry entry;
-            while ((entry = tar.getNextTarEntry()) != null) {
-                File outFile = new File(modelsRoot, entry.getName());
-                if (entry.isDirectory()) {
-                    outFile.mkdirs();
-                    continue;
-                }
-                outFile.getParentFile().mkdirs();
-                try (FileOutputStream fos = new FileOutputStream(outFile)) {
-                    byte[] buf = new byte[8192];
-                    int n;
-                    while ((n = tar.read(buf)) >= 0) {
-                        fos.write(buf, 0, n);
-                    }
-                }
-            }
-        }
-        //noinspection ResultOfMethodCallIgnored
-        archive.delete();
     }
 }
