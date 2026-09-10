@@ -7,6 +7,7 @@ import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
 import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
@@ -26,10 +27,13 @@ import android.os.Handler;
 import android.os.HandlerThread;
 import android.os.IBinder;
 import android.os.Looper;
+import java.util.concurrent.atomic.AtomicBoolean;
+import android.util.Base64;
 import android.util.DisplayMetrics;
 import android.util.Log;
 import android.view.LayoutInflater;
 import android.view.MotionEvent;
+import android.view.PixelCopy;
 import android.view.SurfaceView;
 import android.view.View;
 import android.view.ViewGroup;
@@ -109,6 +113,7 @@ public class PanelMainActivity extends AppCompatActivity {
     private Button settingsCloseButton;
     private TextView emptyStateText;
     private SurfaceView gameRenderSurface;
+    private final GlesZMeshView glesZMeshView = new GlesZMeshView();
     private View overlayView;
     private FrameLayout browserHost;
     private View browserTabScroll;
@@ -229,6 +234,7 @@ public class PanelMainActivity extends AppCompatActivity {
         dialogueTextExtractor.setDeferHeavyVision(depthInferenceBusy::get);
         screenFrameCapture.setPeriodicIntervalMs(dialogueTextExtractor.recommendedCaptureIntervalMs());
         forceStereoEnabled = settingsStore.getForceStereo();
+        useGlesZMesh = settingsStore.getGlesZMesh();
         depthModeStatic = settingsStore.getDepthModeStatic();
         int savedDepthPercent = Math.max(10, settingsStore.getDepthStrengthPercent(depthModeStatic));
         depthStrengthMultiplier = savedDepthPercent / 100f;
@@ -317,7 +323,7 @@ public class PanelMainActivity extends AppCompatActivity {
         // null-checks depthEstimator and falls back to the luminance heuristic until this
         // finishes, so mirroring can start immediately even if depth isn't ready yet.
         new Thread(() -> {
-            DepthEstimator estimator = new DepthEstimator(getApplicationContext());
+            DepthEstimator estimator = DepthEstimator.createDefault(getApplicationContext());
             estimator.setDepthGamma(contrastPercentToGamma(settingsStore.getDepthContrastPercent(false)));
             depthEstimator = estimator;
             if (settingsStore.getDepthModeStatic()) {
@@ -331,6 +337,12 @@ public class PanelMainActivity extends AppCompatActivity {
         cardRoot = findViewById(R.id.card_root);
         emptyStateText = findViewById(R.id.empty_state_text);
         gameRenderSurface = findViewById(R.id.game_render_surface);
+        glesZMeshView.setOnBound(() -> {
+            if (useGlesZMesh && (mirroringApp != null || browserStereoRunning)) {
+                setStereoComposition(forceStereoEnabled);
+            }
+            stereoHandoff = false;
+        });
         overlayView = findViewById(R.id.touch_overlay);
         drmWebView = findViewById(R.id.webView);
         browserHost = findViewById(R.id.browser_host);
@@ -370,6 +382,7 @@ public class PanelMainActivity extends AppCompatActivity {
             return false;
         });
         contentArea = findViewById(R.id.content_area);
+        muteCastPointerChrome();
         contentArea.setOnApplyWindowInsetsListener((v, insets) -> {
             screenFrameCapture.setSystemInsets(
                     v.getWidth(),
@@ -411,8 +424,9 @@ public class PanelMainActivity extends AppCompatActivity {
                 setStereoComposition(forceStereoEnabled);
                 if (!forceStereoEnabled) {
                     cachedParallaxGrid = flatParallaxGrid();
+                    cachedDepth01 = null;
                 }
-                gameRenderSurface.post(this::lockSurfaceBufferSize);
+                activeStereoSurface().post(this::lockSurfaceBufferSize);
             } else if (isBrowserOpen()) {
                 if (isChecked) {
                     startBrowserStereo();
@@ -1508,7 +1522,7 @@ public class PanelMainActivity extends AppCompatActivity {
             browserTabScroll.setVisibility(View.GONE);
         }
         if (mirroringApp != null) {
-            gameRenderSurface.setVisibility(View.VISIBLE);
+            setStereoOutputVisible(true);
             setHomeRowCompact(true);
             setCastTheme(true);
         } else {
@@ -1522,6 +1536,8 @@ public class PanelMainActivity extends AppCompatActivity {
     private final Handler browserStereoHandler = new Handler(Looper.getMainLooper());
     private boolean browserStereoRunning = false;
     private Bitmap browserCaptureBitmap;
+    private boolean browserGpuCanvas;
+    private final AtomicBoolean browserPixelCopyBusy = new AtomicBoolean(false);
 
     private final Runnable browserStereoTick = new Runnable() {
         @Override
@@ -1537,8 +1553,15 @@ public class PanelMainActivity extends AppCompatActivity {
         if (!isBrowserOpen()) {
             return;
         }
+        finishStartBrowserStereo();
+    }
+
+    private void finishStartBrowserStereo() {
+        if (!isBrowserOpen()) {
+            return;
+        }
         setBrowserStereoCaptureMode(true);
-        gameRenderSurface.setVisibility(View.VISIBLE);
+        setStereoOutputVisible(true);
         gameRenderSurface.setClickable(false);
         if (overlayView != null) {
             overlayView.setVisibility(View.VISIBLE);
@@ -1554,9 +1577,9 @@ public class PanelMainActivity extends AppCompatActivity {
             });
         }
         setStereoComposition(forceStereoEnabled);
-        gameRenderSurface.post(() -> {
+        activeStereoSurface().post(() -> {
             fitSurfaceToCaptureAspectRatio();
-            gameRenderSurface.post(this::lockSurfaceBufferSize);
+            activeStereoSurface().post(this::lockSurfaceBufferSize);
         });
         if (!browserStereoRunning) {
             browserStereoRunning = true;
@@ -1612,6 +1635,26 @@ public class PanelMainActivity extends AppCompatActivity {
         return null;
     }
 
+    private void muteCastPointerChrome() {
+        View.OnHoverListener eatHover = (v, event) ->
+                mirroringApp != null || browserStereoRunning;
+        if (contentArea != null) {
+            contentArea.setSoundEffectsEnabled(false);
+            contentArea.setHapticFeedbackEnabled(false);
+            contentArea.setOnHoverListener(eatHover);
+        }
+        gameRenderSurface.setClickable(false);
+        gameRenderSurface.setFocusable(false);
+        gameRenderSurface.setSoundEffectsEnabled(false);
+        gameRenderSurface.setHapticFeedbackEnabled(false);
+        gameRenderSurface.setOnHoverListener(eatHover);
+        if (overlayView != null) {
+            overlayView.setSoundEffectsEnabled(false);
+            overlayView.setHapticFeedbackEnabled(false);
+            overlayView.setOnHoverListener(eatHover);
+        }
+    }
+
     /**
      * Direct motion forwarding from the stereo overlay onto the underlying cast view.
      * Copies the event, remaps if the 3D mesh / SBS / aspect distorts layout, dispatches,
@@ -1639,6 +1682,11 @@ public class PanelMainActivity extends AppCompatActivity {
         MotionEvent mappedEvent = MotionEvent.obtain(event);
         mappedEvent.offsetLocation(mappedX - event.getX(), mappedY - event.getY());
         try {
+            if (event.getActionMasked() == MotionEvent.ACTION_HOVER_ENTER
+                    || event.getActionMasked() == MotionEvent.ACTION_HOVER_MOVE
+                    || event.getActionMasked() == MotionEvent.ACTION_HOVER_EXIT) {
+                return true;
+            }
             if (event.getActionMasked() == MotionEvent.ACTION_DOWN) {
                 overlay.getParent().requestDisallowInterceptTouchEvent(true);
                 castView.requestFocus();
@@ -1685,17 +1733,21 @@ public class PanelMainActivity extends AppCompatActivity {
         }
 
         if (forceStereoEnabled) {
-            int canvasW = Math.max(1, gameRenderSurface.getWidth());
-            int canvasH = Math.max(1, gameRenderSurface.getHeight());
+            int canvasW = Math.max(1, activeStereoSurface().getWidth());
+            int canvasH = Math.max(1, activeStereoSurface().getHeight());
             int halfWidth = Math.max(1, canvasW / 2);
             boolean rightEye = !isHorizonStereoCompositionActive() && xRatio >= 0.5f;
             Rect eyeBounds = rightEye
                     ? new Rect(halfWidth, 0, canvasW, canvasH)
                     : new Rect(0, 0, halfWidth, canvasH);
             int direction = rightEye ? -1 : 1;
-            float destX = eyeBounds.left + nx * eyeBounds.width();
-            float destY = eyeBounds.top + ny * eyeBounds.height();
-            float[] uv = invertParallaxMesh(destX, destY, eyeBounds, cachedParallaxGrid, direction);
+            Bitmap src = browserCaptureBitmap;
+            Rect dest = (src != null)
+                    ? containFit(eyeBounds, src.getWidth(), src.getHeight())
+                    : eyeBounds;
+            float destX = dest.left + nx * dest.width();
+            float destY = dest.top + ny * dest.height();
+            float[] uv = invertParallaxMesh(destX, destY, dest, cachedParallaxGrid, direction);
             nx = uv[0];
             ny = uv[1];
         }
@@ -1771,15 +1823,32 @@ public class PanelMainActivity extends AppCompatActivity {
                 + s11 * fx * fy;
     }
 
+    private static Rect containFit(Rect box, int srcW, int srcH) {
+        if (box.width() <= 0 || box.height() <= 0 || srcW <= 0 || srcH <= 0) {
+            return box;
+        }
+        float boxA = box.width() / (float) box.height();
+        float srcA = srcW / (float) srcH;
+        if (srcA > boxA) {
+            int h = Math.max(1, Math.round(box.width() / srcA));
+            int top = box.top + (box.height() - h) / 2;
+            return new Rect(box.left, top, box.right, top + h);
+        }
+        int w = Math.max(1, Math.round(box.height() * srcA));
+        int left = box.left + (box.width() - w) / 2;
+        return new Rect(left, box.top, left + w, box.bottom);
+    }
+
     private static float clamp01(float value) {
         return Math.max(0f, Math.min(1f, value));
     }
 
     private void setBrowserStereoCaptureMode(boolean stereo) {
-        int layer = stereo ? View.LAYER_TYPE_SOFTWARE : View.LAYER_TYPE_HARDWARE;
+        // Always hardware. Software layer made HTML 3D capturable but left the live
+        // WebView blank after 3D was turned off (and it kills WebGL/Spine).
         for (WebView tab : browserTabs) {
             if (tab != null) {
-                tab.setLayerType(layer, null);
+                tab.setLayerType(View.LAYER_TYPE_HARDWARE, null);
             }
         }
     }
@@ -1818,6 +1887,7 @@ public class PanelMainActivity extends AppCompatActivity {
     private void stopBrowserStereo() {
         browserStereoRunning = false;
         browserStereoHandler.removeCallbacks(browserStereoTick);
+        browserGpuCanvas = false;
         setBrowserStereoCaptureMode(false);
         if (overlayView != null) {
             overlayView.setOnTouchListener(null);
@@ -1826,8 +1896,12 @@ public class PanelMainActivity extends AppCompatActivity {
         if (gameRenderSurface != null && mirroringApp == null) {
             gameRenderSurface.setOnTouchListener(null);
             gameRenderSurface.setClickable(false);
-            gameRenderSurface.setVisibility(View.GONE);
             setStereoComposition(false);
+            setStereoOutputVisible(false);
+        }
+        if (drmWebView != null) {
+            drmWebView.setVisibility(View.VISIBLE);
+            drmWebView.invalidate();
         }
     }
 
@@ -1835,8 +1909,12 @@ public class PanelMainActivity extends AppCompatActivity {
         if (!isBrowserOpen() || drmWebView.getWidth() <= 0 || drmWebView.getHeight() <= 0) {
             return;
         }
-        int w = drmWebView.getWidth();
-        int h = drmWebView.getHeight();
+        // One path for every site: try a large canvas (Spine / WebGL), else the
+        // visible WebView. Never stretch a tiny canvas to the page size.
+        captureBrowserCanvasViaJs();
+    }
+
+    private boolean ensureBrowserCaptureBitmap(int w, int h) {
         if (browserCaptureBitmap == null
                 || browserCaptureBitmap.getWidth() != w
                 || browserCaptureBitmap.getHeight() != h) {
@@ -1845,17 +1923,123 @@ public class PanelMainActivity extends AppCompatActivity {
             }
             browserCaptureBitmap = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
         }
-        pollBrowserPageScroll();
+        return browserCaptureBitmap != null;
+    }
+
+    private void captureBrowserViewportDraw() {
+        int w = drmWebView.getWidth();
+        int h = drmWebView.getHeight();
+        if (!ensureBrowserCaptureBitmap(w, h)) {
+            return;
+        }
         Canvas canvas = new Canvas(browserCaptureBitmap);
         canvas.drawColor(Color.BLACK);
-        // SurfaceView hole-punch + HW WebView leaves draw() with the document
-        // origin at y=0 and the visible page sitting at +scrollY (black above).
-        // Software layer + whole-document draw + this crop keeps 3D on the
-        // same viewport the user scrolled.
-        canvas.save();
-        canvas.translate(-browserCaptureScrollX(), -browserCaptureScrollY());
         drmWebView.draw(canvas);
-        canvas.restore();
+        publishBrowserStereoFrame();
+    }
+
+    private void captureBrowserCanvasViaJs() {
+        if (drmWebView == null) {
+            return;
+        }
+        drmWebView.evaluateJavascript(
+                "(function(){"
+                        + "function pickCanvas(){"
+                        + "var list=document.querySelectorAll('canvas'),c=null,best=0;"
+                        + "for(var i=0;i<list.length;i++){"
+                        + "var t=list[i];"
+                        + "var s=Math.max((t.width||0)*(t.height||0),(t.clientWidth||0)*(t.clientHeight||0));"
+                        + "if(s>best){best=s;c=t;}"
+                        + "}"
+                        + "if(!c||best<160*160)return '';"
+                        + "try{return c.toDataURL('image/jpeg',0.8);}catch(e){return '';}"
+                        + "}"
+                        + "function pickImg(){"
+                        + "var list=document.querySelectorAll('img'),best=null,area=0;"
+                        + "for(var i=0;i<list.length;i++){"
+                        + "var t=list[i];"
+                        + "var vis=(t.clientWidth||0)*(t.clientHeight||0);"
+                        + "var nat=(t.naturalWidth||0)*(t.naturalHeight||0);"
+                        + "if(vis<180*180&&nat<400*400)continue;"
+                        + "var s=Math.max(vis,nat);"
+                        + "if(s>area){area=s;best=t;}"
+                        + "}"
+                        + "if(!best)return '';"
+                        + "try{"
+                        + "var cv=document.createElement('canvas');"
+                        + "cv.width=best.naturalWidth||best.width;"
+                        + "cv.height=best.naturalHeight||best.height;"
+                        + "if(cv.width<2||cv.height<2)return '';"
+                        + "cv.getContext('2d').drawImage(best,0,0);"
+                        + "return cv.toDataURL('image/jpeg',0.85);"
+                        + "}catch(e){return '';}"
+                        + "}"
+                        + "var u=pickCanvas();"
+                        + "if(u)return u;"
+                        + "return pickImg();"
+                        + "})()",
+                value -> {
+                    if (!browserStereoRunning) {
+                        return;
+                    }
+                    Bitmap fromJs = decodeDataUrlBitmap(value);
+                    if (fromJs == null) {
+                        captureBrowserViewportDraw();
+                        return;
+                    }
+                    if (browserCaptureBitmap != null && browserCaptureBitmap != fromJs) {
+                        browserCaptureBitmap.recycle();
+                    }
+                    browserCaptureBitmap = fromJs;
+                    publishBrowserStereoFrame();
+                });
+    }
+
+    private void pixelCopyBrowserWindow() {
+        if (!browserPixelCopyBusy.compareAndSet(false, true)) {
+            return;
+        }
+        int w = drmWebView.getWidth();
+        int h = drmWebView.getHeight();
+        if (!ensureBrowserCaptureBitmap(w, h)) {
+            browserPixelCopyBusy.set(false);
+            return;
+        }
+        int[] loc = new int[2];
+        drmWebView.getLocationInWindow(loc);
+        Rect src = new Rect(loc[0], loc[1], loc[0] + w, loc[1] + h);
+        PixelCopy.request(getWindow(), src, browserCaptureBitmap, result -> {
+            browserPixelCopyBusy.set(false);
+            if (result == PixelCopy.SUCCESS) {
+                publishBrowserStereoFrame();
+            }
+        }, browserStereoHandler);
+    }
+
+    private static Bitmap decodeDataUrlBitmap(String jsValue) {
+        if (jsValue == null || jsValue.length() < 32 || "null".equals(jsValue) || "\"\"".equals(jsValue)) {
+            return null;
+        }
+        String raw = jsValue;
+        if (raw.length() >= 2 && raw.charAt(0) == '"') {
+            raw = raw.substring(1, raw.length() - 1).replace("\\/", "/");
+        }
+        int comma = raw.indexOf(',');
+        if (comma < 0 || !raw.startsWith("data:image")) {
+            return null;
+        }
+        try {
+            byte[] bytes = Base64.decode(raw.substring(comma + 1), Base64.DEFAULT);
+            return BitmapFactory.decodeByteArray(bytes, 0, bytes.length);
+        } catch (RuntimeException ignored) {
+            return null;
+        }
+    }
+
+    private void publishBrowserStereoFrame() {
+        if (browserCaptureBitmap == null) {
+            return;
+        }
         if (ttsEnabled) {
             screenFrameCapture.retainSourceForTap(browserCaptureBitmap);
         }
@@ -1888,12 +2072,15 @@ public class PanelMainActivity extends AppCompatActivity {
     @Override
     protected void onPause() {
         persistSession();
+        glesZMeshView.onPause();
         super.onPause();
     }
 
     @Override
     protected void onResume() {
         super.onResume();
+        boolean glesLive = useGlesZMesh && (mirroringApp != null || browserStereoRunning);
+        glesZMeshView.onResume(gameRenderSurface, glesLive);
         // A pinned app may have been uninstalled while we were in the background;
         // re-resolving on every resume keeps the dock honest without extra bookkeeping.
         refreshDock();
@@ -2106,7 +2293,7 @@ public class PanelMainActivity extends AppCompatActivity {
         mirroringApp = app;
         hideDrmBrowser();
         emptyStateText.setVisibility(View.GONE);
-        gameRenderSurface.setVisibility(View.VISIBLE);
+        setStereoOutputVisible(true);
         stopMirrorButton.setVisibility(View.VISIBLE);
         // drawStereoMirrorFrame() already lays out left/right eye images side by side in
         // one buffer — this tells the OS compositor to actually route each half to its
@@ -2132,7 +2319,7 @@ public class PanelMainActivity extends AppCompatActivity {
             // setLayoutParams() above only requests a new layout pass — getWidth()/
             // getHeight() won't reflect it until that pass runs, so lockSurfaceBufferSize()
             // needs its own, later post to see the post-resize dimensions.
-            gameRenderSurface.post(this::lockSurfaceBufferSize);
+            activeStereoSurface().post(this::lockSurfaceBufferSize);
         });
     }
 
@@ -2162,6 +2349,87 @@ public class PanelMainActivity extends AppCompatActivity {
         gameRenderSurface.setLayoutParams(params);
     }
 
+    /** GLES needs a full 3D stop/start so EGL is not attached over a live Canvas producer. */
+    private void restartStereoAfterGlesToggle() {
+        if (browserStereoRunning || (isBrowserOpen() && forceStereoEnabled)) {
+            stereoHandoff = true;
+            stopBrowserStereo();
+            contentArea.postDelayed(() -> {
+                if (isBrowserOpen() && forceStereoEnabled) {
+                    startBrowserStereo();
+                }
+                stereoHandoff = false;
+            }, 120);
+            return;
+        }
+        if (mirroringApp != null) {
+            stereoHandoff = true;
+            glesHandoffTries = 0;
+            glesZMeshView.stop();
+            contentArea.postDelayed(this::finishMirrorGlesHandoff, 80);
+        }
+    }
+
+    private void finishMirrorGlesHandoff() {
+        if (mirroringApp == null) {
+            stereoHandoff = false;
+            return;
+        }
+        if (glesZMeshView.ownsSurface() && glesHandoffTries++ < 20) {
+            contentArea.postDelayed(this::finishMirrorGlesHandoff, 40);
+            return;
+        }
+        if (useGlesZMesh) {
+            recycleMirrorSurfaceForGles();
+            return;
+        }
+        lockSurfaceBufferSize();
+        stereoHandoff = false;
+    }
+
+    /**
+     * lockCanvas leaves BLAST in a canvas-producer state. Hide + reformat the
+     * SurfaceView before EGL or mid-cast GLES-on freezes the app stream.
+     */
+    private void recycleMirrorSurfaceForGles() {
+        glesZMeshView.stop();
+        gameRenderSurface.setVisibility(View.GONE);
+        gameRenderSurface.post(() -> {
+            if (mirroringApp == null || !useGlesZMesh) {
+                stereoHandoff = false;
+                return;
+            }
+            gameRenderSurface.getHolder().setFormat(PixelFormat.OPAQUE);
+            gameRenderSurface.setVisibility(View.VISIBLE);
+            gameRenderSurface.post(() -> {
+                if (mirroringApp == null || !useGlesZMesh) {
+                    stereoHandoff = false;
+                    return;
+                }
+                glesZMeshView.startOn(gameRenderSurface);
+                contentArea.postDelayed(() -> stereoHandoff = false, 1500);
+            });
+        });
+    }
+
+    private SurfaceView activeStereoSurface() {
+        return gameRenderSurface;
+    }
+
+    private void setStereoOutputVisible(boolean show) {
+        if (!show) {
+            glesZMeshView.stop();
+            gameRenderSurface.setVisibility(View.GONE);
+            return;
+        }
+        gameRenderSurface.setVisibility(View.VISIBLE);
+        if (useGlesZMesh) {
+            glesZMeshView.startOn(gameRenderSurface);
+        } else {
+            glesZMeshView.stop();
+        }
+    }
+
     /**
      * Forces the SurfaceView's SurfaceHolder to a fixed buffer size matching its current
      * laid-out pixel dimensions, so lockCanvas() always hands back a canvas of exactly
@@ -2169,10 +2437,18 @@ public class PanelMainActivity extends AppCompatActivity {
      * setStereoComposition(). See onMirrorSessionStarted() for why this exists.
      */
     private void lockSurfaceBufferSize() {
-        int w = gameRenderSurface.getWidth();
-        int h = gameRenderSurface.getHeight();
-        if (w > 0 && h > 0) {
-            gameRenderSurface.getHolder().setFixedSize(w, h);
+        SurfaceView surface = activeStereoSurface();
+        int w = surface.getWidth();
+        int h = surface.getHeight();
+        if (w <= 0 || h <= 0 || stereoHandoff) {
+            return;
+        }
+        if (useGlesZMesh && glesZMeshView.ownsSurface()) {
+            glesZMeshView.onBufferResize(w, h);
+            return;
+        }
+        if (!useGlesZMesh) {
+            surface.getHolder().setFixedSize(w, h);
         }
     }
 
@@ -2192,7 +2468,8 @@ public class PanelMainActivity extends AppCompatActivity {
             method.invoke(null, gameRenderSurface, mode);
             horizonStereoCompositionApplied = stereo;
             Log.i(TAG, "Horizon OS stereo surface composition set to "
-                    + (stereo ? "SIDE_BY_SIDE" : "MONO"));
+                    + (stereo ? "SIDE_BY_SIDE" : "MONO")
+                    + (useGlesZMesh ? " (GLES Z-mesh)" : " (Canvas mesh)"));
         } catch (ReflectiveOperationException e) {
             horizonStereoCompositionApplied = false;
             Log.w(TAG, "horizonos.view.SurfaceViewExt unavailable on this device/OS build "
@@ -2236,7 +2513,7 @@ public class PanelMainActivity extends AppCompatActivity {
                 captureHeight = h;
                 runOnUiThread(() -> {
                     fitSurfaceToCaptureAspectRatio();
-                    gameRenderSurface.post(this::lockSurfaceBufferSize);
+                    activeStereoSurface().post(this::lockSurfaceBufferSize);
                 });
             }
             if (ttsEnabled) {
@@ -2403,6 +2680,9 @@ public class PanelMainActivity extends AppCompatActivity {
     private volatile long depthUpdateMinIntervalMs;
     private volatile long lastDepthKickMs;
     private volatile boolean depthModeStatic;
+    private boolean useGlesZMesh;
+    private volatile boolean stereoHandoff;
+    private int glesHandoffTries;
     private int lastStaticDepthFingerprint = Integer.MIN_VALUE;
     private int pendingStaticFingerprint = Integer.MIN_VALUE;
     private long staticStableSinceMs;
@@ -2430,6 +2710,7 @@ public class PanelMainActivity extends AppCompatActivity {
     // Starts as a flat mid-value grid so the very first frames still show *something*
     // before the first depth estimate lands.
     private volatile float[][] cachedParallaxGrid = flatParallaxGrid();
+    private volatile float[][] cachedDepth01;
     private final java.util.concurrent.ExecutorService depthExecutor =
             java.util.concurrent.Executors.newSingleThreadExecutor();
     private final java.util.concurrent.atomic.AtomicBoolean depthInferenceBusy =
@@ -2455,6 +2736,15 @@ public class PanelMainActivity extends AppCompatActivity {
 
         findViewById(R.id.depth_mode_live).setOnClickListener(v -> setDepthModeStatic(false));
         findViewById(R.id.depth_mode_static).setOnClickListener(v -> setDepthModeStatic(true));
+
+        Switch glesToggle = findViewById(R.id.toggle_gles_z_mesh);
+        useGlesZMesh = settingsStore.getGlesZMesh();
+        glesToggle.setChecked(useGlesZMesh);
+        glesToggle.setOnCheckedChangeListener((buttonView, isChecked) -> {
+            useGlesZMesh = isChecked;
+            settingsStore.setGlesZMesh(isChecked);
+            restartStereoAfterGlesToggle();
+        });
 
         SeekBar contrastBar = findViewById(R.id.seekbar_depth_contrast);
         TextView contrastValue = findViewById(R.id.depth_contrast_value);
@@ -2540,6 +2830,17 @@ public class PanelMainActivity extends AppCompatActivity {
             public void onStopTrackingTouch(SeekBar seekBar) {}
         });
 
+        findViewById(R.id.reset_depth_defaults).setOnClickListener(v -> resetCurrentDepthDefaults());
+
+        applyDepthProfileToUi();
+    }
+
+    private void resetCurrentDepthDefaults() {
+        settingsStore.resetDepthProfile(depthModeStatic);
+        lastStaticDepthFingerprint = Integer.MIN_VALUE;
+        pendingStaticFingerprint = Integer.MIN_VALUE;
+        cachedParallaxGrid = flatParallaxGrid();
+        cachedDepth01 = null;
         applyDepthProfileToUi();
     }
 
@@ -2650,6 +2951,7 @@ public class PanelMainActivity extends AppCompatActivity {
         depthGridCols = 8 + Math.round(t * 16);
         depthGridRows = 12 + Math.round(t * 24);
         cachedParallaxGrid = flatParallaxGrid();
+        cachedDepth01 = null;
     }
 
     private void applyDepthUpdateSpeed(int percent) {
@@ -2676,6 +2978,23 @@ public class PanelMainActivity extends AppCompatActivity {
      * parallax mesh. With 3D off: one full-bleed image (no mesh, no half-width stretch).
      */
     private void drawStereoMirrorFrame(Bitmap frame) {
+        if (stereoHandoff) {
+            return;
+        }
+        if (useGlesZMesh) {
+            glesZMeshView.submit(
+                    frame,
+                    cachedDepth01,
+                    forceStereoEnabled,
+                    depthStrengthMultiplier,
+                    convergenceOffsetPx,
+                    edgeFadeFraction,
+                    !depthModeStatic);
+            return;
+        }
+        if (glesZMeshView.ownsSurface()) {
+            return;
+        }
         if (!gameRenderSurface.getHolder().getSurface().isValid()) {
             return;
         }
@@ -2686,22 +3005,20 @@ public class PanelMainActivity extends AppCompatActivity {
         try {
             canvas.drawColor(Color.BLACK);
             if (!forceStereoEnabled) {
-                canvas.drawBitmap(frame, null,
-                        new Rect(0, 0, canvas.getWidth(), canvas.getHeight()), MESH_PAINT);
+                Rect fit = containFit(
+                        new Rect(0, 0, canvas.getWidth(), canvas.getHeight()),
+                        frame.getWidth(), frame.getHeight());
+                canvas.drawBitmap(frame, null, fit, MESH_PAINT);
                 return;
             }
             int halfWidth = canvas.getWidth() / 2;
             float[][] parallaxGrid = cachedParallaxGrid;
-            // direction is intentionally +1 for the LEFT eye and -1 for the RIGHT eye:
-            // near content (large parallaxGrid value) must shift toward the *opposite*
-            // eye's side (crossed disparity) to read as popping out in front of the
-            // screen. The other way around (near content shifting toward its own eye's
-            // side, i.e. left eye moves left / right eye moves right for near pixels) is
-            // uncrossed disparity, which reads as the content sinking behind the screen
-            // instead — that was the bug making everything look "sunk in".
-            drawEyeWithParallaxMesh(canvas, frame, new Rect(0, 0, halfWidth, canvas.getHeight()), parallaxGrid, 1);
-            drawEyeWithParallaxMesh(canvas, frame, new Rect(halfWidth, 0, canvas.getWidth(), canvas.getHeight()),
-                    parallaxGrid, -1);
+            Rect leftEye = containFit(new Rect(0, 0, halfWidth, canvas.getHeight()),
+                    frame.getWidth(), frame.getHeight());
+            Rect rightEye = containFit(new Rect(halfWidth, 0, canvas.getWidth(), canvas.getHeight()),
+                    frame.getWidth(), frame.getHeight());
+            drawEyeWithParallaxMesh(canvas, frame, leftEye, parallaxGrid, 1);
+            drawEyeWithParallaxMesh(canvas, frame, rightEye, parallaxGrid, -1);
         } finally {
             gameRenderSurface.getHolder().unlockCanvasAndPost(canvas);
         }
@@ -2758,6 +3075,7 @@ public class PanelMainActivity extends AppCompatActivity {
             try {
                 float[][] depth01 = estimator.estimate(frameCopy, gridCols + 1, gridRows + 1);
                 if (depth01 != null) {
+                    float[][] depthCopy = new float[gridRows + 1][gridCols + 1];
                     float min = minParallaxPx();
                     float max = maxParallaxPx();
                     float[][] grid = new float[gridRows + 1][gridCols + 1];
@@ -2767,6 +3085,9 @@ public class PanelMainActivity extends AppCompatActivity {
                             float d = depth01[row][col];
                             if (invert) {
                                 d = 1f - d;
+                            }
+                            if (depthCopy != null) {
+                                depthCopy[row][col] = d;
                             }
                             float shift = min + d * (max - min);
                             grid[row][col] = shift;
@@ -2781,6 +3102,7 @@ public class PanelMainActivity extends AppCompatActivity {
                         }
                     }
                     cachedParallaxGrid = grid;
+                    cachedDepth01 = depthCopy;
                     if (stills) {
                         lastStaticDepthFingerprint = settledFp;
                     }
@@ -2813,13 +3135,14 @@ public class PanelMainActivity extends AppCompatActivity {
         return hash;
     }
 
+    private static final Paint MESH_PAINT = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
+
     /**
      * Draws the whole frame through a bitmap mesh, displacing each grid vertex
      * horizontally by its parallax amount. drawBitmapMesh continuously interpolates
      * between vertices, so there are no hard seams/grid lines between cells and no extra
      * independent-resample blur like separate drawBitmap() calls per band would cause.
      */
-    private static final Paint MESH_PAINT = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
 
     private void drawEyeWithParallaxMesh(Canvas canvas, Bitmap frame, Rect eyeBounds, float[][] parallaxGrid,
             int direction) {
@@ -2869,7 +3192,7 @@ public class PanelMainActivity extends AppCompatActivity {
         // before the *next* getMediaProjection() call too, not just this one.
         mirroringApp = null;
         setStereoComposition(false);
-        gameRenderSurface.setVisibility(View.GONE);
+        setStereoOutputVisible(false);
         stopMirrorButton.setVisibility(View.GONE);
         emptyStateText.setVisibility(View.VISIBLE);
         setHomeRowCompact(false);
@@ -2967,7 +3290,7 @@ public class PanelMainActivity extends AppCompatActivity {
         if (mirroringApp != null || isBrowserOpen()) {
             contentArea.post(() -> {
                 fitSurfaceToCaptureAspectRatio();
-                gameRenderSurface.post(this::lockSurfaceBufferSize);
+                activeStereoSurface().post(this::lockSurfaceBufferSize);
             });
         }
     }

@@ -3,6 +3,6 @@ description: Current Git branch for this workspace
 alwaysApply: true
 ---
 
-This workspace is on Git branch **feature/virtual-app-sandbox**.
+This workspace is on Git branch **main**.
 
-This is an isolated proof-of-concept for in-process virtual app sandboxing. Do not merge or commit onto `main` unless Chris asks. Keep sandbox code under `com.spatiallauncher.app.sandbox`.
+Sandbox experiments stay under `com.spatiallauncher.app.sandbox`.

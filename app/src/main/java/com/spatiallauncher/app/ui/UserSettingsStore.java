@@ -20,6 +20,7 @@ public class UserSettingsStore {
     private static final String KEY_DEPTH_UPDATE_SPEED = "depth_update_speed_percent";
     private static final String SUFFIX_STATIC = "_static";
     private static final String KEY_DEPTH_STATIC = "depth_mode_static";
+    private static final String KEY_GLES_Z_MESH = "gles_z_mesh";
     private static final String KEY_TTS_ENABLED = "tts_enabled";
     private static final String KEY_TTS_SPEED_PERCENT = "tts_speed_percent";
     private static final String KEY_TTS_MANUAL = "tts_manual_mode";
@@ -39,6 +40,7 @@ public class UserSettingsStore {
     static final int DEFAULT_DEPTH_SMOOTHNESS = 50;
     static final int DEFAULT_DEPTH_UPDATE_SPEED = 100;
     static final boolean DEFAULT_DEPTH_STATIC = false;
+    static final boolean DEFAULT_GLES_Z_MESH = true;
     static final boolean DEFAULT_FORCE_STEREO = true;
     static final boolean DEFAULT_TTS_ENABLED = false;
     /** 100 = normal Piper pace; slider range 50–200. */
@@ -137,7 +139,14 @@ public class UserSettingsStore {
         return prefs.getBoolean(key, def);
     }
 
-    /** True = comics/stills (wait for a settled frame). False = live video. */
+    public boolean getGlesZMesh() {
+        return prefs.getBoolean(KEY_GLES_Z_MESH, DEFAULT_GLES_Z_MESH);
+    }
+
+    public void setGlesZMesh(boolean enabled) {
+        prefs.edit().putBoolean(KEY_GLES_Z_MESH, enabled).apply();
+    }
+
     public boolean getDepthModeStatic() {
         return prefs.getBoolean(KEY_DEPTH_STATIC, DEFAULT_DEPTH_STATIC);
     }
@@ -150,6 +159,19 @@ public class UserSettingsStore {
     }
 
     /** Copy Live sliders into Static once, so the two profiles start equal then diverge. */
+    /** Factory defaults for Live or Static depth sliders (does not change Live/Static mode). */
+    public void resetDepthProfile(boolean stills) {
+        prefs.edit()
+                .putInt(modeKey(KEY_DEPTH_STRENGTH_PERCENT, stills), DEFAULT_DEPTH_STRENGTH_PERCENT)
+                .putInt(modeKey(KEY_CONVERGENCE_PROGRESS, stills), DEFAULT_CONVERGENCE_PROGRESS)
+                .putInt(modeKey(KEY_DEPTH_CONTRAST, stills), DEFAULT_DEPTH_CONTRAST)
+                .putBoolean(modeKey(KEY_INVERT_DEPTH, stills), DEFAULT_INVERT_DEPTH)
+                .putInt(modeKey(KEY_EDGE_SOFTNESS, stills), DEFAULT_EDGE_SOFTNESS)
+                .putInt(modeKey(KEY_DEPTH_SMOOTHNESS, stills), DEFAULT_DEPTH_SMOOTHNESS)
+                .putInt(modeKey(KEY_DEPTH_UPDATE_SPEED, stills), DEFAULT_DEPTH_UPDATE_SPEED)
+                .apply();
+    }
+
     public void seedStaticDepthProfileIfNeeded() {
         String sentinel = modeKey(KEY_DEPTH_STRENGTH_PERCENT, true);
         if (prefs.contains(sentinel)) {

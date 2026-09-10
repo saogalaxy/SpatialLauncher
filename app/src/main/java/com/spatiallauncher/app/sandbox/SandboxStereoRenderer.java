@@ -28,6 +28,7 @@ public final class SandboxStereoRenderer {
     private DepthEstimator estimator;
     private volatile float[][] parallaxGrid;
     private volatile Bitmap latestFrame;
+    private volatile boolean stereoEnabled;
 
     public SandboxStereoRenderer(SurfaceView overlay) {
         this.overlay = overlay;
@@ -35,6 +36,18 @@ public final class SandboxStereoRenderer {
 
     public void setEstimator(DepthEstimator estimator) {
         this.estimator = estimator;
+    }
+
+    public boolean isStereoEnabled() {
+        return stereoEnabled;
+    }
+
+    public void setStereoEnabled(boolean enabled) {
+        stereoEnabled = enabled;
+        Bitmap latest = latestFrame;
+        if (latest != null) {
+            overlay.post(() -> draw(latest));
+        }
     }
 
     public void onContainerFrame(Bitmap frame) {
@@ -109,6 +122,11 @@ public final class SandboxStereoRenderer {
         }
         try {
             canvas.drawColor(Color.BLACK);
+            if (!stereoEnabled) {
+                canvas.drawBitmap(frame, null,
+                        new Rect(0, 0, canvas.getWidth(), canvas.getHeight()), MESH_PAINT);
+                return;
+            }
             int half = canvas.getWidth() / 2;
             float[][] grid = parallaxGrid;
             if (grid == null) {
