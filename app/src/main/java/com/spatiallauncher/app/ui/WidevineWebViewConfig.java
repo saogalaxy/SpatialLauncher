@@ -101,6 +101,8 @@ public final class WidevineWebViewConfig {
         settings.setUseWideViewPort(true);
         settings.setAllowFileAccess(true);
         settings.setAllowContentAccess(true);
+        settings.setAllowFileAccessFromFileURLs(true);
+        settings.setAllowUniversalAccessFromFileURLs(true);
         // Modern mobile Chrome UA so streaming sites don't treat the WebView as a
         // blocked / outdated browser and refuse Widevine / EME playback.
         settings.setUserAgentString(

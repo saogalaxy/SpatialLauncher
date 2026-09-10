@@ -10,3 +10,6 @@ local.properties
 *.dex
 captures/
 .externalNativeBuild/
+app/src/main/assets/translate/**/*.onnx
+app/src/main/assets/translate/**/tokenizer.json
+app/src/main/assets/models/**/*.tar.bz2

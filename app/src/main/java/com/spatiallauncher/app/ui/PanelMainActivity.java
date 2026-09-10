@@ -1,8 +1,10 @@
 package com.spatiallauncher.app.ui;
 
+import android.Manifest;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.Intent;
+import android.net.Uri;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
@@ -58,6 +60,8 @@ import android.text.style.ForegroundColorSpan;
 import android.text.style.StyleSpan;
 
 import androidx.appcompat.app.AppCompatActivity;
+import androidx.core.app.ActivityCompat;
+import androidx.core.content.ContextCompat;
 
 import com.spatiallauncher.app.R;
 
@@ -122,6 +126,13 @@ public class PanelMainActivity extends AppCompatActivity {
     private WebView drmWebView;
     private boolean ttsEnabled;
     private boolean ttsManualMode;
+    private AssistMode assistMode = AssistMode.DEFAULT;
+    private PlaybackListenEngine listenEngine;
+    private TextView shareCaption;
+    private boolean stereoBeforeListen = true;
+    private boolean suppressStereoPersist;
+    private static final int REQUEST_LISTEN_AUDIO = 7101;
+    private static final int REQUEST_OPEN_EPUB = 7103;
     private LinearLayout ttsPlayer;
     private ImageButton ttsSpeakButton;
     private ImageButton ttsPrevButton;
@@ -153,6 +164,8 @@ public class PanelMainActivity extends AppCompatActivity {
     private final ScreenFrameCapture screenFrameCapture = new ScreenFrameCapture();
     private DialogueTextExtractor dialogueTextExtractor;
     private ScreenDialogueReader screenDialogueReader;
+    private PageTranslator pageTranslator;
+    private EpubSession epubSession;
 
     // --- In-panel "stereo mirror" pipeline -------------------------------------------
     // See prepareStereoRenderSurface() for the full explanation of what this can and
@@ -243,6 +256,19 @@ public class PanelMainActivity extends AppCompatActivity {
         projectionManager = (MediaProjectionManager) getSystemService(MEDIA_PROJECTION_SERVICE);
 
         ttsEnabled = settingsStore.getTtsEnabled();
+        assistMode = settingsStore.getAssistMode();
+        listenEngine = new PlaybackListenEngine(this);
+        listenEngine.setListener(new PlaybackListenEngine.Listener() {
+            @Override
+            public void onTranscript(String text) {
+                handleAssistText(text, false);
+            }
+
+            @Override
+            public void onStatus(String message) {
+                Toast.makeText(PanelMainActivity.this, message, Toast.LENGTH_SHORT).show();
+            }
+        });
         ttsManualMode = settingsStore.getTtsManualMode();
         PiperTtsEngine piper = PiperTtsEngine.get(this);
         piper.setSpeechRate(settingsStore.getTtsSpeedPercent() / 100f);
@@ -286,32 +312,19 @@ public class PanelMainActivity extends AppCompatActivity {
             screenFrameCapture.setOcrRegions(ocrRegionStore.load());
         }
         screenFrameCapture.setSnapshotListener((frame, heavy) -> {
-            if (isTtsContinuousActive()) {
+            if (wantScreenOcr()) {
                 dialogueTextExtractor.analyze(frame, heavy);
             }
         });
         dialogueTextExtractor.setListener(new DialogueTextExtractor.Listener() {
             @Override
             public void onDialogueText(String text) {
-                if (!isTtsContinuousActive()) {
-                    return;
-                }
-                Log.i("PanelMainActivity", "Dialogue: " + text);
-                adoptTtsPlaylist(text);
-                ensureDialogueTts();
-                if (screenDialogueReader != null) {
-                    screenDialogueReader.speakDialogue(text, false);
-                }
+                handleAssistText(text, false);
             }
 
             @Override
             public void onDialogueTextForced(String text) {
-                if (!ttsEnabled) {
-                    return;
-                }
-                Log.i("PanelMainActivity", "Dialogue forced: " + text);
-                adoptTtsPlaylist(text);
-                speakPlaylistFrom(0);
+                handleAssistText(text, true);
             }
         });
         if (ttsEnabled) {
@@ -360,20 +373,33 @@ public class PanelMainActivity extends AppCompatActivity {
                 showDrmBrowser(browserLibraryStore.getLastUrlOrHome());
             }
         });
+        findViewById(R.id.epub_button).setOnClickListener(v -> openEpubPicker());
         findViewById(R.id.browser_close_button).setOnClickListener(v -> hideDrmBrowser());
         findViewById(R.id.browser_go_button).setOnClickListener(v -> goToAddressBarUrl());
         findViewById(R.id.browser_bookmark_button).setOnClickListener(v -> toggleCurrentBookmark());
         findViewById(R.id.browser_history_button).setOnClickListener(v -> showBrowserLists());
         findViewById(R.id.browser_back_button).setOnClickListener(v -> {
+            if (epubSession != null && epubSession.hasPrev()) {
+                epubSession.index--;
+                loadEpubChapter();
+                return;
+            }
             if (drmWebView != null && drmWebView.canGoBack()) {
                 drmWebView.goBack();
             }
         });
         findViewById(R.id.browser_forward_button).setOnClickListener(v -> {
+            if (epubSession != null && epubSession.hasNext()) {
+                epubSession.index++;
+                loadEpubChapter();
+                return;
+            }
             if (drmWebView != null && drmWebView.canGoForward()) {
                 drmWebView.goForward();
             }
         });
+        findViewById(R.id.browser_translate_page).setOnClickListener(v -> translateBrowserPage(false));
+        findViewById(R.id.browser_read_page).setOnClickListener(v -> translateBrowserPage(true));
         browserAddress.setOnEditorActionListener((v, actionId, event) -> {
             if (actionId == EditorInfo.IME_ACTION_GO || actionId == EditorInfo.IME_ACTION_DONE) {
                 goToAddressBarUrl();
@@ -418,7 +444,9 @@ public class PanelMainActivity extends AppCompatActivity {
         updateStereoToggleLook(toggleStereo3d, forceStereoEnabled);
         toggleStereo3d.setOnCheckedChangeListener((buttonView, isChecked) -> {
             forceStereoEnabled = isChecked;
-            settingsStore.setForceStereo(isChecked);
+            if (!suppressStereoPersist) {
+                settingsStore.setForceStereo(isChecked);
+            }
             updateStereoToggleLook(toggleStereo3d, isChecked);
             if (mirroringApp != null) {
                 setStereoComposition(forceStereoEnabled);
@@ -462,6 +490,7 @@ public class PanelMainActivity extends AppCompatActivity {
         ttsPlayButton = findViewById(R.id.tts_play_button);
         ttsStopButton = findViewById(R.id.tts_stop_button);
         ttsKaraoke = findViewById(R.id.tts_karaoke);
+        shareCaption = findViewById(R.id.share_caption);
         ttsSpeakButton.setFocusable(false);
         ttsSpeakButton.setFocusableInTouchMode(false);
         ttsSpeakButton.setOnClickListener(v -> onTtsSpeakButtonClicked());
@@ -540,6 +569,11 @@ public class PanelMainActivity extends AppCompatActivity {
             }
         });
         refreshTtsModeSwitches();
+        findViewById(R.id.assist_mode_default).setOnClickListener(v -> setAssistMode(AssistMode.DEFAULT));
+        findViewById(R.id.assist_mode_translate).setOnClickListener(v -> setAssistMode(AssistMode.TRANSLATE));
+        findViewById(R.id.assist_mode_listen).setOnClickListener(v -> setAssistMode(AssistMode.LISTEN));
+        findViewById(R.id.assist_mode_share).setOnClickListener(v -> setAssistMode(AssistMode.SHARE));
+        applyAssistMode(assistMode, false);
 
         SeekBar seekbarTtsSpeed = findViewById(R.id.seekbar_tts_speed);
         TextView ttsSpeedValue = findViewById(R.id.tts_speed_value);
@@ -671,12 +705,6 @@ public class PanelMainActivity extends AppCompatActivity {
 
         bindAdvanced3dSettings();
 
-        TextView gitBranchLabel = findViewById(R.id.settings_git_branch);
-        gitBranchLabel.setText(getString(R.string.sandbox_branch_badge,
-                com.spatiallauncher.app.sandbox.VirtualSandboxTestActivity.GIT_BRANCH));
-        findViewById(R.id.open_virtual_sandbox).setOnClickListener(v ->
-                startActivity(new Intent(this, com.spatiallauncher.app.sandbox.VirtualSandboxTestActivity.class)));
-
         prepareStereoRenderSurface();
         refreshDock();
 
@@ -752,6 +780,97 @@ public class PanelMainActivity extends AppCompatActivity {
         webView.setFocusableInTouchMode(true);
     }
 
+    private PageTranslator pageTranslator() {
+        if (pageTranslator == null) {
+            pageTranslator = new PageTranslator(OnDeviceTranslator.get(this));
+            pageTranslator.setListener(new PageTranslator.Listener() {
+                @Override
+                public void onStatus(String message) {
+                    Toast.makeText(PanelMainActivity.this, message, Toast.LENGTH_SHORT).show();
+                }
+
+                @Override
+                public void onTranslatedPage(String english) {
+                    if (!ttsEnabled) {
+                        Toast.makeText(PanelMainActivity.this, R.string.tts_turn_on_first,
+                                Toast.LENGTH_SHORT).show();
+                        return;
+                    }
+                    adoptTtsPlaylist(english);
+                    speakPlaylistFrom(0);
+                }
+            });
+        }
+        return pageTranslator;
+    }
+
+    private void translateBrowserPage(boolean thenRead) {
+        if (!isBrowserOpen() || drmWebView == null) {
+            showDrmBrowser(browserLibraryStore.getLastUrlOrHome());
+        }
+        if (thenRead && !ttsEnabled) {
+            Toast.makeText(this, R.string.tts_turn_on_first, Toast.LENGTH_SHORT).show();
+            return;
+        }
+        pageTranslator().translatePage(drmWebView, thenRead);
+    }
+
+    private void openEpubPicker() {
+        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        intent.setType("application/epub+zip");
+        intent.putExtra(Intent.EXTRA_MIME_TYPES, new String[] {
+                "application/epub+zip", "application/octet-stream"
+        });
+        startActivityForResult(intent, REQUEST_OPEN_EPUB);
+    }
+
+    private void openEpubFromUri(Uri uri) {
+        try {
+            epubSession = EpubSession.open(this, uri);
+            showDrmBrowserHostOnly();
+            loadEpubChapter();
+            Toast.makeText(this, getString(R.string.browser_epub_opened,
+                    epubSession.title, epubSession.chapterUrls.size()), Toast.LENGTH_LONG).show();
+        } catch (Exception e) {
+            Log.w("PanelMainActivity", "EPUB open failed", e);
+            Toast.makeText(this, R.string.browser_epub_failed, Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    private void showDrmBrowserHostOnly() {
+        emptyStateText.setVisibility(View.GONE);
+        browserHost.setVisibility(View.VISIBLE);
+        drmWebView.setVisibility(View.VISIBLE);
+        browserChrome.setVisibility(View.VISIBLE);
+        refreshBrowserChrome();
+        setHomeRowCompact(true);
+        setCastTheme(true);
+        persistSession();
+        drmWebView.post(() -> {
+            if (forceStereoEnabled) {
+                startBrowserStereo();
+            } else {
+                stopBrowserStereo();
+            }
+        });
+    }
+
+    private void loadEpubChapter() {
+        if (epubSession == null || drmWebView == null) {
+            return;
+        }
+        String url = epubSession.currentUrl();
+        if (url == null) {
+            return;
+        }
+        drmWebView.loadUrl(url);
+        if (browserAddress != null) {
+            browserAddress.setText(epubSession.title + "  " + (epubSession.index + 1)
+                    + "/" + epubSession.chapterUrls.size());
+        }
+    }
+
     private void ensureDialogueTts() {
         if (screenDialogueReader != null) {
             return;
@@ -761,6 +880,142 @@ public class PanelMainActivity extends AppCompatActivity {
 
     private boolean isTtsContinuousActive() {
         return ttsEnabled && !ttsManualMode;
+    }
+
+    private boolean wantScreenOcr() {
+        if (assistMode == AssistMode.LISTEN) {
+            return false;
+        }
+        if (assistMode == AssistMode.SHARE) {
+            return true;
+        }
+        return isTtsContinuousActive();
+    }
+
+    private void handleAssistText(String text, boolean forced) {
+        if (text == null || text.trim().isEmpty()) {
+            return;
+        }
+        if (assistMode == AssistMode.SHARE) {
+            updateShareCaption(text);
+        }
+        if (forced) {
+            if (!ttsEnabled) {
+                return;
+            }
+            Log.i("PanelMainActivity", "Dialogue forced: " + text);
+            adoptTtsPlaylist(text);
+            speakPlaylistFrom(0);
+            return;
+        }
+        if (!isTtsContinuousActive()) {
+            return;
+        }
+        Log.i("PanelMainActivity", "Dialogue: " + text);
+        adoptTtsPlaylist(text);
+        ensureDialogueTts();
+        if (screenDialogueReader != null) {
+            screenDialogueReader.speakDialogue(text, false);
+        }
+    }
+
+    private void updateShareCaption(String text) {
+        if (shareCaption == null) {
+            return;
+        }
+        shareCaption.setText(text);
+        shareCaption.setVisibility(assistMode == AssistMode.SHARE ? View.VISIBLE : View.GONE);
+    }
+
+    private void setAssistMode(AssistMode mode) {
+        if (mode == AssistMode.LISTEN
+                && ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
+                != PackageManager.PERMISSION_GRANTED) {
+            Toast.makeText(this, R.string.assist_listen_need_mic, Toast.LENGTH_SHORT).show();
+            ActivityCompat.requestPermissions(
+                    this, new String[] {Manifest.permission.RECORD_AUDIO}, REQUEST_LISTEN_AUDIO);
+            return;
+        }
+        applyAssistMode(mode, true);
+    }
+
+    private void applyAssistMode(AssistMode mode, boolean userPicked) {
+        AssistMode previous = assistMode;
+        assistMode = mode == null ? AssistMode.DEFAULT : mode;
+        if (userPicked) {
+            settingsStore.setAssistMode(assistMode);
+        }
+        boolean cjk = assistMode == AssistMode.TRANSLATE || assistMode == AssistMode.SHARE;
+        dialogueTextExtractor.setCjkOcr(cjk);
+        dialogueTextExtractor.setTranslateToEnglish(cjk);
+        if (shareCaption != null) {
+            shareCaption.setVisibility(assistMode == AssistMode.SHARE ? View.VISIBLE : View.GONE);
+            if (assistMode != AssistMode.SHARE) {
+                shareCaption.setText("");
+            }
+        }
+        refreshAssistModeButtons();
+        if (assistMode == AssistMode.LISTEN) {
+            if (previous != AssistMode.LISTEN) {
+                stereoBeforeListen = forceStereoEnabled;
+            }
+            setSessionStereo(false);
+            syncListenEngine(userPicked);
+            if (userPicked) {
+                Toast.makeText(this, R.string.assist_3d_off_for_listen, Toast.LENGTH_SHORT).show();
+            }
+        } else {
+            if (listenEngine != null) {
+                listenEngine.stop();
+            }
+            if (previous == AssistMode.LISTEN) {
+                setSessionStereo(stereoBeforeListen);
+            }
+        }
+    }
+
+    private void refreshAssistModeButtons() {
+        Button def = findViewById(R.id.assist_mode_default);
+        Button tr = findViewById(R.id.assist_mode_translate);
+        Button listen = findViewById(R.id.assist_mode_listen);
+        Button share = findViewById(R.id.assist_mode_share);
+        if (def == null || tr == null || listen == null || share == null) {
+            return;
+        }
+        def.setAlpha(assistMode == AssistMode.DEFAULT ? 1f : 0.45f);
+        tr.setAlpha(assistMode == AssistMode.TRANSLATE ? 1f : 0.45f);
+        listen.setAlpha(assistMode == AssistMode.LISTEN ? 1f : 0.45f);
+        share.setAlpha(assistMode == AssistMode.SHARE ? 1f : 0.45f);
+    }
+
+    private void setSessionStereo(boolean on) {
+        ToggleButton toggle = findViewById(R.id.toggle_stereo_3d);
+        if (toggle == null) {
+            forceStereoEnabled = on;
+            return;
+        }
+        if (toggle.isChecked() == on) {
+            forceStereoEnabled = on;
+            return;
+        }
+        suppressStereoPersist = true;
+        toggle.setChecked(on);
+        suppressStereoPersist = false;
+    }
+
+    private void syncListenEngine(boolean notifyIfNoCast) {
+        if (assistMode != AssistMode.LISTEN || listenEngine == null) {
+            return;
+        }
+        if (mediaProjection == null) {
+            if (notifyIfNoCast) {
+                Toast.makeText(this, R.string.assist_listen_need_cast, Toast.LENGTH_SHORT).show();
+            }
+            return;
+        }
+        if (!listenEngine.isRunning()) {
+            listenEngine.start(mediaProjection);
+        }
     }
 
     private void setTtsEnabled(boolean enabled) {
@@ -1452,6 +1707,7 @@ public class PanelMainActivity extends AppCompatActivity {
         if (raw.isEmpty()) {
             return;
         }
+        epubSession = null;
         String url = raw;
         if (!raw.contains(".") && !raw.startsWith("http")) {
             url = "https://www.google.com/search?q=" + android.net.Uri.encode(raw);
@@ -1472,6 +1728,7 @@ public class PanelMainActivity extends AppCompatActivity {
     }
 
     private void showDrmBrowser(String httpsUrl) {
+        epubSession = null;
         emptyStateText.setVisibility(View.GONE);
         browserHost.setVisibility(View.VISIBLE);
         drmWebView.setVisibility(View.VISIBLE);
@@ -1690,7 +1947,7 @@ public class PanelMainActivity extends AppCompatActivity {
             if (event.getActionMasked() == MotionEvent.ACTION_DOWN) {
                 overlay.getParent().requestDisallowInterceptTouchEvent(true);
                 castView.requestFocus();
-                if (isTtsContinuousActive()) {
+                if (wantScreenOcr() || (ttsEnabled && ttsManualMode)) {
                     screenFrameCapture.requestCaptureOnTap();
                 }
             }
@@ -2047,7 +2304,7 @@ public class PanelMainActivity extends AppCompatActivity {
         if (forceStereoEnabled) {
             requestDepthUpdate(browserCaptureBitmap);
         }
-        if (isTtsContinuousActive()) {
+        if (wantScreenOcr()) {
             screenFrameCapture.offerFromScreenBuffer(browserCaptureBitmap);
         }
     }
@@ -2195,6 +2452,12 @@ public class PanelMainActivity extends AppCompatActivity {
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == REQUEST_OPEN_EPUB) {
+            if (resultCode == Activity.RESULT_OK && data != null && data.getData() != null) {
+                openEpubFromUri(data.getData());
+            }
+            return;
+        }
         if (requestCode != REQUEST_MEDIA_PROJECTION) {
             return;
         }
@@ -2215,10 +2478,24 @@ public class PanelMainActivity extends AppCompatActivity {
         if (resultCode == Activity.RESULT_OK && data != null) {
             mediaProjection = projectionManager.getMediaProjection(resultCode, data);
             startMirroringAndLaunch(app, launchIntent);
+            if (assistMode == AssistMode.LISTEN) {
+                syncListenEngine(false);
+            }
         } else if (!pendingLaunchAlreadyStarted) {
             startActivity(launchIntent);
         }
         pendingLaunchAlreadyStarted = false;
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode != REQUEST_LISTEN_AUDIO) {
+            return;
+        }
+        if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+            applyAssistMode(AssistMode.LISTEN, true);
+        }
     }
 
     /**
@@ -2523,7 +2800,7 @@ public class PanelMainActivity extends AppCompatActivity {
             if (forceStereoEnabled) {
                 requestDepthUpdate(windowOnly);
             }
-            if (isTtsContinuousActive()) {
+            if (wantScreenOcr()) {
                 screenFrameCapture.offerFromScreenBuffer(windowOnly);
             }
         } finally {
@@ -3182,6 +3459,9 @@ public class PanelMainActivity extends AppCompatActivity {
     }
 
     private void stopMirroring() {
+        if (listenEngine != null) {
+            listenEngine.stop();
+        }
         releaseCapturePipeline();
         if (mediaProjection != null) {
             mediaProjection.stop();
@@ -3249,6 +3529,7 @@ public class PanelMainActivity extends AppCompatActivity {
         resizeSquareView(stopMirrorButton, buttonSize, buttonPad);
         resizeSquareView(findViewById(R.id.toggle_stereo_3d), buttonSize, 0);
         resizeSquareView(findViewById(R.id.browser_button), buttonSize, buttonPad);
+        resizeSquareView(findViewById(R.id.epub_button), buttonSize, buttonPad);
         resizeSquareView(findViewById(R.id.tts_prev_button), buttonSize, buttonPad);
         resizeSquareView(findViewById(R.id.tts_speak_button), buttonSize, buttonPad);
         resizeSquareView(findViewById(R.id.tts_play_button), buttonSize, buttonPad);

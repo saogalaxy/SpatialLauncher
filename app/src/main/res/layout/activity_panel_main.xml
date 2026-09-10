@@ -90,6 +90,28 @@
                     android:padding="8dp"
                     android:src="@drawable/ic_globe" />
 
+                <Button
+                    android:id="@+id/browser_translate_page"
+                    android:layout_width="wrap_content"
+                    android:layout_height="40dp"
+                    android:layout_marginStart="6dp"
+                    android:minWidth="0dp"
+                    android:paddingStart="8dp"
+                    android:paddingEnd="8dp"
+                    android:text="@string/browser_translate_page"
+                    android:textSize="11sp" />
+
+                <Button
+                    android:id="@+id/browser_read_page"
+                    android:layout_width="wrap_content"
+                    android:layout_height="40dp"
+                    android:layout_marginStart="4dp"
+                    android:minWidth="0dp"
+                    android:paddingStart="8dp"
+                    android:paddingEnd="8dp"
+                    android:text="@string/browser_read_page"
+                    android:textSize="11sp" />
+
                 <ImageButton
                     android:id="@+id/browser_bookmark_button"
                     android:layout_width="40dp"
@@ -194,6 +216,22 @@
                     android:visibility="gone"
                     android:clickable="true"
                     android:focusable="true" />
+
+                <TextView
+                    android:id="@+id/share_caption"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_gravity="bottom"
+                    android:layout_marginStart="12dp"
+                    android:layout_marginEnd="12dp"
+                    android:layout_marginBottom="56dp"
+                    android:background="@drawable/bg_tts_karaoke"
+                    android:elevation="8dp"
+                    android:maxLines="6"
+                    android:padding="10dp"
+                    android:textColor="@color/text_primary"
+                    android:textSize="16sp"
+                    android:visibility="gone" />
 
                 <TextView
                     android:id="@+id/tts_karaoke"
@@ -325,21 +363,6 @@
                             android:minWidth="0dp"
                             android:text="@string/settings_close" />
                     </LinearLayout>
-
-                    <TextView
-                        android:id="@+id/settings_git_branch"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="8dp"
-                        android:textColor="@color/text_secondary"
-                        android:textSize="12sp" />
-
-                    <Button
-                        android:id="@+id/open_virtual_sandbox"
-                        android:layout_width="match_parent"
-                        android:layout_height="40dp"
-                        android:layout_marginTop="8dp"
-                        android:text="@string/sandbox_open" />
 
                     <ScrollView
                         android:layout_width="match_parent"
@@ -643,6 +666,66 @@
                                 android:layout_width="match_parent"
                                 android:layout_height="wrap_content"
                                 android:layout_marginTop="12dp"
+                                android:text="@string/setting_assist_mode"
+                                android:textColor="@color/text_primary"
+                                android:textSize="13sp" />
+
+                            <TextView
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:layout_marginTop="2dp"
+                                android:text="@string/setting_assist_mode_hint"
+                                android:textColor="@color/text_secondary"
+                                android:textSize="11sp" />
+
+                            <LinearLayout
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:layout_marginTop="4dp"
+                                android:orientation="horizontal">
+
+                                <Button
+                                    android:id="@+id/assist_mode_default"
+                                    android:layout_width="0dp"
+                                    android:layout_height="40dp"
+                                    android:layout_weight="1"
+                                    android:text="@string/assist_mode_default" />
+
+                                <Button
+                                    android:id="@+id/assist_mode_translate"
+                                    android:layout_width="0dp"
+                                    android:layout_height="40dp"
+                                    android:layout_marginStart="8dp"
+                                    android:layout_weight="1"
+                                    android:text="@string/assist_mode_translate" />
+                            </LinearLayout>
+
+                            <LinearLayout
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:layout_marginTop="6dp"
+                                android:orientation="horizontal">
+
+                                <Button
+                                    android:id="@+id/assist_mode_listen"
+                                    android:layout_width="0dp"
+                                    android:layout_height="40dp"
+                                    android:layout_weight="1"
+                                    android:text="@string/assist_mode_listen" />
+
+                                <Button
+                                    android:id="@+id/assist_mode_share"
+                                    android:layout_width="0dp"
+                                    android:layout_height="40dp"
+                                    android:layout_marginStart="8dp"
+                                    android:layout_weight="1"
+                                    android:text="@string/assist_mode_share" />
+                            </LinearLayout>
+
+                            <TextView
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:layout_marginTop="12dp"
                                 android:text="@string/setting_tts_speed"
                                 android:textColor="@color/text_primary"
                                 android:textSize="13sp" />
@@ -818,6 +901,16 @@
                     android:contentDescription="@string/browser_button_description"
                     android:padding="10dp"
                     android:src="@drawable/ic_globe" />
+
+                <ImageButton
+                    android:id="@+id/epub_button"
+                    android:layout_width="48dp"
+                    android:layout_height="48dp"
+                    android:layout_marginStart="8dp"
+                    android:background="@drawable/bg_circle_button"
+                    android:contentDescription="@string/epub_button_description"
+                    android:padding="10dp"
+                    android:src="@drawable/ic_epub_book" />
 
                 <ImageButton
                     android:id="@+id/tts_speak_button"
