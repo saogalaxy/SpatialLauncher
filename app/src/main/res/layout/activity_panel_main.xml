@@ -183,6 +183,8 @@
                     android:layout_height="match_parent"
                     android:clickable="true"
                     android:focusable="true"
+                    android:soundEffectsEnabled="false"
+                    android:hapticFeedbackEnabled="false"
                     android:visibility="gone" />
 
                 <com.spatiallauncher.app.ui.OcrRegionOverlayView
@@ -452,6 +454,16 @@
                                     android:text="@string/setting_3d_static" />
                             </LinearLayout>
 
+                            <Switch
+                                android:id="@+id/toggle_gles_z_mesh"
+                                android:layout_width="match_parent"
+                                android:layout_height="40dp"
+                                android:layout_marginTop="6dp"
+                                android:clickable="true"
+                                android:focusable="true"
+                                android:text="@string/setting_gles_z_mesh"
+                                android:textColor="@color/text_primary" />
+
                             <TextView
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
@@ -589,6 +601,13 @@
                                     android:textColor="@color/text_secondary"
                                     android:textSize="12sp" />
                             </LinearLayout>
+
+                            <Button
+                                android:id="@+id/reset_depth_defaults"
+                                android:layout_width="match_parent"
+                                android:layout_height="40dp"
+                                android:layout_marginTop="12dp"
+                                android:text="@string/setting_reset_depth" />
 
                             <Switch
                                 android:id="@+id/toggle_tts"

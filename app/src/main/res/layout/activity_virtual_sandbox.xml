@@ -18,7 +18,8 @@
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         android:layout_marginTop="44dp"
-        android:layout_marginBottom="56dp" />
+        android:layout_marginBottom="56dp"
+        android:visibility="gone" />
 
     <View
         android:id="@+id/sandbox_touch_overlay"
@@ -27,7 +28,8 @@
         android:layout_marginTop="44dp"
         android:layout_marginBottom="56dp"
         android:clickable="true"
-        android:focusable="true" />
+        android:focusable="true"
+        android:visibility="gone" />
 
     <TextView
         android:id="@+id/sandbox_branch_badge"
@@ -52,9 +54,30 @@
         android:paddingEnd="12dp">
 
         <Button
+            android:id="@+id/sandbox_guest_demo"
+            android:layout_width="wrap_content"
+            android:layout_height="40dp"
+            android:text="@string/sandbox_guest_demo" />
+
+        <Button
+            android:id="@+id/sandbox_show_app"
+            android:layout_width="wrap_content"
+            android:layout_height="40dp"
+            android:layout_marginStart="8dp"
+            android:text="@string/sandbox_show_app" />
+
+        <Button
+            android:id="@+id/sandbox_toggle_3d"
+            android:layout_width="wrap_content"
+            android:layout_height="40dp"
+            android:layout_marginStart="8dp"
+            android:text="@string/sandbox_3d_off" />
+
+        <Button
             android:id="@+id/sandbox_capture_once"
             android:layout_width="wrap_content"
             android:layout_height="40dp"
+            android:layout_marginStart="8dp"
             android:text="@string/sandbox_capture_once" />
 
         <Button

@@ -12,6 +12,10 @@ public final class SandboxTouchForwarder {
     private SandboxTouchForwarder() {}
 
     public static boolean dispatch(MotionEvent event, View overlay, View container) {
+        return dispatch(event, overlay, container, false);
+    }
+
+    public static boolean dispatch(MotionEvent event, View overlay, View container, boolean sideBySide) {
         if (event == null || overlay == null || container == null) {
             return false;
         }
@@ -20,7 +24,8 @@ public final class SandboxTouchForwarder {
         float xRatio = event.getX() / overlayW;
         float yRatio = event.getY() / overlayH;
 
-        float[] mapped = ratiosToContainer(overlay, container, xRatio, yRatio, event.getX(), event.getY());
+        float[] mapped = ratiosToContainer(
+                overlay, container, xRatio, yRatio, event.getX(), event.getY(), sideBySide);
         float mappedX = mapped[0] * Math.max(1, container.getWidth());
         float mappedY = mapped[1] * Math.max(1, container.getHeight());
 
@@ -43,6 +48,17 @@ public final class SandboxTouchForwarder {
      */
     static float[] ratiosToContainer(
             View overlay, View container, float xRatio, float yRatio, float overlayX, float overlayY) {
+        return ratiosToContainer(overlay, container, xRatio, yRatio, overlayX, overlayY, false);
+    }
+
+    static float[] ratiosToContainer(
+            View overlay,
+            View container,
+            float xRatio,
+            float yRatio,
+            float overlayX,
+            float overlayY,
+            boolean sideBySide) {
         float overlayW = Math.max(1, overlay.getWidth());
         float overlayH = Math.max(1, overlay.getHeight());
         float castW = Math.max(1, container.getWidth());
@@ -50,6 +66,10 @@ public final class SandboxTouchForwarder {
 
         float nx = clamp01(xRatio);
         float ny = clamp01(yRatio);
+        if (sideBySide) {
+            nx = nx >= 0.5f ? (nx - 0.5f) * 2f : nx * 2f;
+            nx = clamp01(nx);
+        }
 
         float boxAspect = overlayW / overlayH;
         float contentAspect = castW / castH;

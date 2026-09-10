@@ -15,8 +15,7 @@ import java.nio.MappedByteBuffer;
 import java.nio.channels.FileChannel;
 
 /**
- * On-device monocular depth. Live path uses bundled MiDaS v2.1; Static (comics/stills)
- * uses Depth Anything V2 Small when that asset is present.
+ * On-device monocular depth. Live uses MiDaS v2.1; Static uses Depth Anything V2 Small.
  */
 public class DepthEstimator {
     private static final String TAG = "DepthEstimator";
@@ -24,6 +23,7 @@ public class DepthEstimator {
     static final String STATIC_MODEL_ASSET = "depth_anything_v2_small.tflite";
 
     private Interpreter interpreter;
+    private String backend = "none";
     private int inputH;
     private int inputW;
     private int outputH;
@@ -42,15 +42,22 @@ public class DepthEstimator {
         this(context, LIVE_MODEL_ASSET, false, 4);
     }
 
+    /** Live default is MiDaS (smoother on busy pages). Static loads V2 separately. */
+    public static DepthEstimator createDefault(Context context) {
+        DepthEstimator midas = new DepthEstimator(context, LIVE_MODEL_ASSET, false, 4);
+        if (midas.isAvailable()) {
+            return midas;
+        }
+        Log.w(TAG, "MiDaS unavailable; trying Depth Anything V2");
+        return new DepthEstimator(context, STATIC_MODEL_ASSET, true, 4);
+    }
+
     public DepthEstimator(Context context, String assetName, boolean invertRaw, int threads) {
         this.invertRaw = invertRaw;
         this.modelLabel = assetName;
         try {
             MappedByteBuffer modelBuffer = loadModelFile(context, assetName);
-            Interpreter.Options options = new Interpreter.Options();
-            options.setNumThreads(Math.max(1, threads));
-            interpreter = new Interpreter(modelBuffer, options);
-
+            interpreter = createInterpreter(modelBuffer, threads);
             int[] in = interpreter.getInputTensor(0).shape();
             // [1,H,W,3] NHWC or [1,3,H,W] NCHW
             if (in.length == 4 && in[1] == 3) {
@@ -72,7 +79,8 @@ public class DepthEstimator {
             Log.i(TAG, modelLabel + " loaded in=" + inputW + "x" + inputH
                     + (nchwInput ? " nchw" : " nhwc")
                     + " out=" + outputW + "x" + outputH
-                    + " invertRaw=" + invertRaw);
+                    + " invertRaw=" + invertRaw
+                    + " backend=" + backend);
         } catch (IOException | RuntimeException e) {
             Log.w(TAG, modelLabel + " unavailable", e);
             available = false;
@@ -81,6 +89,28 @@ public class DepthEstimator {
 
     public boolean isAvailable() {
         return available;
+    }
+
+    public String getBackend() {
+        return backend;
+    }
+
+    /**
+     * CPU only. NNAPI/Hexagon shares the same DSP Quest tracking uses; putting V2
+     * there caused display static / tracking glitches.
+     */
+    private Interpreter createInterpreter(MappedByteBuffer modelBuffer, int threads) {
+        int n = Math.max(1, threads);
+        Interpreter cpu = new Interpreter(modelBuffer, cpuOptions(n));
+        backend = "cpu-fp32";
+        Log.i(TAG, "Using CPU threads=" + n + " for " + modelLabel);
+        return cpu;
+    }
+
+    private static Interpreter.Options cpuOptions(int threads) {
+        Interpreter.Options options = new Interpreter.Options();
+        options.setNumThreads(threads);
+        return options;
     }
 
     private static MappedByteBuffer loadModelFile(Context context, String assetName) throws IOException {
@@ -100,7 +130,10 @@ public class DepthEstimator {
             Tensor outTensor = interpreter.getOutputTensor(0);
             ByteBuffer outBuf = ByteBuffer.allocateDirect(outTensor.numBytes());
             outBuf.order(ByteOrder.nativeOrder());
+            long t0 = android.os.SystemClock.elapsedRealtime();
             interpreter.run(input, outBuf);
+            long ms = android.os.SystemClock.elapsedRealtime() - t0;
+            Log.i(TAG, modelLabel + " infer " + ms + "ms backend=" + backend);
             outBuf.rewind();
             float[][] depth = readDepthMap(outBuf, outTensor.shape());
             if (depth == null) {
