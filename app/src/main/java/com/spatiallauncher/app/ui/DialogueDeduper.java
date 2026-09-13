@@ -64,7 +64,12 @@ final class DialogueDeduper {
             return false;
         }
         // Substring / containment: OCR often drops a speaker name or one word.
+        // Truncation flicker (full → short) stays the same line. Extension
+        // (partial → fuller subtitle) must count as new or speech cuts mid-line.
         if (previous.contains(next) || next.contains(previous)) {
+            if (next.length() > previous.length() + 2) {
+                return true;
+            }
             return false;
         }
         if (wordOverlap(previous, next) >= SAME_LINE_WORD_OVERLAP) {

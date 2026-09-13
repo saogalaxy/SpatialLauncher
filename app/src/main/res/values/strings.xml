@@ -44,7 +44,7 @@
     <string name="help_start_cast_title">1. Cast an app in 3D</string>
     <string name="help_start_cast_body">Tap a dock app → in the share sheet pick that app (Just this window). Leave 3D on (glasses). Tap power to stop.</string>
     <string name="help_start_subs_title">2. Read on-screen subs / dialogue</string>
-    <string name="help_start_subs_body">Cast the show → OCR zones → box the subtitle band → Save → Done. Settings → turn TTS on → continuous (blue loop). Speech follows text in the boxes.</string>
+    <string name="help_start_subs_body">Cast the show → OCR zones (sidebar) → box the subtitle band → Save → Done. Settings → turn TTS on → continuous (blue loop). Speech follows text in the boxes. Numbers on boxes are read order — add top boxes first.</string>
     <string name="help_start_listen_title">3. Listen when there are no subs</string>
     <string name="help_start_listen_body">Cast the app → tap the ear (turns red). Allow mic if asked. Translate uses bundled OPUS (JA/ZH/KO in the APK). Best with pause breaks between lines. Tap ear again to stop.</string>
     <string name="help_start_translate_ocr_title">4. Translate on-screen foreign text</string>
@@ -105,7 +105,7 @@
     <string name="help_btn_listen_title">Listen</string>
     <string name="help_btn_listen_body">Cast audio → translate → speak. Red when on. Best with pause breaks. See Dual-mode icons above.</string>
     <string name="help_btn_ocr_title">OCR zones</string>
-    <string name="help_btn_ocr_body">Draw boxes over subtitles or dialogue so TTS / Translate read only those areas. Save per app.</string>
+    <string name="help_btn_ocr_body">Opens a side panel to draw boxes over subtitles or dialogue so TTS / Translate read only those areas. The number on each box is read order (add top first). Save per app.</string>
     <string name="help_btn_settings_title">Settings</string>
     <string name="help_btn_settings_body">Depth, TTS voice/speed, Assist mode, Listen smoothness, and other options.</string>
     <string name="help_btn_help_title">Help</string>

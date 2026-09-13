@@ -9,7 +9,7 @@ Tap a dock app → in the share sheet pick that app (**Just this window**). Leav
 **Important:** leave the casted app’s own window open so the stream stays live in Spatial Launcher.
 
 ### 2. Read on-screen subs / dialogue
-Cast the show → **OCR zones** → box the subtitle band → Save → Done. Settings → **TTS on** → continuous (blue loop). Speech follows text in the boxes.
+Cast the show → **OCR zones** (right sidebar) → box the subtitle band → Save → Done. Settings → **TTS on** → continuous (blue loop). Speech follows text in the boxes. Numbers on boxes are **read order** — add top boxes first.
 
 ### 3. Listen when there are no subs
 Cast the app → tap the **ear** (turns red). Allow mic if asked. Translate uses bundled OPUS (JA/ZH/KO in the APK). Best with **pause breaks** between lines. Tap ear again to stop.
