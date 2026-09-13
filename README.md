@@ -38,8 +38,10 @@ See [tools/README.md](tools/README.md).
 | Doc | What |
 |-----|------|
 | [docs/HELP.md](docs/HELP.md) | Same guide as the in-headset **?** Help (modes, downloads, combos) |
-| [docs/SCREENSHOTS.md](docs/SCREENSHOTS.md) | Store / GitHub screenshot shoot order |
-| [docs/screenshots/](docs/screenshots/) | Image drop folder |
+| [docs/PRIVACY.md](docs/PRIVACY.md) | Privacy policy (publish a public URL for Meta Store) |
+| [docs/META_STORE.md](docs/META_STORE.md) | Horizon Store listing copy, flow, screenshot map |
+| [docs/SCREENSHOTS.md](docs/SCREENSHOTS.md) | Screenshot shoot order |
+| [docs/screenshots/](docs/screenshots/) | Store / GitHub images |
 
 ## What it does
 
@@ -60,6 +62,8 @@ tools/
   export_launcher_icon.py
 docs/
   HELP.md
+  PRIVACY.md                  # store privacy policy text
+  META_STORE.md               # Horizon listing copy + screenshot map
   SCREENSHOTS.md
   screenshots/                # store & GitHub images
 app/
