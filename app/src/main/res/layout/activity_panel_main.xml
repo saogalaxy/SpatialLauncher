@@ -1029,24 +1029,25 @@
                 android:paddingEnd="10dp"
                 android:paddingTop="8dp"
                 android:paddingBottom="8dp"
-                android:gravity="center_vertical"
+                android:gravity="bottom"
                 android:orientation="horizontal">
 
-                <HorizontalScrollView
-                    android:layout_width="0dp"
+                <!-- Wraps after 4 pinned apps into extra rows that grow upward into
+                     the cast area, so the TTS player never chops the dock. Pill is
+                     wrap_content so empty space stays outside the frosted bar. -->
+                <LinearLayout
+                    android:id="@+id/dock_container"
+                    android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:scrollbars="none">
+                    android:background="@drawable/bg_dock_pill"
+                    android:gravity="bottom|start"
+                    android:orientation="vertical"
+                    android:padding="12dp" />
 
-                    <LinearLayout
-                        android:id="@+id/dock_container"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:background="@drawable/bg_dock_pill"
-                        android:gravity="center_vertical"
-                        android:orientation="horizontal"
-                        android:padding="12dp" />
-                </HorizontalScrollView>
+                <Space
+                    android:layout_width="0dp"
+                    android:layout_height="0dp"
+                    android:layout_weight="1" />
 
                 <HorizontalScrollView
                     android:id="@+id/control_row_scroll"
