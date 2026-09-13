@@ -188,8 +188,6 @@ public final class OcrRegionOverlayView extends View {
 
         if (regions.isEmpty()) {
             canvas.drawText("Drag to draw a read box", w / 2f, h / 2f, hintPaint);
-        } else {
-            canvas.drawText("Read order is the number on each box · add top first", w / 2f, dp(28), hintPaint);
         }
     }
 
@@ -240,7 +238,7 @@ public final class OcrRegionOverlayView extends View {
                     invalidate();
                     return true;
                 }
-                if (regions.size() < OcrRegionStore.MAX_REGIONS && y > dp(36) && y < h - dp(8)) {
+                if (regions.size() < OcrRegionStore.MAX_REGIONS) {
                     mode = Mode.CREATE;
                     createStartX = x;
                     createStartY = y;

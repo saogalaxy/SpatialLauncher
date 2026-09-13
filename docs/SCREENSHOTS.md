@@ -17,7 +17,7 @@ Capture in **VR mode** with Meta Cam / Quest Capture when possible so the panel 
 | `02-cast-source-open.jpg` | Cast + source open | Share done; **source app window still open** beside Spatial Launcher; 3D on (glasses) |
 | `03-3d-off.jpg` | 3D off | Same scene; toolbar shows **“3D”** text |
 | `04-settings-depth.jpg` | Settings | Gear open; Depth / Advanced 3D visible |
-| `05-ocr-zones.jpg` | OCR editor | Boxes on dialogue; Zones for: app; Add/Save/Done |
+| `05-ocr-zones.jpg` | OCR editor | Boxes on dialogue; right sidebar Zones for: app; Add/Save/Done |
 | `06-tts-continuous.jpg` | TTS continuous | Settings closed; blue loop / reading dialogue |
 | `07-listen.jpg` | Listen | Ear **red**; cast with talky content |
 | `08-browser.jpg` | Browser | Globe; clean page; Translate / Google / Read visible |

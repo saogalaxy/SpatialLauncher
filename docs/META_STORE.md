@@ -21,7 +21,7 @@ Cast apps in 3D, OCR→TTS dialogue, Listen when there are no subs, translate pa
 ### What you can do
 
 - **Cast an app in 3D** — Pin a game or browser to the dock, pick **Just this window** in the share sheet, leave **3D** on (glasses icon). **Keep the source app’s window open** so the stream stays live.
-- **Read on-screen subs / dialogue** — Draw **OCR zones**, save them per app, turn **TTS** on in Settings, use continuous (blue loop) to follow text in the boxes.
+- **Read on-screen subs / dialogue** — Draw **OCR zones** from the right sidebar, save them per app, turn **TTS** on in Settings, use continuous (blue loop) to follow text in the boxes. Box numbers are read order (add top first).
 - **Listen when there are no subs** — Tap the **ear** (turns red). Cast audio → on-device speech recognition → translate → Piper speech. Best with short pause breaks between lines.
 - **Browser translate / read** — Open the **globe**, use on-device **Translate** or optional **Google**, then **Read** with TTS.
 - **My Books** — Tap the **book** icon for your EPUB shelf; open a title to read with Prev/Next. Long-press book to import from PC over Wi‑Fi (Novel Translator).
