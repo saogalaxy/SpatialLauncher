@@ -10,6 +10,9 @@ android {
         targetSdk 32
         versionCode 1
         versionName "0.1.0"
+        ndk {
+            abiFilters "arm64-v8a"
+        }
     }
 
     sourceSets {
@@ -17,19 +20,23 @@ android {
             manifest.srcFile 'src/main/AndroidManifest.xml'
             java.srcDirs = ['src/main/java']
             res.srcDirs = ['src/main/res']
+            jniLibs.srcDirs += ['src/main/jniLibs', "${buildDir}/sherpaJni"]
         }
     }
 
     compileOptions {
-        sourceCompatibility JavaVersion.VERSION_1_8
-        targetCompatibility JavaVersion.VERSION_1_8
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
     }
 
     aaptOptions {
-        noCompress "tflite", "onnx", "bz2"
+        noCompress "tflite", "onnx", "bz2", "gguf", "aa", "ab", "ac"
     }
 
     packagingOptions {
+        // Sherpa JNI needs OrtGetApiBase from its own ORT. Microsoft's copy in
+        // onnxruntime-android 1.17.3 is loaded first via pickFirst and Piper then
+        // fails with UnsatisfiedLinkError. Prefer sherpa's .so from jniLibs.
         pickFirst 'lib/arm64-v8a/libonnxruntime.so'
         pickFirst 'lib/armeabi-v7a/libonnxruntime.so'
         pickFirst 'lib/x86/libonnxruntime.so'
@@ -70,58 +77,84 @@ dependencies {
     implementation 'com.google.mlkit:text-recognition-japanese:16.0.1'
     implementation 'com.google.mlkit:text-recognition-chinese:16.0.1'
     implementation 'com.google.mlkit:text-recognition-korean:16.0.1'
+    // Listen talk turns: offline MT (JA/ZH/KO → EN) after SenseVoice ASR.
+    implementation 'com.google.mlkit:translate:17.0.3'
 
-    // Bundled OPUS-MT (ja→en, zh→en) via ONNX Runtime — no Play Services.
-    implementation 'com.microsoft.onnxruntime:onnxruntime-android:1.17.3'
-
-    // On-device Piper (VITS) via sherpa-onnx. Low voices are packed in the APK.
+    // Piper first so pickFirst libonnxruntime.so is sherpa's (OrtGetApiBase).
     implementation 'com.github.k2-fsa.sherpa-onnx:sherpa-onnx:v1.13.5'
+    implementation 'com.microsoft.onnxruntime:onnxruntime-android:1.17.3'
     implementation 'org.apache.commons:commons-compress:1.26.2'
+    implementation 'net.ladenthin:llama-android-opencl:5.1.0'
+    implementation 'org.slf4j:slf4j-nop:2.0.17'
 }
 
 def translateAssets = file("src/main/assets/translate")
 def piperAssets = file("src/main/assets/models/piper")
 def asrAssets = file("src/main/assets/models/asr")
+def qwenFastAsset = file("src/main/assets/models/qwen/Qwen2.5-1.5B-Instruct-Q4_K_M.gguf")
+// Page Translate = APK-bundled Qwen 2.5 1.5B only (fits with Piper + SenseVoice + OPUS).
+def qwenFastBytes = 900_000_000L
+def qwenFastUrl = "https://huggingface.co/bartowski/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/Qwen2.5-1.5B-Instruct-Q4_K_M.gguf"
 
-def downloadTo = { String url, File dest ->
-    if (dest.exists() && dest.length() > 1024) {
+def downloadTo = { Object... args ->
+    String url = (String) args[0]
+    File dest = (File) args[1]
+    long minBytes = args.length > 2 ? ((Number) args[2]).longValue() : 1024L
+    if (dest.exists() && dest.length() >= minBytes) {
         return
     }
     dest.parentFile.mkdirs()
+    File tmp = new File(dest.parentFile, dest.name + ".part")
     logger.lifecycle("Downloading ${url}")
-    dest.withOutputStream { out ->
+    tmp.withOutputStream { out ->
         def conn = new URL(url).openConnection()
         conn.setInstanceFollowRedirects(true)
-        conn.connectTimeout = 30000
-        conn.readTimeout = 180000
+        conn.setRequestProperty("User-Agent", "SpatialLauncher-offline-pack")
+        conn.connectTimeout = 60000
+        conn.readTimeout = 600000
         conn.inputStream.withStream { ins ->
-            byte[] buf = new byte[8192]
+            byte[] buf = new byte[1 * 1024 * 1024]
             int n
+            long got = 0
             while ((n = ins.read(buf)) >= 0) {
                 out.write(buf, 0, n)
+                got += n
+                if (got % (256L * 1024 * 1024) < n) {
+                    logger.lifecycle("  ${dest.name}: ${(got / (1024 * 1024))} MB")
+                }
             }
         }
+    }
+    if (tmp.exists()) {
+        dest.delete()
+        tmp.renameTo(dest)
     }
 }
 
 tasks.register("downloadOfflineModels") {
-    description = "Pack Piper, SenseVoice, and OPUS-MT into assets. Headset never downloads models."
+    description = "Pack Piper, SenseVoice, OPUS ja-en, and Qwen 1.5B into APK assets."
     doLast {
-        [
-                "vits-piper-en_US-amy-low",
-                "vits-piper-en_US-ryan-low"
-        ].each { name ->
-            downloadTo(
-                    "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/${name}.tar.bz2",
-                    new File(piperAssets, "${name}.tar.bz2"))
+        downloadTo(
+                "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-piper-en_US-amy-low.tar.bz2",
+                new File(piperAssets, "vits-piper-en_US-amy-low.tar.bz2"))
+        def staleRyan = new File(piperAssets, "vits-piper-en_US-ryan-low.tar.bz2")
+        if (staleRyan.exists()) {
+            staleRyan.delete()
+            logger.lifecycle("Removed bundled male Piper (optional download)")
         }
         downloadTo(
                 "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17.tar.bz2",
                 new File(asrAssets, "sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17.tar.bz2"))
 
+        ["zhen", "enflow"].each { id ->
+            File stale = new File(translateAssets, id)
+            if (stale.exists()) {
+                stale.deleteDir()
+                logger.lifecycle("Removed bundled ${id} (optional or unused)")
+            }
+        }
         def pairs = [
-                [id: "jaen", repo: "Xenova/opus-mt-ja-en"],
-                [id: "zhen", repo: "Xenova/opus-mt-zh-en"]
+                [id: "jaen", repo: "Xenova/opus-mt-ja-en"]
         ]
         pairs.each { pair ->
             def dir = new File(translateAssets, pair.id)
@@ -140,9 +173,18 @@ tasks.register("downloadOfflineModels") {
                 downloadTo("${hf}/tokenizer.json", tok)
                 def json = new groovy.json.JsonSlurper().parse(tok)
                 pieces.withWriter("UTF-8") { w ->
-                    json.model.vocab.each { row ->
-                        String piece = String.valueOf(row[0]).replace("\\", "\\\\").replace("\t", "\\t")
-                        w.writeLine(piece + "\t" + row[1])
+                    def vocab = json.model.vocab
+                    if (vocab instanceof Map) {
+                        vocab.each { k, v ->
+                            String piece = String.valueOf(k).replace("\\", "\\\\").replace("\t", "\\t")
+                            w.writeLine(piece + "\t" + v)
+                        }
+                    } else {
+                        vocab.each { row ->
+                            String piece = String.valueOf(row instanceof List ? row[0] : row).replace("\\", "\\\\").replace("\t", "\\t")
+                            def score = row instanceof List ? row[1] : 0
+                            w.writeLine(piece + "\t" + score)
+                        }
                     }
                 }
                 logger.lifecycle("Wrote ${pieces}")
@@ -151,8 +193,94 @@ tasks.register("downloadOfflineModels") {
                 tok.delete()
             }
         }
+
+        downloadTo(qwenFastUrl, qwenFastAsset, qwenFastBytes)
+        if (!qwenFastAsset.exists() || qwenFastAsset.length() < qwenFastBytes) {
+            throw new GradleException("Qwen 1.5B download incomplete: ${qwenFastAsset}")
+        }
+        logger.lifecycle("Qwen 1.5B packed in APK: ${qwenFastAsset.length()} bytes")
+
+        // Drop leftover USB A/B caches so builds don't drag multi-GB unused GGUFs.
+        def staleCache = layout.buildDirectory.dir("qwen-cache").get().asFile
+        if (staleCache.isDirectory()) {
+            staleCache.eachFile { f ->
+                if (f.name != qwenFastAsset.name) {
+                    logger.lifecycle("Removing unused cache ${f.name}")
+                    f.delete()
+                }
+            }
+        }
     }
 }
 
 preBuild.dependsOn downloadOfflineModels
+
+afterEvaluate {
+    tasks.register("syncSherpaOnnxRuntime") {
+        description = "Copy sherpa-onnx libonnxruntime.so so Piper JNI can resolve OrtGetApiBase"
+        def destDir = layout.buildDirectory.dir("sherpaJni/arm64-v8a")
+        outputs.dir destDir
+        doLast {
+            def cfg = configurations.findByName("debugRuntimeClasspath")
+            if (cfg == null) {
+                cfg = configurations.findByName("releaseRuntimeClasspath")
+            }
+            if (cfg == null) {
+                logger.warn("No Android runtime classpath; skip sherpa ORT sync")
+                return
+            }
+            cfg.resolve()
+            def aar = cfg.files.find { f ->
+                f.name.contains("sherpa-onnx") && f.name.endsWith(".aar")
+            }
+            if (aar == null) {
+                logger.warn("sherpa-onnx AAR not on classpath; Piper native load may fail")
+                return
+            }
+            copy {
+                from zipTree(aar)
+                include "jni/arm64-v8a/libonnxruntime.so"
+                into destDir.get().asFile
+                eachFile { fcd ->
+                    fcd.path = fcd.name
+                }
+                includeEmptyDirs = false
+            }
+            logger.lifecycle("Synced sherpa ONNX Runtime from ${aar.name}")
+        }
+    }
+    tasks.register("syncMicrosoftOrtAsset") {
+        description = "Copy Microsoft libonnxruntime.so into assets for the :opusmt process"
+        def dest = file("src/main/assets/native/ms_onnxruntime.so")
+        outputs.file dest
+        doLast {
+            if (dest.exists() && dest.length() > 1_000_000) {
+                return
+            }
+            def cfg = configurations.findByName("debugRuntimeClasspath")
+            if (cfg == null) {
+                cfg = configurations.findByName("releaseRuntimeClasspath")
+            }
+            cfg.resolve()
+            def aar = cfg.files.find { f ->
+                f.name.contains("onnxruntime-android") && f.name.endsWith(".aar")
+            }
+            if (aar == null) {
+                throw new GradleException("onnxruntime-android AAR missing")
+            }
+            dest.parentFile.mkdirs()
+            copy {
+                from zipTree(aar)
+                include "jni/arm64-v8a/libonnxruntime.so"
+                into dest.parentFile
+                eachFile { fcd ->
+                    fcd.path = dest.name
+                }
+                includeEmptyDirs = false
+            }
+            logger.lifecycle("Copied Microsoft ORT to ${dest} (${dest.length()} bytes)")
+        }
+    }
+    tasks.named("preBuild").configure { dependsOn("syncSherpaOnnxRuntime", "syncMicrosoftOrtAsset") }
+}
 

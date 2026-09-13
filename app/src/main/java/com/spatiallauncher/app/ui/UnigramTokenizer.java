@@ -124,12 +124,19 @@ final class UnigramTokenizer {
                 continue;
             }
             String piece = pieces[id];
-            if ("<unk>".equals(piece) || "<s>".equals(piece) || "</s>".equals(piece) || "<pad>".equals(piece)) {
+            if ("<unk>".equals(piece) || "<s>".equals(piece) || "</s>".equals(piece)
+                    || "<pad>".equals(piece) || piece.startsWith("<extra_id")
+                    || piece.startsWith("<")) {
                 continue;
             }
             sb.append(piece);
         }
-        return sb.toString().replace('▁', ' ').replace("  ", " ").trim();
+        String out = sb.toString().replace('▁', ' ');
+        // Collapse repeated spaces; MT post-clean handles \n / /// junk.
+        while (out.contains("  ")) {
+            out = out.replace("  ", " ");
+        }
+        return out.trim();
     }
 
     private static String unescape(String piece) {

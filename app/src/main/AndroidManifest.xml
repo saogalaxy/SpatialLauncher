@@ -3,9 +3,14 @@
     xmlns:tools="http://schemas.android.com/tools">
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
 
     <!-- Package-visibility (API 30+): needed to enumerate installed launchable apps for
          "Add Game" — without this <queries> block, PackageManager.queryIntentActivities()
@@ -21,11 +26,30 @@
         android:allowBackup="false"
         android:label="@string/app_name"
         android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher_round"
         android:theme="@style/Theme.SpatialLauncher.Panel"
         android:hardwareAccelerated="true"
+        android:largeHeap="true"
         android:resizeableActivity="true"
         android:maxAspectRatio="10.0"
         tools:targetApi="34">
+
+        <!-- Android 12+ hides vendor .so unless declared. llama.cpp OpenCL needs these. -->
+        <uses-native-library
+            android:name="libOpenCL.so"
+            android:required="false" />
+        <uses-native-library
+            android:name="libOpenCL-pixel.so"
+            android:required="false" />
+        <uses-native-library
+            android:name="libcdsprpc.so"
+            android:required="false" />
+        <uses-native-library
+            android:name="libcb.so"
+            android:required="false" />
+        <uses-native-library
+            android:name="libvndksupport.so"
+            android:required="false" />
 
         <activity
             android:name=".ui.PanelMainActivity"
@@ -75,5 +99,21 @@
             android:name=".ui.MirrorCaptureService"
             android:exported="false"
             android:foregroundServiceType="mediaProjection" />
+
+        <service
+            android:name=".ui.BookImportService"
+            android:exported="false" />
+
+        <!-- Own process so Microsoft ORT is not mixed with sherpa's libonnxruntime.so (Piper). -->
+        <service
+            android:name=".ui.TranslateMtService"
+            android:exported="false"
+            android:process=":opusmt" />
+
+        <!-- Own process so llama.cpp / jllama is not mixed with sherpa ONNX (Piper). -->
+        <service
+            android:name=".ui.QwenPageService"
+            android:exported="false"
+            android:process=":qwen" />
     </application>
 </manifest>

@@ -3,7 +3,10 @@ package com.spatiallauncher.app.ui;
 import android.Manifest;
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.content.BroadcastReceiver;
+import android.content.Context;
 import android.content.Intent;
+import android.content.IntentFilter;
 import android.net.Uri;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
@@ -24,6 +27,7 @@ import android.media.Image;
 import android.media.ImageReader;
 import android.media.projection.MediaProjection;
 import android.media.projection.MediaProjectionManager;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.HandlerThread;
@@ -48,11 +52,11 @@ import android.widget.FrameLayout;
 import android.widget.ImageButton;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
+import android.widget.ProgressBar;
 import android.widget.SeekBar;
 import android.widget.Switch;
 import android.widget.TextView;
 import android.widget.ToggleButton;
-import android.widget.Toast;
 import android.text.SpannableString;
 import android.text.Spanned;
 import android.text.style.BackgroundColorSpan;
@@ -65,6 +69,9 @@ import androidx.core.content.ContextCompat;
 
 import com.spatiallauncher.app.R;
 
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.InputStream;
 import java.lang.reflect.Method;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
@@ -72,6 +79,7 @@ import java.util.Collections;
 import java.util.Comparator;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Set;
 
 /**
@@ -107,6 +115,12 @@ public class PanelMainActivity extends AppCompatActivity {
     private GameLibraryStore libraryStore;
     private UserSettingsStore settingsStore;
     private BrowserLibraryStore browserLibraryStore;
+    private EpubLibraryStore epubLibraryStore;
+    private boolean epubSortByTitle = false;
+    private String currentEpubPath = "";
+    private boolean epubScrollToBottomOnLoad = false;
+    private View epubPageBar;
+    private AlertDialog myBooksDialog;
     private PackageManager packageManager;
 
     private LinearLayout dockContainer;
@@ -114,7 +128,9 @@ public class PanelMainActivity extends AppCompatActivity {
     private LinearLayout panelRoot;
     private View cardRoot;
     private View settingsDrawer;
+    private View helpDrawer;
     private Button settingsCloseButton;
+    private Button helpCloseButton;
     private TextView emptyStateText;
     private SurfaceView gameRenderSurface;
     private final GlesZMeshView glesZMeshView = new GlesZMeshView();
@@ -130,6 +146,8 @@ public class PanelMainActivity extends AppCompatActivity {
     private PlaybackListenEngine listenEngine;
     private TextView shareCaption;
     private boolean stereoBeforeListen = true;
+    private boolean stereoBeforePageTranslate = true;
+    private boolean pageTranslateHeldStereo;
     private boolean suppressStereoPersist;
     private static final int REQUEST_LISTEN_AUDIO = 7101;
     private static final int REQUEST_OPEN_EPUB = 7103;
@@ -165,6 +183,18 @@ public class PanelMainActivity extends AppCompatActivity {
     private DialogueTextExtractor dialogueTextExtractor;
     private ScreenDialogueReader screenDialogueReader;
     private PageTranslator pageTranslator;
+    private TextView browserTranslateStatus;
+    private Button browserTranslateButton;
+    private ProgressBar browserTranslateProgress;
+    private View browserTranslateMeter;
+    private TextView browserTranslateEta;
+    private android.graphics.drawable.Drawable browserTranslateButtonIdleBg;
+    private boolean translateUiActive;
+    private int translateDone;
+    private int translateTotal;
+    private long translateStartedAt;
+    private final Handler translateUiHandler = new Handler(Looper.getMainLooper());
+    private final Runnable translateUiTick = this::refreshTranslateOverlay;
     private EpubSession epubSession;
 
     // --- In-panel "stereo mirror" pipeline -------------------------------------------
@@ -202,6 +232,40 @@ public class PanelMainActivity extends AppCompatActivity {
     // doc comment for why this must be bound before any MediaProjection capture call.
     private MirrorCaptureService mirrorCaptureService;
     private boolean mirrorServiceBound = false;
+    private boolean bookImportRunning = false;
+    private String bookImportUrl = "";
+    private String bookImportToken = "";
+    private final BroadcastReceiver bookImportReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            if (intent == null || intent.getAction() == null) {
+                return;
+            }
+            if (BookImportService.ACTION_IMPORT_READY.equals(intent.getAction())) {
+                bookImportUrl = intent.getStringExtra(BookImportService.EXTRA_URL);
+                bookImportToken = intent.getStringExtra(BookImportService.EXTRA_TOKEN);
+                bookImportRunning = true;
+                return;
+            }
+            if (BookImportService.ACTION_BOOK_RECEIVED.equals(intent.getAction())) {
+                String path = intent.getStringExtra(BookImportService.EXTRA_PATH);
+                String name = intent.getStringExtra(BookImportService.EXTRA_NAME);
+                if (path == null) {
+                    return;
+                }
+                File file = new File(path);
+                if (!file.exists()) {
+                    return;
+                }
+                PanelAlerts.show(PanelMainActivity.this,
+                        getString(R.string.book_import_received, name != null ? name : file.getName()));
+                if (epubLibraryStore != null) {
+                    epubLibraryStore.upsert(file, name);
+                }
+                openEpubFromUri(Uri.fromFile(file));
+            }
+        }
+    };
     // Set if the user tapped a dock icon before the service finished its (near-instant,
     // but technically async) bind — retried automatically once onServiceConnected fires.
     private InstalledAppInfo pendingLaunchAwaitingService;
@@ -236,11 +300,13 @@ public class PanelMainActivity extends AppCompatActivity {
         // compositor tile (black band under the address bar in 3D).
         WebView.enableSlowWholeDocumentDraw();
         setContentView(R.layout.activity_panel_main);
+        PanelAlerts.bindBanner(findViewById(R.id.panel_message_bar));
 
         packageManager = getPackageManager();
         libraryStore = new GameLibraryStore(this);
         settingsStore = new UserSettingsStore(this);
         browserLibraryStore = new BrowserLibraryStore(this);
+        epubLibraryStore = new EpubLibraryStore(this);
         ocrRegionStore = new OcrRegionStore(this);
         dialogueTextExtractor = new DialogueTextExtractor(this);
         dialogueTextExtractor.setMode(DialogueTextExtractor.ReadingStepMode.OPTION_A_ON_DEVICE_VLM);
@@ -266,9 +332,16 @@ public class PanelMainActivity extends AppCompatActivity {
 
             @Override
             public void onStatus(String message) {
-                Toast.makeText(PanelMainActivity.this, message, Toast.LENGTH_SHORT).show();
+                PanelAlerts.show(PanelMainActivity.this, message);
             }
         });
+        new Thread(() -> {
+            OfflineModelPack.unpackAll(getApplicationContext());
+            OfflineModelPack.unpackSpeech(getApplicationContext());
+            if (assistMode == AssistMode.TRANSLATE || assistMode == AssistMode.SHARE) {
+                OnDeviceTranslator.get(PanelMainActivity.this).ensureReady(ok -> { });
+            }
+        }, "ModelPack").start();
         ttsManualMode = settingsStore.getTtsManualMode();
         PiperTtsEngine piper = PiperTtsEngine.get(this);
         piper.setSpeechRate(settingsStore.getTtsSpeedPercent() / 100f);
@@ -328,16 +401,17 @@ public class PanelMainActivity extends AppCompatActivity {
             }
         });
         if (ttsEnabled) {
+            piper.ensureReadyAsync();
             ensureDialogueTts();
         }
-
-        // Loading the ~63MB MiDaS model + building the TFLite Interpreter takes a moment
         // and must not block onCreate()/the UI thread. computeParallaxGrid() already
         // null-checks depthEstimator and falls back to the luminance heuristic until this
         // finishes, so mirroring can start immediately even if depth isn't ready yet.
         new Thread(() -> {
             DepthEstimator estimator = DepthEstimator.createDefault(getApplicationContext());
             estimator.setDepthGamma(contrastPercentToGamma(settingsStore.getDepthContrastPercent(false)));
+            // Live only: light temporal flicker dampen. Keep Static crisp for pop.
+            estimator.setTemporalKeep(0.35f);
             depthEstimator = estimator;
             if (settingsStore.getDepthModeStatic()) {
                 ensureStaticDepthModel();
@@ -363,6 +437,14 @@ public class PanelMainActivity extends AppCompatActivity {
         browserTabStrip = findViewById(R.id.browser_tab_strip);
         browserChrome = findViewById(R.id.browser_chrome);
         browserAddress = findViewById(R.id.browser_address);
+        browserTranslateStatus = findViewById(R.id.browser_translate_status);
+        browserTranslateButton = findViewById(R.id.browser_translate_page);
+        browserTranslateProgress = findViewById(R.id.browser_translate_progress);
+        browserTranslateMeter = findViewById(R.id.browser_translate_meter);
+        browserTranslateEta = findViewById(R.id.browser_translate_eta);
+        if (browserTranslateButton != null) {
+            browserTranslateButtonIdleBg = browserTranslateButton.getBackground();
+        }
         browserButton = findViewById(R.id.browser_button);
         applyBrowserWebView(drmWebView);
         browserTabs.add(drmWebView);
@@ -373,15 +455,18 @@ public class PanelMainActivity extends AppCompatActivity {
                 showDrmBrowser(browserLibraryStore.getLastUrlOrHome());
             }
         });
-        findViewById(R.id.epub_button).setOnClickListener(v -> openEpubPicker());
+        findViewById(R.id.epub_button).setOnClickListener(v -> onEpubButtonClicked());
+        findViewById(R.id.epub_button).setOnLongClickListener(v -> {
+            toggleBookImportServer();
+            return true;
+        });
         findViewById(R.id.browser_close_button).setOnClickListener(v -> hideDrmBrowser());
         findViewById(R.id.browser_go_button).setOnClickListener(v -> goToAddressBarUrl());
         findViewById(R.id.browser_bookmark_button).setOnClickListener(v -> toggleCurrentBookmark());
         findViewById(R.id.browser_history_button).setOnClickListener(v -> showBrowserLists());
         findViewById(R.id.browser_back_button).setOnClickListener(v -> {
-            if (epubSession != null && epubSession.hasPrev()) {
-                epubSession.index--;
-                loadEpubChapter();
+            if (epubSession != null) {
+                epubTurnPage(false);
                 return;
             }
             if (drmWebView != null && drmWebView.canGoBack()) {
@@ -389,17 +474,44 @@ public class PanelMainActivity extends AppCompatActivity {
             }
         });
         findViewById(R.id.browser_forward_button).setOnClickListener(v -> {
-            if (epubSession != null && epubSession.hasNext()) {
-                epubSession.index++;
-                loadEpubChapter();
+            if (epubSession != null) {
+                epubTurnPage(true);
                 return;
             }
             if (drmWebView != null && drmWebView.canGoForward()) {
                 drmWebView.goForward();
             }
         });
-        findViewById(R.id.browser_translate_page).setOnClickListener(v -> translateBrowserPage(false));
-        findViewById(R.id.browser_read_page).setOnClickListener(v -> translateBrowserPage(true));
+        epubPageBar = findViewById(R.id.epub_page_bar);
+        View epubPrev = findViewById(R.id.epub_prev_page);
+        View epubNext = findViewById(R.id.epub_next_page);
+        if (epubPrev != null) {
+            epubPrev.setOnClickListener(v -> epubTurnPage(false));
+        }
+        if (epubNext != null) {
+            epubNext.setOnClickListener(v -> epubTurnPage(true));
+        }
+        findViewById(R.id.browser_translate_page).setOnClickListener(v -> {
+            if (pageTranslator != null && pageTranslator.isBusy()) {
+                pageTranslator.cancel(this);
+                stopTranslateUi();
+                PiperTtsEngine.get(this).stopSpeaking();
+                PanelAlerts.show(this, R.string.browser_translate_cancelled);
+                return;
+            }
+            translateBrowserPage();
+        });
+        findViewById(R.id.browser_google_translate).setOnClickListener(v -> {
+            if (pageTranslator != null && pageTranslator.isBusy()) {
+                pageTranslator.cancel(this);
+                stopTranslateUi();
+                PiperTtsEngine.get(this).stopSpeaking();
+                PanelAlerts.show(this, R.string.browser_translate_cancelled);
+                return;
+            }
+            googleTranslateBrowserPage();
+        });
+        findViewById(R.id.browser_read_page).setOnClickListener(v -> readBrowserPage());
         browserAddress.setOnEditorActionListener((v, actionId, event) -> {
             if (actionId == EditorInfo.IME_ACTION_GO || actionId == EditorInfo.IME_ACTION_DONE) {
                 goToAddressBarUrl();
@@ -469,12 +581,29 @@ public class PanelMainActivity extends AppCompatActivity {
         // taking up space on the main panel surface.
         View settingsDrawer = findViewById(R.id.settings_drawer);
         this.settingsDrawer = settingsDrawer;
+        View helpDrawer = findViewById(R.id.help_drawer);
+        this.helpDrawer = helpDrawer;
+        populateHelpContent();
         ImageButton settingsButton = findViewById(R.id.settings_button);
         settingsButton.setOnClickListener(v -> {
+            if (helpDrawer != null && helpDrawer.getVisibility() == View.VISIBLE) {
+                closeSideDrawer(helpDrawer);
+            }
             if (settingsDrawer.getVisibility() == View.VISIBLE) {
-                closeSettingsDrawer(settingsDrawer);
+                closeSideDrawer(settingsDrawer);
             } else {
-                openSettingsDrawer(settingsDrawer);
+                openSideDrawer(settingsDrawer);
+            }
+        });
+        ImageButton helpButton = findViewById(R.id.help_button);
+        helpButton.setOnClickListener(v -> {
+            if (settingsDrawer.getVisibility() == View.VISIBLE) {
+                closeSideDrawer(settingsDrawer);
+            }
+            if (helpDrawer.getVisibility() == View.VISIBLE) {
+                closeSideDrawer(helpDrawer);
+            } else {
+                openSideDrawer(helpDrawer);
             }
         });
         ocrRegionButton = findViewById(R.id.ocr_region_button);
@@ -501,15 +630,11 @@ public class PanelMainActivity extends AppCompatActivity {
         ttsStopButton.setOnClickListener(v -> onTtsStopClicked());
         ttsSpeakButton.setOnLongClickListener(v -> {
             if (!ttsEnabled) {
-                Toast.makeText(this, R.string.tts_turn_on_first, Toast.LENGTH_SHORT).show();
+                PanelAlerts.show(this, R.string.tts_turn_on_first);
                 return true;
             }
             setTtsManualMode(!ttsManualMode);
-            Toast.makeText(this,
-                    ttsManualMode
-                            ? getString(R.string.tts_mode_once_toast)
-                            : getString(R.string.tts_mode_loop_toast),
-                    Toast.LENGTH_SHORT).show();
+            PanelAlerts.show(this, ttsManualMode ? getString(R.string.tts_mode_once_toast) : getString(R.string.tts_mode_loop_toast));
             return true;
         });
         refreshTtsSpeakButton();
@@ -533,8 +658,19 @@ public class PanelMainActivity extends AppCompatActivity {
         });
         Button settingsCloseButton = findViewById(R.id.settings_close_button);
         this.settingsCloseButton = settingsCloseButton;
-        settingsCloseButton.setOnClickListener(v -> closeSettingsDrawer(settingsDrawer));
+        settingsCloseButton.setOnClickListener(v -> closeSideDrawer(settingsDrawer));
+        Button helpCloseButton = findViewById(R.id.help_close_button);
+        this.helpCloseButton = helpCloseButton;
+        if (helpCloseButton != null) {
+            helpCloseButton.setOnClickListener(v -> closeSideDrawer(helpDrawer));
+        }
         Switch toggleTts = findViewById(R.id.toggle_tts);
+        Switch toggle3dOffPageTranslate = findViewById(R.id.toggle_3d_off_page_translate);
+        if (toggle3dOffPageTranslate != null) {
+            toggle3dOffPageTranslate.setChecked(settingsStore.get3dOffForPageTranslate());
+            toggle3dOffPageTranslate.setOnClickListener(v ->
+                    settingsStore.set3dOffForPageTranslate(toggle3dOffPageTranslate.isChecked()));
+        }
         Switch toggleTtsAuto = findViewById(R.id.toggle_tts_auto);
         Switch toggleTtsManual = findViewById(R.id.toggle_tts_manual);
         toggleTts.setChecked(ttsEnabled);
@@ -546,7 +682,7 @@ public class PanelMainActivity extends AppCompatActivity {
         toggleTtsAuto.setOnClickListener(v -> {
             if (!ttsEnabled) {
                 toggleTtsAuto.setChecked(false);
-                Toast.makeText(this, R.string.tts_turn_on_first, Toast.LENGTH_SHORT).show();
+                PanelAlerts.show(this, R.string.tts_turn_on_first);
                 return;
             }
             if (toggleTtsAuto.isChecked()) {
@@ -559,7 +695,7 @@ public class PanelMainActivity extends AppCompatActivity {
         toggleTtsManual.setOnClickListener(v -> {
             if (!ttsEnabled) {
                 toggleTtsManual.setChecked(false);
-                Toast.makeText(this, R.string.tts_turn_on_first, Toast.LENGTH_SHORT).show();
+                PanelAlerts.show(this, R.string.tts_turn_on_first);
                 return;
             }
             if (toggleTtsManual.isChecked()) {
@@ -573,7 +709,36 @@ public class PanelMainActivity extends AppCompatActivity {
         findViewById(R.id.assist_mode_translate).setOnClickListener(v -> setAssistMode(AssistMode.TRANSLATE));
         findViewById(R.id.assist_mode_listen).setOnClickListener(v -> setAssistMode(AssistMode.LISTEN));
         findViewById(R.id.assist_mode_share).setOnClickListener(v -> setAssistMode(AssistMode.SHARE));
+        findViewById(R.id.listen_button).setOnClickListener(v -> toggleListenFromToolbar());
         applyAssistMode(assistMode, false);
+        refreshListenButton();
+
+        SeekBar seekbarListenSmooth = findViewById(R.id.seekbar_listen_smoothness);
+        TextView listenSmoothValue = findViewById(R.id.listen_smoothness_value);
+        int savedListenSmooth = settingsStore.getListenSmoothnessPercent();
+        seekbarListenSmooth.setProgress(savedListenSmooth);
+        listenSmoothValue.setText(listenSmoothnessLabel(savedListenSmooth));
+        if (listenEngine != null) {
+            listenEngine.setSmoothnessPercent(savedListenSmooth);
+        }
+        seekbarListenSmooth.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override
+            public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
+                listenSmoothValue.setText(listenSmoothnessLabel(progress));
+                if (listenEngine != null) {
+                    listenEngine.setSmoothnessPercent(progress);
+                }
+                if (fromUser) {
+                    settingsStore.setListenSmoothnessPercent(progress);
+                }
+            }
+
+            @Override
+            public void onStartTrackingTouch(SeekBar seekBar) {}
+
+            @Override
+            public void onStopTrackingTouch(SeekBar seekBar) {}
+        });
 
         SeekBar seekbarTtsSpeed = findViewById(R.id.seekbar_tts_speed);
         TextView ttsSpeedValue = findViewById(R.id.tts_speed_value);
@@ -613,7 +778,7 @@ public class PanelMainActivity extends AppCompatActivity {
             settingsStore.setTtsMaleVoice(true);
             PiperTtsEngine.get(this).setMaleVoice(true);
             refreshVoiceButtons(true);
-            Toast.makeText(this, R.string.tts_voice_downloading, Toast.LENGTH_SHORT).show();
+            PanelAlerts.show(this, R.string.tts_voice_downloading);
             scheduleTtsVoicePreview(1400);
         });
 
@@ -718,7 +883,69 @@ public class PanelMainActivity extends AppCompatActivity {
         // ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION". unbindService() in
         // onDestroy() lets it tear down automatically once the panel closes.
         bindService(new Intent(this, MirrorCaptureService.class), mirrorServiceConnection, BIND_AUTO_CREATE);
+        IntentFilter importFilter = new IntentFilter();
+        importFilter.addAction(BookImportService.ACTION_BOOK_RECEIVED);
+        importFilter.addAction(BookImportService.ACTION_IMPORT_READY);
+        if (Build.VERSION.SDK_INT >= 33) {
+            registerReceiver(bookImportReceiver, importFilter, Context.RECEIVER_NOT_EXPORTED);
+        } else {
+            registerReceiver(bookImportReceiver, importFilter);
+        }
+        // Do NOT start BookImport here — onCreate can run while still "background"
+        // (Quest restoring the panel under a VR game) and startService() crashes the app.
         contentArea.post(this::restoreLastSession);
+    }
+
+    /**
+     * Start LAN EPUB import only when the user asks (EPUB long-press / toggle).
+     * Never auto-start on boot/focus — that fought VR games and crashed in background.
+     */
+    private void startBookImportServer() {
+        if (bookImportRunning) {
+            return;
+        }
+        try {
+            startService(new Intent(this, BookImportService.class));
+            bookImportRunning = true;
+        } catch (IllegalStateException e) {
+            android.util.Log.w("PanelMain", "BookImport start blocked (background)", e);
+            bookImportRunning = false;
+            PanelAlerts.show(this, R.string.book_import_off);
+        }
+    }
+
+    private void stopBookImportServerQuiet() {
+        if (!bookImportRunning) {
+            return;
+        }
+        try {
+            stopService(new Intent(this, BookImportService.class));
+        } catch (Exception ignored) {
+        }
+        bookImportRunning = false;
+    }
+
+    private void showBookImportStatus() {
+        startBookImportServer();
+        String url = bookImportUrl != null && !bookImportUrl.isEmpty()
+                ? bookImportUrl
+                : ("http://(waiting…):" + BookImportHttp.DEFAULT_PORT);
+        String token = bookImportToken != null ? bookImportToken : "";
+        if (token.isEmpty()) {
+            token = getSharedPreferences("book_import", MODE_PRIVATE).getString("token", "");
+        }
+        PanelAlerts.show(this, getString(R.string.book_import_on, url, token));
+    }
+
+    private void toggleBookImportServer() {
+        if (bookImportRunning) {
+            stopBookImportServerQuiet();
+            bookImportUrl = "";
+            PanelAlerts.show(this, R.string.book_import_off);
+            return;
+        }
+        startBookImportServer();
+        showBookImportStatus();
     }
 
     private void persistSession() {
@@ -758,6 +985,14 @@ public class PanelMainActivity extends AppCompatActivity {
                     Log.i("PanelMainActivity", msg);
                 },
                 (view, url) -> runOnUiThread(() -> {
+                    if (epubSession != null) {
+                        if (browserAddress != null && !browserAddress.hasFocus()) {
+                            browserAddress.setText(epubSession.title + "  " + (epubSession.index + 1)
+                                    + "/" + epubSession.chapterUrls.size());
+                        }
+                        refreshBrowserChrome();
+                        return;
+                    }
                     if (view == drmWebView && browserAddress != null && !browserAddress.hasFocus()) {
                         browserAddress.setText(url);
                     }
@@ -782,37 +1017,268 @@ public class PanelMainActivity extends AppCompatActivity {
 
     private PageTranslator pageTranslator() {
         if (pageTranslator == null) {
-            pageTranslator = new PageTranslator(OnDeviceTranslator.get(this));
+            pageTranslator = new PageTranslator();
             pageTranslator.setListener(new PageTranslator.Listener() {
                 @Override
                 public void onStatus(String message) {
-                    Toast.makeText(PanelMainActivity.this, message, Toast.LENGTH_SHORT).show();
+                    if (message == null) {
+                        return;
+                    }
+                    if (browserTranslateProgress != null && translateUiActive) {
+                        browserTranslateProgress.setIndeterminate(false);
+                        browserTranslateProgress.setProgress(0);
+                        browserTranslateProgress.setContentDescription(message);
+                    }
+                    PanelAlerts.show(PanelMainActivity.this, message);
                 }
 
                 @Override
                 public void onTranslatedPage(String english) {
                     if (!ttsEnabled) {
-                        Toast.makeText(PanelMainActivity.this, R.string.tts_turn_on_first,
-                                Toast.LENGTH_SHORT).show();
+                        PanelAlerts.show(PanelMainActivity.this, R.string.tts_turn_on_first);
                         return;
                     }
                     adoptTtsPlaylist(english);
                     speakPlaylistFrom(0);
+                }
+
+                @Override
+                public void onTranslateStarted(int total) {
+                    startTranslateUi(Math.max(1, total));
+                }
+
+                @Override
+                public void onTranslateProgress(int done, int total) {
+                    translateDone = done;
+                    translateTotal = Math.max(1, total);
+                    refreshTranslateOverlay();
+                }
+
+                @Override
+                public void onTranslateLine(String englishLine) {
+                    if (browserTranslateEta != null && englishLine != null && !englishLine.isEmpty()) {
+                        String shortLine = englishLine.length() > 48
+                                ? englishLine.substring(0, 45) + "…"
+                                : englishLine;
+                        browserTranslateEta.setText(shortLine);
+                    }
+                }
+
+                @Override
+                public void onTranslatePartial(String englishSoFar) {
+                    // Page stays Japanese until the end; line text is in the ETA label.
+                }
+
+                @Override
+                public void onTranslateFinished() {
+                    endPageTranslateStereoHold();
+                    if (browserTranslateProgress != null) {
+                        browserTranslateProgress.setIndeterminate(false);
+                        browserTranslateProgress.setMax(Math.max(1, translateTotal));
+                        browserTranslateProgress.setProgress(Math.max(translateDone, translateTotal));
+                    }
+                    long holdMs = translateDone <= 0 ? 4000L : 700L;
+                    translateUiHandler.removeCallbacks(translateUiTick);
+                    translateUiHandler.postDelayed(PanelMainActivity.this::stopTranslateUi, holdMs);
                 }
             });
         }
         return pageTranslator;
     }
 
-    private void translateBrowserPage(boolean thenRead) {
+    private void readBrowserPage() {
         if (!isBrowserOpen() || drmWebView == null) {
             showDrmBrowser(browserLibraryStore.getLastUrlOrHome());
         }
-        if (thenRead && !ttsEnabled) {
-            Toast.makeText(this, R.string.tts_turn_on_first, Toast.LENGTH_SHORT).show();
+        if (!ttsEnabled) {
+            PanelAlerts.show(this, R.string.tts_turn_on_first);
             return;
         }
-        pageTranslator().translatePage(drmWebView, thenRead);
+        pageTranslator().readPage(drmWebView);
+    }
+
+    private void translateBrowserPage() {
+        if (!isBrowserOpen() || drmWebView == null) {
+            showDrmBrowser(browserLibraryStore.getLastUrlOrHome());
+        }
+        // Stop OCR→Piper so it can't fight line-by-line page Translate.
+        PiperTtsEngine.get(this).stopSpeaking();
+        beginPageTranslateStereoHold();
+        startTranslateUi(1);
+        if (!ttsEnabled) {
+            PanelAlerts.show(this, R.string.tts_turn_on_first);
+        }
+        pageTranslator().translatePage(drmWebView, ttsEnabled);
+    }
+
+    private void googleTranslateBrowserPage() {
+        if (!isBrowserOpen() || drmWebView == null) {
+            showDrmBrowser(browserLibraryStore.getLastUrlOrHome());
+        }
+        PiperTtsEngine.get(this).stopSpeaking();
+        beginPageTranslateStereoHold();
+        startTranslateUi(1);
+        if (!ttsEnabled) {
+            PanelAlerts.show(this, R.string.tts_turn_on_first);
+        }
+        PanelAlerts.show(this, R.string.browser_google_waking);
+        pageTranslator().googleTranslatePage(drmWebView, ttsEnabled);
+    }
+
+    private void beginPageTranslateStereoHold() {
+        // Pause 3D capture during Translate so Adreno stays free for OPUS / Piper.
+        if (!forceStereoEnabled || pageTranslateHeldStereo) {
+            return;
+        }
+        pageTranslateHeldStereo = true;
+        stereoBeforePageTranslate = true;
+        setSessionStereo(false);
+        PanelAlerts.show(this, R.string.page_translate_3d_off);
+    }
+
+    private void endPageTranslateStereoHold() {
+        if (!pageTranslateHeldStereo) {
+            return;
+        }
+        pageTranslateHeldStereo = false;
+        setSessionStereo(stereoBeforePageTranslate);
+    }
+
+    private void startTranslateUi(int total) {
+        translateUiActive = true;
+        translateTotal = Math.max(1, total);
+        translateDone = 0;
+        translateStartedAt = android.os.SystemClock.elapsedRealtime();
+        if (browserTranslateStatus != null) {
+            browserTranslateStatus.setVisibility(View.GONE);
+        }
+        if (browserTranslateMeter != null) {
+            browserTranslateMeter.setVisibility(View.VISIBLE);
+        }
+        if (browserTranslateProgress != null) {
+            browserTranslateProgress.setVisibility(View.VISIBLE);
+            browserTranslateProgress.setMax(Math.max(1, total));
+            browserTranslateProgress.setIndeterminate(false);
+            browserTranslateProgress.setProgress(0);
+        }
+        if (browserTranslateEta != null) {
+            browserTranslateEta.setText(R.string.browser_translating_loading);
+        }
+        if (browserTranslateButton != null) {
+            browserTranslateButton.setAlpha(1f);
+            browserTranslateButton.setBackgroundResource(R.drawable.bg_translate_active);
+            browserTranslateButton.setText(R.string.browser_translate_page);
+        }
+        PanelAlerts.show(this, R.string.browser_translating_loading);
+        translateUiHandler.removeCallbacks(translateUiTick);
+        translateUiHandler.post(translateUiTick);
+        refreshTranslateOverlay();
+    }
+
+    private void refreshTranslateOverlay() {
+        if (!translateUiActive) {
+            return;
+        }
+        int done = Math.max(0, translateDone);
+        int total = Math.max(1, translateTotal);
+        long elapsedMs = android.os.SystemClock.elapsedRealtime() - translateStartedAt;
+        int elapsedSec = (int) Math.max(0, elapsedMs / 1000);
+        int etaSec = 0;
+        if (done > 0 && done < total) {
+            long eta = elapsedMs * (total - done) / Math.max(1, done);
+            etaSec = (int) Math.max(1, (eta + 500) / 1000);
+        }
+        String etaText;
+        if (done <= 0 && total <= 1) {
+            etaText = getString(R.string.browser_translating_loading)
+                    + " · " + elapsedSec + "s";
+        } else if (done < total) {
+            // done = completed; current chunk is done+1 while work is in flight.
+            int working = Math.min(total, done + 1);
+            if (done == 0) {
+                etaText = getString(R.string.browser_translating_working, working, total)
+                        + " · " + elapsedSec + "s";
+            } else {
+                etaText = getString(R.string.browser_translating_status, done, total, etaSec);
+            }
+        } else {
+            etaText = getString(R.string.browser_translating_status, done, total, 0);
+        }
+        if (browserTranslateMeter != null) {
+            browserTranslateMeter.setVisibility(View.VISIBLE);
+        }
+        if (browserTranslateProgress != null) {
+            browserTranslateProgress.setVisibility(View.VISIBLE);
+            browserTranslateProgress.setIndeterminate(false);
+            browserTranslateProgress.setMax(total);
+            // Show in-flight chunk as partial step so the bar moves before the first finish.
+            int shown = done < total ? Math.min(total, done + 1) : done;
+            // Half-step while first chunk still running: keep at least 1 once work started.
+            if (done == 0 && total > 1 && elapsedSec > 0) {
+                shown = 1;
+            }
+            browserTranslateProgress.setProgress(shown);
+            browserTranslateProgress.setContentDescription(etaText);
+        }
+        if (browserTranslateEta != null) {
+            browserTranslateEta.setText(etaText);
+        }
+        if (browserTranslateButton != null) {
+            browserTranslateButton.setBackgroundResource(R.drawable.bg_translate_active);
+            browserTranslateButton.setText(R.string.browser_translate_page);
+        }
+        translateUiHandler.removeCallbacks(translateUiTick);
+        translateUiHandler.postDelayed(translateUiTick, 400);
+    }
+
+    private void stopTranslateUi() {
+        translateUiActive = false;
+        translateUiHandler.removeCallbacks(translateUiTick);
+        if (browserTranslateButton != null) {
+            browserTranslateButton.setAlpha(1f);
+            browserTranslateButton.setText(R.string.browser_translate_page);
+            if (browserTranslateButtonIdleBg != null) {
+                browserTranslateButton.setBackground(browserTranslateButtonIdleBg);
+            }
+        }
+        if (browserTranslateProgress != null) {
+            browserTranslateProgress.setIndeterminate(false);
+            browserTranslateProgress.setProgress(100);
+        }
+        if (browserTranslateEta != null) {
+            browserTranslateEta.setText("");
+        }
+        if (browserTranslateMeter != null) {
+            browserTranslateMeter.setVisibility(View.GONE);
+        }
+        if (browserTranslateProgress != null) {
+            browserTranslateProgress.setVisibility(View.GONE);
+        }
+        if (browserTranslateStatus != null) {
+            browserTranslateStatus.setVisibility(View.GONE);
+        }
+        endPageTranslateStereoHold();
+    }
+
+    private void onEpubButtonClicked() {
+        if (myBooksDialog != null && myBooksDialog.isShowing()) {
+            myBooksDialog.dismiss();
+            return;
+        }
+        // Tap book again while reading closes the reader (same idea as toggling the shelf).
+        if (epubSession != null && isBrowserOpen()) {
+            closeEpubReader();
+            return;
+        }
+        showMyBooksShelf();
+    }
+
+    private void closeEpubReader() {
+        epubSession = null;
+        currentEpubPath = "";
+        setEpubPageBarVisible(false);
+        hideDrmBrowser();
+        PanelAlerts.show(this, R.string.epub_closed);
     }
 
     private void openEpubPicker() {
@@ -822,19 +1288,118 @@ public class PanelMainActivity extends AppCompatActivity {
         intent.putExtra(Intent.EXTRA_MIME_TYPES, new String[] {
                 "application/epub+zip", "application/octet-stream"
         });
+        intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION
+                | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
         startActivityForResult(intent, REQUEST_OPEN_EPUB);
+    }
+
+    private void showMyBooksShelf() {
+        if (epubLibraryStore == null) {
+            epubLibraryStore = new EpubLibraryStore(this);
+        }
+        if (myBooksDialog != null && myBooksDialog.isShowing()) {
+            myBooksDialog.dismiss();
+            return;
+        }
+        epubLibraryStore.scanInbox();
+        List<EpubLibraryStore.BookEntry> books = epubLibraryStore.list(epubSortByTitle);
+        AlertDialog.Builder builder = new AlertDialog.Builder(this)
+                .setTitle(R.string.my_books_title)
+                .setPositiveButton(R.string.my_books_open_other, (d, w) -> openEpubPicker())
+                .setNeutralButton(
+                        epubSortByTitle ? R.string.my_books_sort_title : R.string.my_books_sort_recent,
+                        (d, w) -> {
+                            epubSortByTitle = !epubSortByTitle;
+                            showMyBooksShelf();
+                        })
+                .setNegativeButton(R.string.my_books_close, null);
+        if (books.isEmpty()) {
+            myBooksDialog = builder.setMessage(R.string.my_books_empty).create();
+            myBooksDialog.setOnDismissListener(d -> myBooksDialog = null);
+            myBooksDialog.show();
+            return;
+        }
+        String[] labels = new String[books.size()];
+        for (int i = 0; i < books.size(); i++) {
+            labels[i] = books.get(i).title;
+        }
+        myBooksDialog = builder
+                .setItems(labels, (d, which) -> {
+                    EpubLibraryStore.BookEntry entry = books.get(which);
+                    openEpubFromUri(Uri.fromFile(new File(entry.path)));
+                })
+                .create();
+        myBooksDialog.setOnDismissListener(d -> myBooksDialog = null);
+        myBooksDialog.show();
     }
 
     private void openEpubFromUri(Uri uri) {
         try {
-            epubSession = EpubSession.open(this, uri);
+            try {
+                getContentResolver().takePersistableUriPermission(
+                        uri, Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            } catch (SecurityException ignored) {
+            }
+            File shelfFile = ensureEpubInInbox(uri);
+            epubSession = EpubSession.open(this, shelfFile != null ? Uri.fromFile(shelfFile) : uri);
+            currentEpubPath = shelfFile != null ? shelfFile.getAbsolutePath() : (uri.getPath() != null ? uri.getPath() : "");
+            if (epubLibraryStore != null && shelfFile != null) {
+                epubLibraryStore.markOpened(shelfFile.getAbsolutePath(), epubSession.title);
+            }
             showDrmBrowserHostOnly();
             loadEpubChapter();
-            Toast.makeText(this, getString(R.string.browser_epub_opened,
-                    epubSession.title, epubSession.chapterUrls.size()), Toast.LENGTH_LONG).show();
+            PanelAlerts.show(this, getString(R.string.browser_epub_opened, epubSession.title, epubSession.chapterUrls.size()));
         } catch (Exception e) {
             Log.w("PanelMainActivity", "EPUB open failed", e);
-            Toast.makeText(this, R.string.browser_epub_failed, Toast.LENGTH_SHORT).show();
+            PanelAlerts.show(this, R.string.browser_epub_failed);
+        }
+    }
+
+    /** Copy content:// picks into inbox so they can reopen from My Books. */
+    private File ensureEpubInInbox(Uri uri) {
+        if (uri == null) {
+            return null;
+        }
+        if ("file".equalsIgnoreCase(uri.getScheme()) && uri.getPath() != null) {
+            File file = new File(uri.getPath());
+            if (file.isFile()) {
+                return file;
+            }
+        }
+        if (epubLibraryStore == null) {
+            epubLibraryStore = new EpubLibraryStore(this);
+        }
+        String name = uri.getLastPathSegment();
+        if (name == null || name.isEmpty()) {
+            name = "book.epub";
+        }
+        name = name.replace('\\', '/');
+        int slash = name.lastIndexOf('/');
+        if (slash >= 0) {
+            name = name.substring(slash + 1);
+        }
+        if (!name.toLowerCase(Locale.US).endsWith(".epub")) {
+            name = name + ".epub";
+        }
+        File dest = new File(epubLibraryStore.getInboxDir(), name);
+        if (dest.exists()) {
+            String base = name.substring(0, name.length() - 5);
+            dest = new File(epubLibraryStore.getInboxDir(), base + "-" + System.currentTimeMillis() + ".epub");
+        }
+        try (InputStream in = getContentResolver().openInputStream(uri);
+             FileOutputStream out = new FileOutputStream(dest)) {
+            if (in == null) {
+                return null;
+            }
+            byte[] buf = new byte[8192];
+            int n;
+            while ((n = in.read(buf)) >= 0) {
+                out.write(buf, 0, n);
+            }
+            return dest;
+        } catch (Exception e) {
+            Log.w("PanelMainActivity", "copy to inbox failed", e);
+            return null;
         }
     }
 
@@ -843,6 +1408,7 @@ public class PanelMainActivity extends AppCompatActivity {
         browserHost.setVisibility(View.VISIBLE);
         drmWebView.setVisibility(View.VISIBLE);
         browserChrome.setVisibility(View.VISIBLE);
+        setEpubPageBarVisible(true);
         refreshBrowserChrome();
         setHomeRowCompact(true);
         setCastTheme(true);
@@ -869,6 +1435,62 @@ public class PanelMainActivity extends AppCompatActivity {
             browserAddress.setText(epubSession.title + "  " + (epubSession.index + 1)
                     + "/" + epubSession.chapterUrls.size());
         }
+        setEpubPageBarVisible(true);
+        refreshBrowserChrome();
+        if (epubScrollToBottomOnLoad) {
+            epubScrollToBottomOnLoad = false;
+            drmWebView.postDelayed(this::epubScrollToBottom, 120);
+        }
+    }
+
+    private void setEpubPageBarVisible(boolean visible) {
+        if (epubPageBar != null) {
+            epubPageBar.setVisibility(visible && epubSession != null ? View.VISIBLE : View.GONE);
+        }
+    }
+
+    /**
+     * Turn one viewport page inside the chapter. At the top/bottom, move to the
+     * previous/next spine chapter so reading feels continuous.
+     */
+    private void epubTurnPage(boolean forward) {
+        if (epubSession == null || drmWebView == null) {
+            return;
+        }
+        String js = forward
+                ? "(function(){var h=Math.floor(window.innerHeight*0.92);var max=Math.max(0,(document.documentElement.scrollHeight||document.body.scrollHeight)-window.innerHeight);var y=window.pageYOffset||document.documentElement.scrollTop||0;if(y>=max-4)return 'END';window.scrollTo(0,Math.min(max,y+h));return 'OK';})();"
+                : "(function(){var h=Math.floor(window.innerHeight*0.92);var y=window.pageYOffset||document.documentElement.scrollTop||0;if(y<=2)return 'TOP';window.scrollTo(0,Math.max(0,y-h));return 'OK';})();";
+        drmWebView.evaluateJavascript(js, value -> {
+            String result = value == null ? "" : value.replace("\"", "");
+            if (forward && "END".equals(result)) {
+                if (epubSession.hasNext()) {
+                    epubSession.index++;
+                    epubScrollToBottomOnLoad = false;
+                    loadEpubChapter();
+                } else {
+                    PanelAlerts.show(this, getString(R.string.epub_end_of_book));
+                }
+                return;
+            }
+            if (!forward && "TOP".equals(result)) {
+                if (epubSession.hasPrev()) {
+                    epubSession.index--;
+                    epubScrollToBottomOnLoad = true;
+                    loadEpubChapter();
+                }
+                return;
+            }
+            refreshBrowserChrome();
+        });
+    }
+
+    private void epubScrollToBottom() {
+        if (drmWebView == null || epubSession == null) {
+            return;
+        }
+        drmWebView.evaluateJavascript(
+                "(function(){var max=Math.max(0,(document.documentElement.scrollHeight||document.body.scrollHeight)-window.innerHeight);window.scrollTo(0,max);})();",
+                null);
     }
 
     private void ensureDialogueTts() {
@@ -883,6 +1505,10 @@ public class PanelMainActivity extends AppCompatActivity {
     }
 
     private boolean wantScreenOcr() {
+        // Page Translate owns speech/MT — OCR continuous would re-read the page/UI and loop.
+        if (translateUiActive || (pageTranslator != null && pageTranslator.isBusy())) {
+            return false;
+        }
         if (assistMode == AssistMode.LISTEN) {
             return false;
         }
@@ -894,6 +1520,9 @@ public class PanelMainActivity extends AppCompatActivity {
 
     private void handleAssistText(String text, boolean forced) {
         if (text == null || text.trim().isEmpty()) {
+            return;
+        }
+        if (translateUiActive || (pageTranslator != null && pageTranslator.isBusy())) {
             return;
         }
         if (assistMode == AssistMode.SHARE) {
@@ -931,12 +1560,58 @@ public class PanelMainActivity extends AppCompatActivity {
         if (mode == AssistMode.LISTEN
                 && ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
                 != PackageManager.PERMISSION_GRANTED) {
-            Toast.makeText(this, R.string.assist_listen_need_mic, Toast.LENGTH_SHORT).show();
+            PanelAlerts.show(this, R.string.assist_listen_need_mic);
             ActivityCompat.requestPermissions(
                     this, new String[] {Manifest.permission.RECORD_AUDIO}, REQUEST_LISTEN_AUDIO);
             return;
         }
         applyAssistMode(mode, true);
+    }
+
+    /**
+     * Main-row ear button: one tap turns on Listen with the settings it needs
+     * (TTS on + continuous, assist=Listen, 3D off). Tap again to leave Listen.
+     */
+    private void toggleListenFromToolbar() {
+        if (assistMode == AssistMode.LISTEN) {
+            setAssistMode(AssistMode.DEFAULT);
+            // Drop TTS so off→on can restart STT/speech cleanly (continuous OCR
+            // also won't steal the queue after Listen).
+            if (ttsEnabled) {
+                setTtsEnabled(false);
+            }
+            PanelAlerts.show(this, R.string.listen_mode_off);
+            return;
+        }
+        if (!ttsEnabled) {
+            setTtsEnabled(true);
+        }
+        if (ttsManualMode) {
+            setTtsManualMode(false);
+        }
+        warmListenMt();
+        setAssistMode(AssistMode.LISTEN);
+    }
+
+    private void warmListenMt() {
+        PanelAlerts.show(this, R.string.listen_mt_downloading);
+        ListenMtTranslator.get(this).ensureReady((ok, message) -> {
+            if (ok) {
+                PanelAlerts.show(this, R.string.listen_mt_ready);
+            } else {
+                PanelAlerts.show(this, R.string.listen_mt_failed);
+            }
+        });
+    }
+
+    private void refreshListenButton() {
+        ImageButton btn = findViewById(R.id.listen_button);
+        if (btn == null) {
+            return;
+        }
+        boolean on = assistMode == AssistMode.LISTEN;
+        btn.setBackgroundResource(on ? R.drawable.bg_circle_button_listen_active : R.drawable.bg_circle_button);
+        btn.setAlpha(1f);
     }
 
     private void applyAssistMode(AssistMode mode, boolean userPicked) {
@@ -955,14 +1630,20 @@ public class PanelMainActivity extends AppCompatActivity {
             }
         }
         refreshAssistModeButtons();
+        refreshListenButton();
+        if (assistMode == AssistMode.TRANSLATE || assistMode == AssistMode.SHARE) {
+            OnDeviceTranslator.get(this).ensureReady(ok -> { });
+        }
         if (assistMode == AssistMode.LISTEN) {
             if (previous != AssistMode.LISTEN) {
                 stereoBeforeListen = forceStereoEnabled;
+                // Settings chip path — warm ML Kit packs (toolbar already called warmListenMt).
+                ListenMtTranslator.get(this).ensureReady((ok, message) -> { });
             }
             setSessionStereo(false);
             syncListenEngine(userPicked);
-            if (userPicked) {
-                Toast.makeText(this, R.string.assist_3d_off_for_listen, Toast.LENGTH_SHORT).show();
+            if (userPicked && previous != AssistMode.LISTEN) {
+                PanelAlerts.show(this, R.string.listen_mode_on);
             }
         } else {
             if (listenEngine != null) {
@@ -1009,11 +1690,12 @@ public class PanelMainActivity extends AppCompatActivity {
         }
         if (mediaProjection == null) {
             if (notifyIfNoCast) {
-                Toast.makeText(this, R.string.assist_listen_need_cast, Toast.LENGTH_SHORT).show();
+                PanelAlerts.show(this, R.string.assist_listen_need_cast);
             }
             return;
         }
         if (!listenEngine.isRunning()) {
+            listenEngine.setSmoothnessPercent(settingsStore.getListenSmoothnessPercent());
             listenEngine.start(mediaProjection);
         }
     }
@@ -1022,6 +1704,7 @@ public class PanelMainActivity extends AppCompatActivity {
         ttsEnabled = enabled;
         settingsStore.setTtsEnabled(enabled);
         if (enabled) {
+            PiperTtsEngine.get(this).ensureReadyAsync();
             ensureDialogueTts();
         } else {
             PiperTtsEngine.get(this).stopSpeaking();
@@ -1129,7 +1812,7 @@ public class PanelMainActivity extends AppCompatActivity {
 
     private void onTtsSpeakButtonClicked() {
         if (!ttsEnabled) {
-            Toast.makeText(this, R.string.tts_turn_on_first, Toast.LENGTH_SHORT).show();
+            PanelAlerts.show(this, R.string.tts_turn_on_first);
             return;
         }
         if (!ttsManualMode) {
@@ -1142,7 +1825,7 @@ public class PanelMainActivity extends AppCompatActivity {
 
     private void onTtsPlayClicked() {
         if (!ttsEnabled) {
-            Toast.makeText(this, R.string.tts_turn_on_first, Toast.LENGTH_SHORT).show();
+            PanelAlerts.show(this, R.string.tts_turn_on_first);
             return;
         }
         PiperTtsEngine piper = PiperTtsEngine.get(this);
@@ -1162,7 +1845,7 @@ public class PanelMainActivity extends AppCompatActivity {
 
     private void onTtsPauseClicked() {
         if (!ttsEnabled) {
-            Toast.makeText(this, R.string.tts_turn_on_first, Toast.LENGTH_SHORT).show();
+            PanelAlerts.show(this, R.string.tts_turn_on_first);
             return;
         }
         PiperTtsEngine piper = PiperTtsEngine.get(this);
@@ -1178,7 +1861,7 @@ public class PanelMainActivity extends AppCompatActivity {
         PiperTtsEngine.get(this).stopSpeaking();
         hideTtsKaraoke();
         refreshTtsSpeakButton();
-        Toast.makeText(this, R.string.tts_stopped, Toast.LENGTH_SHORT).show();
+        PanelAlerts.show(this, R.string.tts_stopped);
     }
 
     private void onTtsPrevClicked() {
@@ -1194,7 +1877,7 @@ public class PanelMainActivity extends AppCompatActivity {
             return;
         }
         if (ttsPlaylist.isEmpty()) {
-            Toast.makeText(this, R.string.tts_nothing_to_read, Toast.LENGTH_SHORT).show();
+            PanelAlerts.show(this, R.string.tts_nothing_to_read);
             requestTapToSpeak();
             return;
         }
@@ -1203,7 +1886,7 @@ public class PanelMainActivity extends AppCompatActivity {
             next = 0;
         }
         if (delta > 0 && next >= ttsPlaylist.size()) {
-            Toast.makeText(this, R.string.tts_end_of_lines, Toast.LENGTH_SHORT).show();
+            PanelAlerts.show(this, R.string.tts_end_of_lines);
             return;
         }
         ttsPlaylistIndex = Math.max(0, Math.min(next, ttsPlaylist.size() - 1));
@@ -1254,7 +1937,7 @@ public class PanelMainActivity extends AppCompatActivity {
         if (text == null) {
             return out;
         }
-        String[] parts = text.trim().split("(?<=[.!?])\\s+|\\n+");
+        String[] parts = text.trim().split("(?<=[.!?。！？])\\s*|\\n+");
         for (String part : parts) {
             String trimmed = part.trim();
             if (!trimmed.isEmpty()) {
@@ -1333,16 +2016,16 @@ public class PanelMainActivity extends AppCompatActivity {
             raw = screenFrameCapture.copyLatestSource();
         }
         if (raw == null) {
-            Toast.makeText(this, R.string.tts_nothing_to_read, Toast.LENGTH_SHORT).show();
+            PanelAlerts.show(this, R.string.tts_nothing_to_read);
             return;
         }
         Bitmap dialogue = screenFrameCapture.prepareDialogueFrame(raw);
         raw.recycle();
         if (dialogue == null) {
-            Toast.makeText(this, R.string.tts_nothing_to_read, Toast.LENGTH_SHORT).show();
+            PanelAlerts.show(this, R.string.tts_nothing_to_read);
             return;
         }
-        Toast.makeText(this, R.string.tts_reading_now, Toast.LENGTH_SHORT).show();
+        PanelAlerts.show(this, R.string.tts_reading_now);
         dialogueTextExtractor.analyzeForced(dialogue);
         dialogue.recycle();
     }
@@ -1355,6 +2038,16 @@ public class PanelMainActivity extends AppCompatActivity {
         }
         female.setAlpha(male ? 0.45f : 1f);
         maleBtn.setAlpha(male ? 1f : 0.45f);
+    }
+
+    private String listenSmoothnessLabel(int percent) {
+        if (percent >= 70) {
+            return getString(R.string.listen_smoothness_smooth);
+        }
+        if (percent >= 35) {
+            return getString(R.string.listen_smoothness_balanced);
+        }
+        return getString(R.string.listen_smoothness_fast);
     }
 
     private List<OcrRegion> currentOcrRegionsForSave() {
@@ -1415,7 +2108,10 @@ public class PanelMainActivity extends AppCompatActivity {
             return;
         }
         if (settingsDrawer != null && settingsDrawer.getVisibility() == View.VISIBLE) {
-            closeSettingsDrawer(settingsDrawer);
+            closeSideDrawer(settingsDrawer);
+        }
+        if (helpDrawer != null && helpDrawer.getVisibility() == View.VISIBLE) {
+            closeSideDrawer(helpDrawer);
         }
         ocrEditTargetKey = currentOcrAppKey();
         List<OcrRegion> regions;
@@ -1447,14 +2143,14 @@ public class PanelMainActivity extends AppCompatActivity {
 
     private void saveOcrLayoutForSelectedApp() {
         if (ocrEditTargetKey == null) {
-            Toast.makeText(this, R.string.ocr_assign_need_app, Toast.LENGTH_SHORT).show();
+            PanelAlerts.show(this, R.string.ocr_assign_need_app);
             return;
         }
         List<OcrRegion> regions = currentOcrRegionsForSave();
         String label = labelForOcrKey(ocrEditTargetKey);
         ocrRegionStore.saveForApp(ocrEditTargetKey, label, regions);
         screenFrameCapture.setOcrRegions(regions);
-        Toast.makeText(this, getString(R.string.ocr_saved_for, label), Toast.LENGTH_SHORT).show();
+        PanelAlerts.show(this, getString(R.string.ocr_saved_for, label));
         refreshOcrAppStrip();
     }
 
@@ -1608,13 +2304,25 @@ public class PanelMainActivity extends AppCompatActivity {
     private void refreshBrowserChrome() {
         ImageButton back = findViewById(R.id.browser_back_button);
         ImageButton forward = findViewById(R.id.browser_forward_button);
+        boolean canBack;
+        boolean canForward;
+        if (epubSession != null) {
+            // Page turn can always try; chapter edges are handled inside epubTurnPage.
+            canBack = true;
+            canForward = true;
+            setEpubPageBarVisible(true);
+        } else {
+            canBack = drmWebView != null && drmWebView.canGoBack();
+            canForward = drmWebView != null && drmWebView.canGoForward();
+            setEpubPageBarVisible(false);
+        }
         if (back != null) {
-            back.setEnabled(drmWebView != null && drmWebView.canGoBack());
-            back.setAlpha(back.isEnabled() ? 1f : 0.35f);
+            back.setEnabled(canBack);
+            back.setAlpha(canBack ? 1f : 0.35f);
         }
         if (forward != null) {
-            forward.setEnabled(drmWebView != null && drmWebView.canGoForward());
-            forward.setAlpha(forward.isEnabled() ? 1f : 0.35f);
+            forward.setEnabled(canForward);
+            forward.setAlpha(canForward ? 1f : 0.35f);
         }
         refreshBrowserTabs();
         refreshBookmarkButton();
@@ -1622,6 +2330,9 @@ public class PanelMainActivity extends AppCompatActivity {
 
     private void rememberBrowserVisit(WebView view, String url) {
         if (view == null || url == null) {
+            return;
+        }
+        if (epubSession != null || url.startsWith("file:")) {
             return;
         }
         browserLibraryStore.rememberVisit(url, view.getTitle());
@@ -1729,6 +2440,7 @@ public class PanelMainActivity extends AppCompatActivity {
 
     private void showDrmBrowser(String httpsUrl) {
         epubSession = null;
+        setEpubPageBarVisible(false);
         emptyStateText.setVisibility(View.GONE);
         browserHost.setVisibility(View.VISIBLE);
         drmWebView.setVisibility(View.VISIBLE);
@@ -1753,6 +2465,8 @@ public class PanelMainActivity extends AppCompatActivity {
         if (drmWebView == null) {
             return;
         }
+        setEpubPageBarVisible(false);
+        stopTranslateUi();
         hideKeyboard();
         if (drmWebView != null) {
             rememberBrowserVisit(drmWebView, drmWebView.getUrl());
@@ -2309,26 +3023,178 @@ public class PanelMainActivity extends AppCompatActivity {
         }
     }
 
-    private void openSettingsDrawer(View drawer) {
+    private void openSideDrawer(View drawer) {
+        if (drawer == null) {
+            return;
+        }
         drawer.bringToFront();
         drawer.setVisibility(View.VISIBLE);
-        drawer.setTranslationX(drawer.getWidth() > 0 ? drawer.getWidth() : 300f);
+        drawer.setTranslationX(drawer.getWidth() > 0 ? drawer.getWidth() : 320f);
         drawer.setAlpha(0f);
         drawer.animate().translationX(0f).alpha(1f).setDuration(180).start();
     }
 
-    private void closeSettingsDrawer(View drawer) {
+    private void closeSideDrawer(View drawer) {
+        if (drawer == null) {
+            return;
+        }
         drawer.animate()
-                .translationX(drawer.getWidth() > 0 ? drawer.getWidth() : 300f)
+                .translationX(drawer.getWidth() > 0 ? drawer.getWidth() : 320f)
                 .alpha(0f)
                 .setDuration(150)
                 .withEndAction(() -> drawer.setVisibility(View.GONE))
                 .start();
     }
 
+    private void populateHelpContent() {
+        LinearLayout content = findViewById(R.id.help_content);
+        if (content == null) {
+            return;
+        }
+        content.removeAllViews();
+
+        addHelpSection(content, R.string.help_section_start);
+        addHelpCombo(content, R.string.help_start_cast_title, R.string.help_start_cast_body);
+        addHelpCombo(content, R.string.help_start_subs_title, R.string.help_start_subs_body);
+        addHelpCombo(content, R.string.help_start_listen_title, R.string.help_start_listen_body);
+        addHelpCombo(content, R.string.help_start_translate_ocr_title, R.string.help_start_translate_ocr_body);
+        addHelpCombo(content, R.string.help_start_browser_title, R.string.help_start_browser_body);
+        addHelpCombo(content, R.string.help_start_books_title, R.string.help_start_books_body);
+
+        addHelpSection(content, R.string.help_section_downloads);
+        addHelpCombo(content, R.string.help_dl_intro_title, R.string.help_dl_intro_body);
+        addHelpRow(content, R.drawable.ic_listen_ear, R.string.help_dl_listen_title, R.string.help_dl_listen_body);
+        addHelpRow(content, R.drawable.ic_tts_speaker, R.string.help_dl_male_title, R.string.help_dl_male_body);
+        addHelpRow(content, R.drawable.ic_ocr_region, R.string.help_dl_captions_title, R.string.help_dl_captions_body);
+        addHelpRow(content, R.drawable.ic_google_g, R.string.help_dl_google_title, R.string.help_dl_google_body);
+        addHelpCombo(content, R.string.help_dl_bundled_title, R.string.help_dl_bundled_body);
+
+        addHelpSection(content, R.string.help_section_dual);
+        addHelpDual(content,
+                0, R.string.toggle_3d_label, R.string.help_dual_3d_a, R.drawable.bg_circle_button,
+                R.drawable.ic_3d_glasses, 0, R.string.help_dual_3d_b, R.drawable.bg_circle_button,
+                R.string.help_dual_3d_title, R.string.help_dual_3d_body);
+        addHelpDual(content,
+                R.drawable.ic_tts_speaker, 0, R.string.help_dual_tts_a, R.drawable.bg_circle_button_tts_once,
+                R.drawable.ic_tts_loop, 0, R.string.help_dual_tts_b, R.drawable.bg_circle_button_tts_loop,
+                R.string.help_dual_tts_title, R.string.help_dual_tts_body);
+        addHelpDual(content,
+                R.drawable.ic_listen_ear, 0, R.string.help_dual_listen_a, R.drawable.bg_circle_button,
+                R.drawable.ic_listen_ear, 0, R.string.help_dual_listen_b, R.drawable.bg_circle_button_listen_active,
+                R.string.help_dual_listen_title, R.string.help_dual_listen_body);
+        addHelpDual(content,
+                R.drawable.ic_epub_book, 0, R.string.help_dual_books_a, R.drawable.bg_circle_button,
+                R.drawable.ic_epub_book, 0, R.string.help_dual_books_b, R.drawable.bg_circle_button,
+                R.string.help_dual_books_title, R.string.help_dual_books_body);
+        addHelpDual(content,
+                R.drawable.ic_dock_add_new_game, 0, R.string.help_dual_dock_a, R.drawable.bg_circle_button,
+                R.drawable.ic_close, 0, R.string.help_dual_dock_b, R.drawable.bg_circle_button,
+                R.string.help_dual_dock_title, R.string.help_dual_dock_body);
+        addHelpCombo(content, R.string.help_dual_assist_title, R.string.help_dual_assist_body);
+        addHelpCombo(content, R.string.help_dual_depth_title, R.string.help_dual_depth_body);
+
+        addHelpSection(content, R.string.help_section_buttons);
+        addHelpRow(content, R.drawable.ic_power, R.string.help_btn_stop_title, R.string.help_btn_stop_body);
+        addHelpRow(content, R.drawable.ic_3d_glasses, R.string.help_btn_3d_title, R.string.help_btn_3d_body);
+        addHelpRow(content, R.drawable.ic_globe, R.string.help_btn_browser_title, R.string.help_btn_browser_body);
+        addHelpRow(content, R.drawable.ic_epub_book, R.string.help_btn_books_title, R.string.help_btn_books_body);
+        addHelpRow(content, R.drawable.ic_tts_speaker, R.string.help_btn_tts_title, R.string.help_btn_tts_body);
+        addHelpRow(content, R.drawable.ic_listen_ear, R.string.help_btn_listen_title, R.string.help_btn_listen_body);
+        addHelpRow(content, R.drawable.ic_ocr_region, R.string.help_btn_ocr_title, R.string.help_btn_ocr_body);
+        addHelpRow(content, R.drawable.ic_settings_gear, R.string.help_btn_settings_title, R.string.help_btn_settings_body);
+        addHelpRow(content, R.drawable.ic_help, R.string.help_btn_help_title, R.string.help_btn_help_body);
+
+        addHelpSection(content, R.string.help_section_browser);
+        addHelpRow(content, R.drawable.ic_globe, R.string.help_btn_page_translate_title, R.string.help_btn_page_translate_body);
+        addHelpRow(content, R.drawable.ic_google_g, R.string.help_btn_google_translate_title, R.string.help_btn_google_translate_body);
+        addHelpRow(content, R.drawable.ic_tts_speaker, R.string.help_btn_read_title, R.string.help_btn_read_body);
+
+        addHelpSection(content, R.string.help_section_combos);
+        addHelpCombo(content, R.string.help_combo_cast_3d_title, R.string.help_combo_cast_3d_body);
+        addHelpCombo(content, R.string.help_combo_ocr_tts_title, R.string.help_combo_ocr_tts_body);
+        addHelpCombo(content, R.string.help_combo_ocr_translate_title, R.string.help_combo_ocr_translate_body);
+        addHelpCombo(content, R.string.help_combo_listen_title, R.string.help_combo_listen_body);
+        addHelpCombo(content, R.string.help_combo_browser_translate_title, R.string.help_combo_browser_translate_body);
+        addHelpCombo(content, R.string.help_combo_books_import_title, R.string.help_combo_books_import_body);
+        addHelpCombo(content, R.string.help_combo_listen_vs_ocr_title, R.string.help_combo_listen_vs_ocr_body);
+    }
+
+    private void addHelpDual(LinearLayout parent,
+            int iconA, int textA, int labelA, int bgA,
+            int iconB, int textB, int labelB, int bgB,
+            int titleRes, int bodyRes) {
+        View row = LayoutInflater.from(this).inflate(R.layout.item_help_dual, parent, false);
+        TextView title = row.findViewById(R.id.help_dual_title);
+        TextView body = row.findViewById(R.id.help_dual_body);
+        ImageView a = row.findViewById(R.id.help_dual_icon_a);
+        ImageView b = row.findViewById(R.id.help_dual_icon_b);
+        TextView textAv = row.findViewById(R.id.help_dual_text_a);
+        TextView la = row.findViewById(R.id.help_dual_label_a);
+        TextView lb = row.findViewById(R.id.help_dual_label_b);
+        View bgAv = row.findViewById(R.id.help_dual_a_bg);
+        View bgBv = row.findViewById(R.id.help_dual_b_bg);
+        title.setText(titleRes);
+        body.setText(bodyRes);
+        if (textA != 0) {
+            a.setVisibility(View.GONE);
+            textAv.setVisibility(View.VISIBLE);
+            textAv.setText(textA);
+        } else {
+            a.setVisibility(View.VISIBLE);
+            textAv.setVisibility(View.GONE);
+            a.setImageResource(iconA);
+        }
+        if (textB != 0) {
+            b.setVisibility(View.GONE);
+        } else {
+            b.setVisibility(View.VISIBLE);
+            b.setImageResource(iconB);
+        }
+        la.setText(labelA);
+        lb.setText(labelB);
+        bgAv.setBackgroundResource(bgA);
+        bgBv.setBackgroundResource(bgB);
+        parent.addView(row);
+    }
+
+    private void addHelpSection(LinearLayout parent, int titleRes) {
+        TextView section = new TextView(this);
+        section.setText(titleRes);
+        section.setTextColor(getResources().getColor(R.color.help_text_primary, getTheme()));
+        section.setTextSize(14f);
+        section.setTypeface(section.getTypeface(), android.graphics.Typeface.BOLD);
+        int top = parent.getChildCount() == 0 ? 0 : dp(14);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        lp.topMargin = top;
+        parent.addView(section, lp);
+    }
+
+    private void addHelpRow(LinearLayout parent, int iconRes, int titleRes, int bodyRes) {
+        View row = LayoutInflater.from(this).inflate(R.layout.item_help_row, parent, false);
+        ImageView icon = row.findViewById(R.id.help_row_icon);
+        TextView title = row.findViewById(R.id.help_row_title);
+        TextView body = row.findViewById(R.id.help_row_body);
+        icon.setImageResource(iconRes);
+        title.setText(titleRes);
+        body.setText(bodyRes);
+        parent.addView(row);
+    }
+
+    private void addHelpCombo(LinearLayout parent, int titleRes, int bodyRes) {
+        View row = LayoutInflater.from(this).inflate(R.layout.item_help_combo, parent, false);
+        TextView title = row.findViewById(R.id.help_combo_title);
+        TextView body = row.findViewById(R.id.help_combo_body);
+        title.setText(titleRes);
+        body.setText(bodyRes);
+        parent.addView(row);
+    }
+
     @Override
     protected void onPause() {
         persistSession();
+        // Drop LAN import before a game takes focus — never fight VR for process/focus.
+        stopBookImportServerQuiet();
         glesZMeshView.onPause();
         super.onPause();
     }
@@ -2341,6 +3207,16 @@ public class PanelMainActivity extends AppCompatActivity {
         // A pinned app may have been uninstalled while we were in the background;
         // re-resolving on every resume keeps the dock honest without extra bookkeeping.
         refreshDock();
+        // Book import is user-started only (EPUB long-press). Do not auto-start on resume.
+    }
+
+    @Override
+    public void onWindowFocusChanged(boolean hasFocus) {
+        super.onWindowFocusChanged(hasFocus);
+        // If the panel loses focus (e.g. VR game), stop PC listen so it can't fight the title.
+        if (!hasFocus) {
+            stopBookImportServerQuiet();
+        }
     }
 
     /**
@@ -2408,10 +3284,11 @@ public class PanelMainActivity extends AppCompatActivity {
     }
 
     private void launchGame(InstalledAppInfo app) {
+        // Don't keep LAN import alive while we hand focus to a VR title.
+        stopBookImportServerQuiet();
         Intent launchIntent = packageManager.getLaunchIntentForPackage(app.packageName);
         if (launchIntent == null) {
-            Toast.makeText(this, getString(R.string.launch_failed_message, app.label),
-                    Toast.LENGTH_SHORT).show();
+            PanelAlerts.show(this, getString(R.string.launch_failed_message, app.label));
             return;
         }
 
@@ -2470,8 +3347,7 @@ public class PanelMainActivity extends AppCompatActivity {
 
         Intent launchIntent = packageManager.getLaunchIntentForPackage(app.packageName);
         if (launchIntent == null) {
-            Toast.makeText(this, getString(R.string.launch_failed_message, app.label),
-                    Toast.LENGTH_SHORT).show();
+            PanelAlerts.show(this, getString(R.string.launch_failed_message, app.label));
             return;
         }
 
@@ -2994,14 +3870,37 @@ public class PanelMainActivity extends AppCompatActivity {
             new java.util.concurrent.atomic.AtomicBoolean(false);
 
     /**
-     * Keeps the "3D" toggle's round button the same background color as the power/
-     * settings buttons (set in the layout) so all three share one palette, while still
-     * showing on/off state via opacity + accent text color instead of a different
-     * background color.
+     * Off → "3D" text. On → 3D glasses icon (same circle button chrome).
      */
     private void updateStereoToggleLook(ToggleButton toggleStereo3d, boolean isOn) {
         toggleStereo3d.setAlpha(1f);
-        toggleStereo3d.setTextColor(getResources().getColor(R.color.text_primary, getTheme()));
+        int color = getResources().getColor(R.color.text_primary, getTheme());
+        toggleStereo3d.setTextColor(color);
+        String label = getString(R.string.toggle_3d_label);
+        // Clear any previous compound/foreground so off/on don't stack.
+        toggleStereo3d.setCompoundDrawables(null, null, null, null);
+        toggleStereo3d.setForeground(null);
+        if (isOn) {
+            toggleStereo3d.setTextOn("");
+            toggleStereo3d.setTextOff(label);
+            toggleStereo3d.setText("");
+            android.graphics.drawable.Drawable glasses =
+                    ContextCompat.getDrawable(this, R.drawable.ic_3d_glasses);
+            if (glasses != null) {
+                glasses = glasses.mutate();
+                glasses.setTint(color);
+                // Match ImageButton icon padding (globe/gear use ~10dp).
+                int pad = Math.round(10f * getResources().getDisplayMetrics().density);
+                toggleStereo3d.setForeground(glasses);
+                toggleStereo3d.setForegroundGravity(android.view.Gravity.CENTER);
+                toggleStereo3d.setPadding(pad, pad, pad, pad);
+            }
+        } else {
+            toggleStereo3d.setTextOn(label);
+            toggleStereo3d.setTextOff(label);
+            toggleStereo3d.setText(label);
+            toggleStereo3d.setPadding(0, 0, 0, 0);
+        }
     }
 
     private void bindAdvanced3dSettings() {
@@ -3172,6 +4071,12 @@ public class PanelMainActivity extends AppCompatActivity {
         settingsStore.setDepthModeStatic(stills);
         lastStaticDepthFingerprint = Integer.MIN_VALUE;
         pendingStaticFingerprint = Integer.MIN_VALUE;
+        if (depthEstimator != null) {
+            depthEstimator.resetTemporal();
+        }
+        if (depthStaticEstimator != null) {
+            depthStaticEstimator.resetTemporal();
+        }
         if (stills) {
             ensureStaticDepthModel();
         }
@@ -3239,8 +4144,14 @@ public class PanelMainActivity extends AppCompatActivity {
         if (edgeFadeFraction <= 0.001f || meshCols <= 0) {
             return 1f;
         }
-        float cells = Math.max(1f, meshCols * edgeFadeFraction);
-        return Math.min(1f, Math.min(col, meshCols - col) / cells);
+        // Softness only pins the outermost column(s). A wide fade bows the whole frame
+        // into a "window" while content stays flat — exactly the Static look we hate.
+        float cells = Math.max(1f, Math.min(2f, meshCols * edgeFadeFraction * 0.25f));
+        float dist = Math.min(col, meshCols - col);
+        if (dist >= cells) {
+            return 1f;
+        }
+        return 0.2f + 0.8f * (dist / cells);
     }
 
     private float[][] flatParallaxGrid() {
@@ -3292,7 +4203,8 @@ public class PanelMainActivity extends AppCompatActivity {
             float[][] parallaxGrid = cachedParallaxGrid;
             Rect leftEye = containFit(new Rect(0, 0, halfWidth, canvas.getHeight()),
                     frame.getWidth(), frame.getHeight());
-            Rect rightEye = containFit(new Rect(halfWidth, 0, canvas.getWidth(), canvas.getHeight()),
+            // Same width as left — avoid odd-pixel right eye looking wider.
+            Rect rightEye = containFit(new Rect(halfWidth, 0, halfWidth + halfWidth, canvas.getHeight()),
                     frame.getWidth(), frame.getHeight());
             drawEyeWithParallaxMesh(canvas, frame, leftEye, parallaxGrid, 1);
             drawEyeWithParallaxMesh(canvas, frame, rightEye, parallaxGrid, -1);
@@ -3353,29 +4265,24 @@ public class PanelMainActivity extends AppCompatActivity {
                 float[][] depth01 = estimator.estimate(frameCopy, gridCols + 1, gridRows + 1);
                 if (depth01 != null) {
                     float[][] depthCopy = new float[gridRows + 1][gridCols + 1];
-                    float min = minParallaxPx();
-                    float max = maxParallaxPx();
-                    float[][] grid = new float[gridRows + 1][gridCols + 1];
-                    float sum = 0f;
                     for (int row = 0; row <= gridRows; row++) {
                         for (int col = 0; col <= gridCols; col++) {
                             float d = depth01[row][col];
                             if (invert) {
                                 d = 1f - d;
                             }
-                            if (depthCopy != null) {
-                                depthCopy[row][col] = d;
-                            }
-                            float shift = min + d * (max - min);
-                            grid[row][col] = shift;
-                            sum += shift;
+                            depthCopy[row][col] = d;
                         }
                     }
-                    int cellCount = (gridRows + 1) * (gridCols + 1);
-                    float mean = sum / cellCount;
+                    // Reference + flatten frame borders so letterbox/chrome don't bow
+                    // the window. Content pop comes from interior deltas only.
+                    float ref01 = centerDepth01(depthCopy);
+                    flattenDepthBorder(depthCopy, ref01, 2);
+                    float span = (maxParallaxPx() - minParallaxPx()) * (stills ? 1.9f : 1.3f);
+                    float[][] grid = new float[gridRows + 1][gridCols + 1];
                     for (int row = 0; row <= gridRows; row++) {
                         for (int col = 0; col <= gridCols; col++) {
-                            grid[row][col] -= mean;
+                            grid[row][col] = (depthCopy[row][col] - ref01) * span;
                         }
                     }
                     cachedParallaxGrid = grid;
@@ -3389,6 +4296,46 @@ public class PanelMainActivity extends AppCompatActivity {
                 depthInferenceBusy.set(false);
             }
         });
+    }
+
+    private static float centerDepth01(float[][] depth) {
+        if (depth == null || depth.length < 3 || depth[0].length < 3) {
+            return 0.5f;
+        }
+        int rows = depth.length;
+        int cols = depth[0].length;
+        int r0 = rows / 5;
+        int r1 = rows - 1 - r0;
+        int c0 = cols / 5;
+        int c1 = cols - 1 - c0;
+        float s = 0f;
+        int n = 0;
+        for (int r = r0; r <= r1; r++) {
+            for (int c = c0; c <= c1; c++) {
+                s += depth[r][c];
+                n++;
+            }
+        }
+        return n == 0 ? 0.5f : s / n;
+    }
+
+    /** Pull frame-border depths toward the content reference so edges don't warp. */
+    private static void flattenDepthBorder(float[][] depth, float ref01, int margin) {
+        if (depth == null || margin <= 0) {
+            return;
+        }
+        int rows = depth.length - 1;
+        int cols = depth[0].length - 1;
+        for (int r = 0; r <= rows; r++) {
+            for (int c = 0; c <= cols; c++) {
+                int dist = Math.min(Math.min(r, rows - r), Math.min(c, cols - c));
+                if (dist >= margin) {
+                    continue;
+                }
+                float t = dist / (float) margin;
+                depth[r][c] = depth[r][c] * t + ref01 * (1f - t);
+            }
+        }
     }
 
     private static int stillDepthFingerprint(Bitmap frame) {
@@ -3427,17 +4374,8 @@ public class PanelMainActivity extends AppCompatActivity {
         int meshCols = parallaxGrid[0].length - 1;
         float[] verts = new float[(meshCols + 1) * (meshRows + 1) * 2];
 
-        // Edge fade: taper the shift to zero over the outermost few columns instead of
-        // mapping the bitmap onto an overscanned (wider-than-eyeBounds) area. The
-        // overscan approach that used to be here shrank the *visible fraction* of the
-        // bitmap on every frame (u=0/1 mapped outside the clip rect even with zero
-        // shift), which is exactly the "whole image looks cropped/zoomed in a little"
-        // bug — it wasn't only hiding tearing during a shift, it was permanently cropping
-        // in by the overscan margin on every single frame. Fading the shift itself near
-        // the edges avoids gaps without ever remapping u=0..1 outside eyeBounds, so the
-        // full source image is always visible edge-to-edge.
-        int edgeFadeCells = Math.max(1, meshCols / 8);
-
+        // Edge shift is already flattened in the depth grid; only a 1-column pin remains
+        // via edgeFadeForColumn so the bitmap never samples outside the eye clip.
         int k = 0;
         for (int row = 0; row <= meshRows; row++) {
             float v = row / (float) meshRows;
@@ -3494,13 +4432,19 @@ public class PanelMainActivity extends AppCompatActivity {
         controlRow.setBackgroundColor(casting ? chrome : Color.TRANSPARENT);
         dockContainer.setBackgroundResource(
                 casting ? R.drawable.bg_dock_pill_cast : R.drawable.bg_dock_pill);
-        settingsDrawer.setBackgroundResource(
-                casting ? R.drawable.bg_settings_drawer_cast : R.drawable.bg_frosted_panel);
-        int closeBg = getResources().getColor(
-                casting ? R.color.settings_drawer_cast : R.color.dock_icon_bg, getTheme());
-        int closeText = getResources().getColor(R.color.text_primary, getTheme());
+        // Always opaque dark — frosted idle glass washes out Settings / Help text.
+        settingsDrawer.setBackgroundResource(R.drawable.bg_settings_drawer);
+        if (helpDrawer != null) {
+            helpDrawer.setBackgroundResource(R.drawable.bg_help_drawer);
+        }
+        int closeBg = getResources().getColor(R.color.dock_icon_bg, getTheme());
+        int closeText = getResources().getColor(R.color.help_text_primary, getTheme());
         settingsCloseButton.setBackgroundTintList(android.content.res.ColorStateList.valueOf(closeBg));
         settingsCloseButton.setTextColor(closeText);
+        if (helpCloseButton != null) {
+            helpCloseButton.setBackgroundTintList(android.content.res.ColorStateList.valueOf(closeBg));
+            helpCloseButton.setTextColor(closeText);
+        }
         getWindow().getDecorView().setBackgroundColor(casting ? chrome : idle);
     }
 
@@ -3532,11 +4476,13 @@ public class PanelMainActivity extends AppCompatActivity {
         resizeSquareView(findViewById(R.id.epub_button), buttonSize, buttonPad);
         resizeSquareView(findViewById(R.id.tts_prev_button), buttonSize, buttonPad);
         resizeSquareView(findViewById(R.id.tts_speak_button), buttonSize, buttonPad);
+        resizeSquareView(findViewById(R.id.listen_button), buttonSize, buttonPad);
         resizeSquareView(findViewById(R.id.tts_play_button), buttonSize, buttonPad);
         resizeSquareView(findViewById(R.id.tts_pause_button), buttonSize, buttonPad);
         resizeSquareView(findViewById(R.id.tts_stop_button), buttonSize, buttonPad);
         resizeSquareView(findViewById(R.id.tts_next_button), buttonSize, buttonPad);
         resizeSquareView(findViewById(R.id.ocr_region_button), buttonSize, buttonPad);
+        resizeSquareView(findViewById(R.id.help_button), buttonSize, buttonPad);
         resizeSquareView(findViewById(R.id.settings_button), buttonSize, buttonPad);
         refreshTtsSpeakButton();
 
@@ -3615,6 +4561,13 @@ public class PanelMainActivity extends AppCompatActivity {
             mirrorServiceBound = false;
             mirrorCaptureService = null;
         }
+        try {
+            unregisterReceiver(bookImportReceiver);
+        } catch (Exception ignored) {
+        }
+        if (bookImportRunning) {
+            stopBookImportServerQuiet();
+        }
         if (depthEstimator != null) {
             depthEstimator.close();
             depthEstimator = null;
@@ -3650,7 +4603,7 @@ public class PanelMainActivity extends AppCompatActivity {
     private void showAddGameDialog() {
         List<InstalledAppInfo> candidates = queryLaunchableApps();
         if (candidates.isEmpty()) {
-            Toast.makeText(this, "No more installed apps to add", Toast.LENGTH_SHORT).show();
+            PanelAlerts.show(this, "No more installed apps to add");
             return;
         }
 

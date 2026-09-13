@@ -1,7 +1,6 @@
 package com.spatiallauncher.app.ui;
 
 import android.content.Context;
-import android.content.res.AssetManager;
 import android.util.Log;
 
 import ai.onnxruntime.OnnxTensor;
@@ -12,8 +11,6 @@ import org.json.JSONObject;
 
 import java.io.File;
 import java.io.FileInputStream;
-import java.io.FileOutputStream;
-import java.io.InputStream;
 import java.nio.LongBuffer;
 import java.util.HashMap;
 import java.util.Map;
@@ -21,8 +18,8 @@ import java.util.Map;
 /** One bundled OPUS-MT language pair (encoder + decoder ONNX). */
 final class MarianOnnxPair {
     private static final String TAG = "MarianOnnx";
-    private static final int MAX_SRC = 96;
-    private static final int MAX_TGT = 64;
+    private static final int MAX_SRC = 256;
+    private static final int MAX_TGT = 160;
 
     private final OrtEnvironment env;
     private final OrtSession encoder;
@@ -39,7 +36,7 @@ final class MarianOnnxPair {
     private final String decoderLogitsName;
 
     static MarianOnnxPair load(Context context, OrtEnvironment env, String pairId) throws Exception {
-        File dir = copyPair(context, pairId);
+        File dir = OfflineModelPack.ensureTranslatePair(context, pairId);
         JSONObject config = new JSONObject(readUtf8(new File(dir, "config.json")));
         int pad = config.optInt("pad_token_id", 60715);
         int eos = config.optInt("eos_token_id", 0);
@@ -188,29 +185,6 @@ final class MarianOnnxPair {
             }
         }
         return names.isEmpty() ? null : names.iterator().next();
-    }
-
-    private static File copyPair(Context context, String pairId) throws Exception {
-        File dest = new File(context.getFilesDir(), "translate/" + pairId);
-        dest.mkdirs();
-        AssetManager assets = context.getAssets();
-        String prefix = "translate/" + pairId + "/";
-        String[] files = {"encoder.onnx", "decoder.onnx", "pieces.tsv", "config.json"};
-        for (String name : files) {
-            File out = new File(dest, name);
-            if (out.exists() && out.length() > 64) {
-                continue;
-            }
-            try (InputStream in = assets.open(prefix + name);
-                 FileOutputStream fos = new FileOutputStream(out)) {
-                byte[] buf = new byte[8192];
-                int n;
-                while ((n = in.read(buf)) >= 0) {
-                    fos.write(buf, 0, n);
-                }
-            }
-        }
-        return dest;
     }
 
     private static String readUtf8(File file) throws Exception {

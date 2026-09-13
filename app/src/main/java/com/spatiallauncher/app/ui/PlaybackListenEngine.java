@@ -32,8 +32,12 @@ final class PlaybackListenEngine {
     private static final String MODEL_FILE = "model.int8.onnx";
     private static final int SAMPLE_RATE = 16000;
     private static final float SPEECH_RMS = 0.012f;
-    private static final long MAX_UTTERANCE_MS = 8000;
-    private static final long SILENCE_FLUSH_MS = 700;
+    /** Original smooth defaults (slider = 100). */
+    private static final long SMOOTH_MAX_UTTERANCE_MS = 8000;
+    private static final long SMOOTH_SILENCE_FLUSH_MS = 700;
+    /** Fastest slider end (0): smaller chunks, less lag, choppier. */
+    private static final long FAST_MAX_UTTERANCE_MS = 2500;
+    private static final long FAST_SILENCE_FLUSH_MS = 350;
 
     interface Listener {
         void onTranscript(String text);
@@ -45,20 +49,35 @@ final class PlaybackListenEngine {
     private final File modelsRoot;
     private final Handler main = new Handler(Looper.getMainLooper());
     private final AtomicBoolean running = new AtomicBoolean(false);
-    private final OnDeviceTranslator translator;
+    private final ListenMtTranslator listenMt;
     private volatile OfflineRecognizer recognizer;
     private volatile AudioRecord recorder;
     private volatile Thread captureThread;
     private volatile Listener listener;
+    private volatile long maxUtteranceMs = SMOOTH_MAX_UTTERANCE_MS;
+    private volatile long silenceFlushMs = SMOOTH_SILENCE_FLUSH_MS;
+    private volatile int minUtteranceSamples = SAMPLE_RATE / 4;
 
     PlaybackListenEngine(Context context) {
         app = context.getApplicationContext();
         modelsRoot = new File(app.getFilesDir(), "asr");
-        translator = OnDeviceTranslator.get(app);
+        listenMt = ListenMtTranslator.get(app);
     }
 
     void setListener(Listener listener) {
         this.listener = listener;
+    }
+
+    /**
+     * @param smoothnessPercent 0 = fast/small chunks, 100 = smooth (original). Live while Listen runs.
+     */
+    void setSmoothnessPercent(int smoothnessPercent) {
+        float t = Math.max(0, Math.min(100, smoothnessPercent)) / 100f;
+        maxUtteranceMs = Math.round(FAST_MAX_UTTERANCE_MS
+                + t * (SMOOTH_MAX_UTTERANCE_MS - FAST_MAX_UTTERANCE_MS));
+        silenceFlushMs = Math.round(FAST_SILENCE_FLUSH_MS
+                + t * (SMOOTH_SILENCE_FLUSH_MS - FAST_SILENCE_FLUSH_MS));
+        minUtteranceSamples = t >= 0.5f ? SAMPLE_RATE / 4 : SAMPLE_RATE / 5;
     }
 
     boolean isRunning() {
@@ -73,8 +92,7 @@ final class PlaybackListenEngine {
         if (!running.compareAndSet(false, true)) {
             return;
         }
-        translator.ensureReady(ok -> { });
-        status("Unpacking listen model…");
+        status("Starting listen…");
         captureThread = new Thread(() -> {
             try {
                 ensureModel();
@@ -143,6 +161,7 @@ final class PlaybackListenEngine {
         long speechStart = 0;
         long lastSpeech = 0;
         boolean inSpeech = false;
+        long lastRmsLog = 0;
         while (running.get()) {
             int n = rec.read(buf, 0, buf.length);
             if (n <= 0) {
@@ -158,6 +177,11 @@ final class PlaybackListenEngine {
             }
             rms = (float) Math.sqrt(rms / Math.max(1, n));
             long now = System.currentTimeMillis();
+            if (now - lastRmsLog >= 2000L) {
+                lastRmsLog = now;
+                Log.i(TAG, "audio rms=" + String.format(java.util.Locale.US, "%.4f", rms)
+                        + " thresh=" + SPEECH_RMS + (rms >= SPEECH_RMS ? " SPEECH" : " quiet"));
+            }
             if (rms >= SPEECH_RMS) {
                 if (!inSpeech) {
                     inSpeech = true;
@@ -169,9 +193,9 @@ final class PlaybackListenEngine {
                 }
                 lastSpeech = now;
             }
-            boolean tooLong = inSpeech && now - speechStart >= MAX_UTTERANCE_MS;
-            boolean silence = inSpeech && now - lastSpeech >= SILENCE_FLUSH_MS;
-            if (inSpeech && (tooLong || silence) && utterance.size() > SAMPLE_RATE / 4) {
+            boolean tooLong = inSpeech && now - speechStart >= maxUtteranceMs;
+            boolean silence = inSpeech && now - lastSpeech >= silenceFlushMs;
+            if (inSpeech && (tooLong || silence) && utterance.size() > minUtteranceSamples) {
                 float[] samples = new float[utterance.size()];
                 for (int i = 0; i < utterance.size(); i++) {
                     samples[i] = utterance.get(i);
@@ -203,10 +227,10 @@ final class PlaybackListenEngine {
             }
             Log.i(TAG, "ASR: " + text);
             final String raw = text;
-            translator.toEnglish(raw, en -> {
+            listenMt.toEnglish(raw, en -> {
                 Listener sink = listener;
                 if (sink != null) {
-                    main.post(() -> sink.onTranscript(en));
+                    sink.onTranscript(en);
                 }
             });
         } catch (Throwable t) {
@@ -245,13 +269,16 @@ final class PlaybackListenEngine {
             return null;
         }
         try {
-            AudioPlaybackCaptureConfiguration cap =
+            // Capture MEDIA/GAME from the projected session — do NOT match our own UID
+            // (that only hears SpatialLauncher / Piper silence). Exclude ourselves so
+            // spoken translations don't get re-captured into the STT loop.
+            AudioPlaybackCaptureConfiguration.Builder capBuilder =
                     new AudioPlaybackCaptureConfiguration.Builder(projection)
                             .addMatchingUsage(AudioAttributes.USAGE_MEDIA)
                             .addMatchingUsage(AudioAttributes.USAGE_GAME)
                             .addMatchingUsage(AudioAttributes.USAGE_UNKNOWN)
-                            .addMatchingUid(Process.myUid())
-                            .build();
+                            .excludeUid(Process.myUid());
+            AudioPlaybackCaptureConfiguration cap = capBuilder.build();
             AudioFormat format = new AudioFormat.Builder()
                     .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
                     .setSampleRate(SAMPLE_RATE)
@@ -259,11 +286,18 @@ final class PlaybackListenEngine {
                     .build();
             int min = AudioRecord.getMinBufferSize(
                     SAMPLE_RATE, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT);
-            return new AudioRecord.Builder()
+            AudioRecord record = new AudioRecord.Builder()
                     .setAudioFormat(format)
                     .setBufferSizeInBytes(Math.max(min, SAMPLE_RATE))
                     .setAudioPlaybackCaptureConfig(cap)
                     .build();
+            if (record.getState() != AudioRecord.STATE_INITIALIZED) {
+                Log.w(TAG, "AudioRecord not initialized");
+                record.release();
+                return null;
+            }
+            Log.i(TAG, "Playback capture ready (exclude self uid=" + Process.myUid() + ")");
+            return record;
         } catch (Throwable t) {
             Log.w(TAG, "AudioRecord playback capture failed", t);
             return null;

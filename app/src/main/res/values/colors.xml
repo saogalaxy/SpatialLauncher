@@ -9,6 +9,10 @@
     <color name="panel_border">#3DFFFFFF</color>
     <color name="cast_chrome">#FF000000</color>
     <color name="settings_drawer_cast">#F2111114</color>
+    <color name="help_drawer_bg">#F214141A</color>
+    <color name="help_drawer_border">#40FFFFFF</color>
+    <color name="help_text_primary">#FFFFFFFF</color>
+    <color name="help_text_secondary">#FFC8CDD9</color>
     <color name="dock_pill_bg">#66FFFFFF</color>
     <color name="dock_pill_bg_cast">#2EFFFFFF</color>
     <color name="dock_icon_bg">#33FFFFFF</color>
@@ -19,5 +23,6 @@
     <color name="control_tint">#FF9AABB8</color>
     <color name="tts_once_bg">#FF16A34A</color>
     <color name="tts_loop_bg">#FF2563EB</color>
+    <color name="listen_active_bg">#FFDC2626</color>
     <color name="divider">#22FFFFFF</color>
 </resources>

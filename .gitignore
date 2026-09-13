@@ -12,4 +12,13 @@ captures/
 .externalNativeBuild/
 app/src/main/assets/translate/**/*.onnx
 app/src/main/assets/translate/**/tokenizer.json
+app/src/main/assets/native/
 app/src/main/assets/models/**/*.tar.bz2
+app/src/main/assets/models/qwen/
+# One-off capture dumps at repo root (keep curated shots under docs/screenshots/)
+/headset-*.png
+/headset-*.jpg
+/quest-*.png
+/quest-*.jpg
+/ocr-settings-shot.png
+/branding/

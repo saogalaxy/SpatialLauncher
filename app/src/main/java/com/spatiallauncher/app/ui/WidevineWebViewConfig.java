@@ -174,26 +174,37 @@ public final class WidevineWebViewConfig {
             }
         });
 
-        // Step 3: keep navigation inside this WebView (never hand off to an external
-        // browser). return false = WebView loads the URL itself. Initial loads still go
-        // through loadSecureUrl() so the session starts on https:// for Widevine.
+        // Keep navigation in-app. Main-frame http:// is rewritten to https:// so Chromium
+        // never hits ERR_CLEARTEXT_NOT_PERMITTED from redirects or in-page links.
         webView.setWebViewClient(new WebViewClient() {
             @Override
             public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
-                // Keeps navigation inside the built-in browser
-                return false;
+                if (request == null || request.getUrl() == null) {
+                    return false;
+                }
+                if (!request.isForMainFrame()) {
+                    return false;
+                }
+                return loadHttpsInstead(view, request.getUrl().toString());
             }
 
             @Override
             @SuppressWarnings("deprecation")
             public boolean shouldOverrideUrlLoading(WebView view, String url) {
-                // Keeps navigation inside the built-in browser
-                return false;
+                return loadHttpsInstead(view, url);
+            }
+
+            @Override
+            public void onPageStarted(WebView view, String url, android.graphics.Bitmap favicon) {
+                String https = upgradeHttpToHttps(url);
+                if (https != null && view != null) {
+                    view.stopLoading();
+                    view.loadUrl(https);
+                }
             }
 
             @Override
             public void onPageFinished(WebView view, String url) {
-                // Verification: check Widevine + EME with key system com.widevine.alpha.
                 probeEmeWidevineSupport(view, emeCallback);
                 if (urlCallback != null && url != null && !url.isEmpty()) {
                     urlCallback.onUrlChanged(view, url);
@@ -270,12 +281,33 @@ public final class WidevineWebViewConfig {
         webView.loadUrl(secure);
     }
 
-    private static String toHttpsUrl(String url) {
+    /** @return true if navigation was consumed by an https:// reload. */
+    static boolean loadHttpsInstead(WebView view, String url) {
+        String https = upgradeHttpToHttps(url);
+        if (view == null || https == null) {
+            return false;
+        }
+        view.loadUrl(https);
+        return true;
+    }
+
+    static String upgradeHttpToHttps(String url) {
+        if (url == null || url.isEmpty()) {
+            return null;
+        }
+        if (!url.regionMatches(true, 0, "http://", 0, 7)) {
+            return null;
+        }
+        return "https://" + url.substring(7);
+    }
+
+    static String toHttpsUrl(String url) {
+        String upgraded = upgradeHttpToHttps(url);
+        if (upgraded != null) {
+            return upgraded;
+        }
         if (url.startsWith("https://")) {
             return url;
-        }
-        if (url.startsWith("http://")) {
-            return "https://" + url.substring("http://".length());
         }
         if (url.contains("://")) {
             return null;

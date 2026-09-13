@@ -455,32 +455,40 @@ public class GlesZMeshView {
                 return;
             }
             float[][] used = smooth ? blendDepth(depth) : depth;
-            rebuildMesh(
-                    used,
-                    gpuFrame.getWidth() / (float) Math.max(1, gpuFrame.getHeight()),
-                    strength,
-                    fade);
+            float aspect = gpuFrame.getWidth() / (float) Math.max(1, gpuFrame.getHeight());
             GLES20.glUseProgram(program);
             GLES20.glActiveTexture(GLES20.GL_TEXTURE0);
             GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, texId);
+            if (!stereo) {
+                rebuildMesh(used, aspect, strength, fade, converge, 0f);
+                bindMeshAttrs();
+                GLES20.glViewport(0, 0, viewportW, viewportH);
+                drawEye(viewportW / (float) viewportH);
+            } else {
+                // Canvas-style: same camera, opposite horizontal parallax per eye.
+                // Perspective+Z was causing fisheye suck-in; dual IPD+mesh caused ghosting.
+                int half = Math.max(1, viewportW / 2);
+                // Identical eye rects — using (viewportW - half) on the right made that eye
+                // one pixel wider while FOV still used `half`, so L looked thin / R wide.
+                float eyeA = half / (float) viewportH;
+                rebuildMesh(used, aspect, strength, fade, converge, +1f);
+                bindMeshAttrs();
+                GLES20.glViewport(0, 0, half, viewportH);
+                drawEye(eyeA);
+                rebuildMesh(used, aspect, strength, fade, converge, -1f);
+                bindMeshAttrs();
+                GLES20.glViewport(half, 0, half, viewportH);
+                drawEye(eyeA);
+            }
+        }
+
+        private void bindMeshAttrs() {
             posBuf.position(0);
             uvBuf.position(0);
             GLES20.glVertexAttribPointer(aPos, 3, GLES20.GL_FLOAT, false, 0, posBuf);
             GLES20.glVertexAttribPointer(aUv, 2, GLES20.GL_FLOAT, false, 0, uvBuf);
             GLES20.glEnableVertexAttribArray(aPos);
             GLES20.glEnableVertexAttribArray(aUv);
-            if (!stereo) {
-                GLES20.glViewport(0, 0, viewportW, viewportH);
-                drawEye(0f, viewportW / (float) viewportH);
-            } else {
-                int half = Math.max(1, viewportW / 2);
-                float eyeA = half / (float) viewportH;
-                float ipd = 0.028f + (converge / 600f);
-                GLES20.glViewport(0, 0, half, viewportH);
-                drawEye(+ipd, eyeA);
-                GLES20.glViewport(half, 0, viewportW - half, viewportH);
-                drawEye(-ipd, eyeA);
-            }
         }
 
         private float[][] blendDepth(float[][] incoming) {
@@ -493,31 +501,42 @@ public class GlesZMeshView {
                 smoothDepth = copyDepth(incoming);
                 return smoothDepth;
             }
+            // Light temporal only — 0.9 keep made Live GLES wave/lag.
             for (int r = 0; r < incoming.length; r++) {
                 for (int c = 0; c < incoming[r].length; c++) {
-                    smoothDepth[r][c] = smoothDepth[r][c] * 0.9f + incoming[r][c] * 0.1f;
+                    smoothDepth[r][c] = smoothDepth[r][c] * 0.35f + incoming[r][c] * 0.65f;
                 }
             }
             return smoothDepth;
         }
 
-        private void drawEye(float camX, float projAspect) {
+        private void drawEye(float projAspect) {
             float[] p = new float[16];
             float[] v = new float[16];
             float[] mvp = new float[16];
             float va = Math.max(0.2f, projAspect);
-            float pad = liveMesh ? 1.24f : 1.08f;
-            float needH = Math.max(1f, planeW / va) * pad;
+            // Tight FOV so the plane fills the eye without overscan "recess"/mirror edges.
+            float needH = Math.max(1f, planeW / va) * 1.02f;
             float fovY = (float) Math.toDegrees(2.0 * Math.atan((needH * 0.5f) / 1.0));
             Matrix.perspectiveM(p, 0, fovY, va, 0.25f, 8f);
-            Matrix.setLookAtM(v, 0, camX, 0f, 0f, camX, 0f, -1f, 0f, 1f, 0f);
+            Matrix.setLookAtM(v, 0, 0f, 0f, 0f, 0f, 0f, -1f, 0f, 1f, 0f);
             Matrix.multiplyMM(mvp, 0, p, 0, v, 0);
             GLES20.glUniformMatrix4fv(uMvp, 1, false, mvp, 0);
             idxBuf.position(0);
             GLES20.glDrawElements(GLES20.GL_TRIANGLES, indexCount, GLES20.GL_UNSIGNED_SHORT, idxBuf);
         }
 
-        private void rebuildMesh(float[][] depth, float frameAspect, float strength, float fade) {
+        /**
+         * Flat Z plane + horizontal parallax (Canvas mesh equivalent). Depth no longer
+         * moves vertices in Z — that perspective foreshortening was the fisheye suck-in.
+         */
+        private void rebuildMesh(
+                float[][] depth,
+                float frameAspect,
+                float strength,
+                float fade,
+                float convergePx,
+                float eyeSign) {
             int rows = 12;
             int cols = 16;
             if (depth != null && depth.length >= 2 && depth[0].length >= 2) {
@@ -527,28 +546,26 @@ public class GlesZMeshView {
             int verts = (rows + 1) * (cols + 1);
             float[] pos = new float[verts * 3];
             float[] uv = new float[verts * 2];
-            float mean = meanDepth(depth);
-            float pop = (liveMesh ? 0.07f : 0.20f) * Math.max(0.2f, strength);
+            float ref = centerDepthRef(depth);
             planeW = Math.max(0.4f, frameAspect);
+            float parallax = planeW * 0.034f * Math.max(0.2f, strength);
+            float converge = (convergePx / 14f) * planeW * 0.01f;
             int i = 0;
             int t = 0;
             for (int r = 0; r <= rows; r++) {
                 float vv = r / (float) rows;
-                float fadeR = edge(r, rows, fade);
                 for (int c = 0; c <= cols; c++) {
                     float u = c / (float) cols;
-                    float fadeC = edge(c, cols, fade) * fadeR;
                     float d = 0.5f;
                     if (depth != null && r < depth.length && c < depth[r].length) {
                         d = depth[r][c];
-                        if (liveMesh) {
-                            d = 0.5f + (d - 0.5f) * 0.55f;
-                        }
                     }
-                    float lift = (d - mean) * fadeC * pop;
-                    pos[i++] = (u - 0.5f) * planeW;
+                    float borderPin = outerRingPin(r, rows, c, cols, fade);
+                    float delta = (d - ref) * borderPin;
+                    float xShift = eyeSign * (delta * parallax + converge);
+                    pos[i++] = (u - 0.5f) * planeW + xShift;
                     pos[i++] = (0.5f - vv);
-                    pos[i++] = -1f + lift;
+                    pos[i++] = -1f;
                     uv[t++] = u;
                     uv[t++] = vv;
                 }
@@ -574,6 +591,37 @@ public class GlesZMeshView {
             idxBuf = bb.asShortBuffer();
             idxBuf.put(idx);
             idxBuf.position(0);
+        }
+
+        /** Mean of the inner ~60% — ignores letterbox / chrome that bias global mean. */
+        private static float centerDepthRef(float[][] depth) {
+            if (depth == null || depth.length < 3 || depth[0].length < 3) {
+                return meanDepth(depth);
+            }
+            int rows = depth.length;
+            int cols = depth[0].length;
+            int r0 = rows / 5;
+            int r1 = rows - 1 - r0;
+            int c0 = cols / 5;
+            int c1 = cols - 1 - c0;
+            float s = 0f;
+            int n = 0;
+            for (int r = r0; r <= r1; r++) {
+                for (int c = c0; c <= c1; c++) {
+                    s += depth[r][c];
+                    n++;
+                }
+            }
+            return n == 0 ? 0.5f : s / n;
+        }
+
+        /** Soft-pin only the outermost ring so the frame doesn't tear. */
+        private static float outerRingPin(int r, int rows, int c, int cols, float fade) {
+            if (fade <= 0.001f) {
+                return 1f;
+            }
+            boolean outer = r == 0 || r == rows || c == 0 || c == cols;
+            return outer ? 0.15f : 1f;
         }
 
         private static Bitmap scaleForGpu(Bitmap frame) {
@@ -607,14 +655,6 @@ public class GlesZMeshView {
                 }
             }
             return n == 0 ? 0.5f : s / n;
-        }
-
-        private static float edge(int i, int n, float fade) {
-            if (fade <= 0.001f || n <= 0) {
-                return 1f;
-            }
-            float cells = Math.max(1f, n * fade);
-            return Math.min(1f, Math.min(i, n - i) / cells);
         }
 
         private static float[][] copyDepth(float[][] src) {
