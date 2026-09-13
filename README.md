@@ -6,15 +6,9 @@ Private Meta Quest app: cast 2D apps into a spatial panel with optional **3D dep
 
 ## Preview
 
-| Home | Cast + 3D | OCR zones |
-|------|-----------|-----------|
-| ![Home](docs/screenshots/01-dock-home.png) | ![Cast 3D](docs/screenshots/02b-cast-3d-depth.png) | ![OCR](docs/screenshots/05-ocr-zones.png) |
+![Dock / home](docs/screenshots/01-dock-home.png)
 
-| Browser | Translate | Settings |
-|---------|-----------|----------|
-| ![Browser](docs/screenshots/08-browser.png) | ![Translate](docs/screenshots/09-page-translate.png) | ![Settings](docs/screenshots/04-settings-depth.png) |
-
-More shots: [docs/screenshots/](docs/screenshots/) · shoot guide: [docs/SCREENSHOTS.md](docs/SCREENSHOTS.md)
+More shots will land in [docs/screenshots/](docs/screenshots/) as the VR capture set is exported. Shoot order: [docs/SCREENSHOTS.md](docs/SCREENSHOTS.md)
 
 ## Quick install (Quest)
 
