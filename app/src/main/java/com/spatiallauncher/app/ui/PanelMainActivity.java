@@ -3156,6 +3156,7 @@ public class PanelMainActivity extends AppCompatActivity {
         addHelpCombo(content, R.string.help_combo_cast_3d_title, R.string.help_combo_cast_3d_body);
         addHelpCombo(content, R.string.help_combo_ocr_tts_title, R.string.help_combo_ocr_tts_body);
         addHelpCombo(content, R.string.help_combo_ocr_translate_title, R.string.help_combo_ocr_translate_body);
+        addHelpCombo(content, R.string.help_combo_ocr_share_title, R.string.help_combo_ocr_share_body);
         addHelpCombo(content, R.string.help_combo_listen_title, R.string.help_combo_listen_body);
         addHelpCombo(content, R.string.help_combo_browser_translate_title, R.string.help_combo_browser_translate_body);
         addHelpCombo(content, R.string.help_combo_books_import_title, R.string.help_combo_books_import_body);

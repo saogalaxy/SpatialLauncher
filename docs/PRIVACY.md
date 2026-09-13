@@ -26,7 +26,8 @@ Screen capture buffers and ASR audio are used in memory for the active feature a
 | App cast / 3D depth | MediaProjection frames → local stereo / depth |
 | OCR zones | ML Kit (and related) OCR on-device |
 | Piper TTS | On-device speech synthesis (female voice bundled) |
-| Listen | Cast audio → SenseVoice ASR → local MT → Piper |
+| Listen | Cast audio → SenseVoice ASR → optional bundled OPUS → Piper |
+| Reader pipeline | Local mode preference (Read / Translate / Share / Listen) and OPUS vs as-read engine |
 | Page Translate | On-device Qwen (bundled) when you use in-app Translate |
 | My Books / EPUB | Files stored in app storage on the headset |
 
@@ -85,8 +86,6 @@ Or contact the developer through the Meta Horizon app listing when published.
 
 ---
 
-**Store note:** Meta Horizon Store needs a **publicly reachable** privacy policy URL. Once this repository is public, you can use:
+**Store note:** Meta Horizon Store needs a **publicly reachable** privacy policy URL:
 
 `https://github.com/saogalaxy/SpatialLauncher/blob/main/docs/PRIVACY.md`
-
-(or a GitHub Pages / raw.githubusercontent.com mirror). Until then, publish this same text via a public gist or a published Google Doc.
