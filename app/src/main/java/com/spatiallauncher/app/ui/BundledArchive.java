@@ -19,8 +19,21 @@ final class BundledArchive {
     static void extractTarBz2(Context context, String assetPath, File destRoot) throws Exception {
         destRoot.mkdirs();
         Log.i(TAG, "Unpacking " + assetPath + " -> " + destRoot);
-        try (InputStream raw = new BufferedInputStream(context.getAssets().open(assetPath));
-             BZip2CompressorInputStream bz = new BZip2CompressorInputStream(raw);
+        try (InputStream raw = new BufferedInputStream(context.getAssets().open(assetPath))) {
+            extractTarBz2Stream(raw, destRoot);
+        }
+    }
+
+    static void extractTarBz2File(File archive, File destRoot) throws Exception {
+        destRoot.mkdirs();
+        Log.i(TAG, "Unpacking " + archive.getName() + " -> " + destRoot);
+        try (InputStream raw = new BufferedInputStream(new java.io.FileInputStream(archive))) {
+            extractTarBz2Stream(raw, destRoot);
+        }
+    }
+
+    private static void extractTarBz2Stream(InputStream raw, File destRoot) throws Exception {
+        try (BZip2CompressorInputStream bz = new BZip2CompressorInputStream(raw);
              TarArchiveInputStream tar = new TarArchiveInputStream(bz)) {
             TarArchiveEntry entry;
             while ((entry = tar.getNextTarEntry()) != null) {

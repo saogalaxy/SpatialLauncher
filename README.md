@@ -1,80 +1,91 @@
 # Spatial Launcher
 
-OpenXR native (C++/NDK) Android project for a Quest spatial launcher: an immersive
-`NativeActivity` app that wraps 2D Android UI panels (`android.view.Surface`) as OpenXR
-quad composition layers placed in the user's space.
+Private Meta Quest app: cast 2D apps into a spatial panel with optional **3D depth**, **OCR→TTS**, **Listen** (speech→translate→speak), **browser translate**, and **EPUB / My Books** (PC import from Novel Translator).
+
+**Private repo:** https://github.com/saogalaxy/SpatialLauncher
+
+## Quick install (Quest)
+
+1. Enable **Developer Mode** on the Quest  
+2. Plug in USB (or Wi‑Fi ADB) and accept debugging  
+3. Double-click **`Install to Quest.bat`**
+
+That runs `tools/easy_install.ps1`: checks JDK + Node/metavr + headset, builds the debug APK if needed, installs with replace + permissions, and launches the app.
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\easy_install.ps1
+```
+
+See [tools/README.md](tools/README.md).
+
+## Docs
+
+| Doc | What |
+|-----|------|
+| [docs/HELP.md](docs/HELP.md) | Same guide as the in-headset **?** Help (modes, downloads, combos) |
+| [docs/SCREENSHOTS.md](docs/SCREENSHOTS.md) | Store / GitHub screenshot shoot order |
+| [docs/screenshots/](docs/screenshots/) | Image drop folder |
+
+## What it does
+
+- **Dock cast** — mirror an app window; leave the source app open  
+- **3D** — stereo depth (glasses on / “3D” off)  
+- **OCR zones + TTS** — read on-screen dialogue (continuous blue loop)  
+- **Listen** — cast audio → SenseVoice → ML Kit → Piper (best with pause breaks)  
+- **Browser** — Widevine WebView; on-device Translate or Google; Read  
+- **My Books** — EPUB shelf; PC import over Wi‑Fi; tap book again to close  
 
 ## Project layout
 
 ```
+Install to Quest.bat          # one-click build + sideload
+tools/
+  easy_install.ps1            # JDK / metavr / Gradle / install / launch
+  README.md
+  export_launcher_icon.py
+docs/
+  HELP.md
+  SCREENSHOTS.md
+  screenshots/                # store & GitHub images
 app/
-  build.gradle                     # module build config, NDK/CMake, OpenXR loader dep
+  build.gradle
   src/main/
-    AndroidManifest.xml             # OpenXR IMMERSIVE_HMD intent filter + spatial permissions
-    cpp/
-      CMakeLists.txt
-      Main.cpp                      # android_main() entry point / event + render loop
-      OpenXRContext.h / .cpp         # XrInstance/XrSession lifecycle, extension negotiation
-      SurfaceLayer.h / .cpp          # main C++ surface-wrapping hooks (see below)
-      HandInput.h / .cpp             # XR_EXT_hand_tracking wrapper: index fingertip poses
-      PanelInteractor.h / .cpp       # hit-tests fingertips against panel quads, dispatches
-                                      # poke events into Java via PanelBridge
-    java/com/spatiallauncher/app/panel/
-      PanelElement.java              # one interactive hit-region on a panel
-      PanelSurfaceView.java          # generic Surface renderer + poke routing
-      PanelBridge.java               # JNI landing point for PanelInteractor
-      DockPanel.java                 # dock content: icons, layout, per-icon PanelElements
-    res/drawable/ic_dock_*.xml       # clean vector icon set for the dock
+    AndroidManifest.xml
+    java/com/spatiallauncher/app/ui/   # panel UI, cast, TTS, Listen, browser, books
+    res/                              # layouts, drawables, help strings
+    cpp/                              # OpenXR NativeActivity / layers (legacy hooks)
+    assets/                           # bundled models (large; some gitignored)
 ```
 
-## Surface-wrapping hooks
+### Important app packages (Java UI)
 
-`SurfaceLayer` (`app/src/main/cpp/SurfaceLayer.{h,cpp}`) is the core native hook that
-turns an Android `Surface` into a composited OpenXR quad layer:
-
-- `SurfaceLayer::LoadExtensionFunctions()` resolves `xrCreateSwapchainAndroidSurfaceKHR`
-  from `XR_KHR_android_surface_swapchain` once, at session start.
-- `SurfaceLayer::CreateSurfaceBackedSwapchain()` creates the swapchain and returns the
-  backing `jobject` Surface, falling back to `XR_FB_android_surface_swapchain_create`
-  when the KHR extension isn't available.
-- `SurfaceLayer::BuildQuadLayer()` produces the `XrCompositionLayerQuad` for that panel,
-  using `SetPlacement()` (pose + size in meters) and `SetSpace()` (reference space).
-
-`OpenXRContext` (`app/src/main/cpp/OpenXRContext.{h,cpp}`) owns instance/session
-creation, extension negotiation (querying both surface-swapchain extensions before
-requesting them), the session-state machine, and the per-frame `xrWaitFrame` /
-`xrBeginFrame` / `xrEndFrame` loop that will submit each panel's quad layer.
-
-## Direct hand-tracking / touch interaction
-
-Every panel supports direct poke interaction (no controller ray required), driven by:
-
-- `HandInput` — wraps `XR_EXT_hand_tracking`, exposing each hand's index fingertip pose.
-  Falls back to `IsAvailable() == false` cleanly if the runtime doesn't support it.
-- `PanelInteractor` — per frame, hit-tests both fingertips against every registered
-  panel's world-space quad (`SurfaceLayer::GetPlacement()`), and calls
-  `PanelBridge.onPoke(panelId, u, v, action)` in Java when a fingertip is within
-  ~2cm of a panel's front face (release at ~3.5cm, to avoid jitter at the threshold).
-- `PanelBridge` / `PanelSurfaceView` / `PanelElement` (Java) — route that normalized hit
-  point to whichever registered element's bounds contain it, and paint a hover/press
-  highlight. Because hit-testing walks a generic element list, **every** control drawn
-  on a panel (dock icons, settings toggles, sliders, buttons) gets direct-touch support
-  automatically just by registering a `PanelElement` — no native code changes needed
-  per widget.
-- `DockPanel` (Java) draws the dock's frosted pill background and one vector icon per
-  slot (`res/drawable/ic_dock_*.xml`: My Games, Project Aethel, Spatial_Sim, MetaVR
-  Dashboard, Add New Game), registering each icon as a `PanelElement`.
+| Area | Classes (under `app/.../ui/`) |
+|------|-------------------------------|
+| Main panel | `PanelMainActivity`, `UserSettingsStore`, `PanelAlerts` |
+| 3D / cast | `GlesZMeshView`, `DepthEstimator`, mirror / MediaProjection path |
+| OCR + TTS | `DialogueTextExtractor`, `ScreenDialogueReader`, `PiperTtsEngine` |
+| Listen | `PlaybackListenEngine`, `ListenMtTranslator` |
+| Page MT | `PageTranslator`, `OnDeviceTranslator`, `TranslateMtService`, `OfflineModelPack` |
+| Books | `EpubLibraryStore`, `BookImportService`, `BookImportHttp` |
+| Browser | `WidevineWebViewConfig`, `GoogleWebTranslate`, `QwenPageEngine` |
 
 ## Build requirements
 
-- JDK 17
-- Android SDK: platforms 26/32/34, build-tools 34.0.0, NDK `27.0.12077973`, CMake `3.22.1`
-- A Quest headset with Developer Mode enabled, connected via USB or `metavr device connect <ip>`
+- JDK 17+  
+- Android SDK (see `app/build.gradle` / AGP)  
+- Node 20+ (`npx metavr`)  
+- Quest with Developer Mode  
 
-## Build & deploy
+Manual:
 
 ```powershell
-./gradlew assembleDebug
-metavr app install app/build/outputs/apk/debug/app-debug.apk
-metavr app launch com.spatiallauncher.app
+.\gradlew.bat :app:assembleDebug
+npx -y metavr app install .\app\build\outputs\apk\debug\app-debug.apk --replace --grant-permissions
+npx -y metavr app launch com.spatiallauncher.app
 ```
+
+## Notes
+
+- Large model archives under `assets/models/` may be gitignored; local builds unpack/download as needed.  
+- First **Listen** / male voice / ZH·KO caption packs need Wi‑Fi once — see [docs/HELP.md](docs/HELP.md).  
+- Sandbox experiments stay under `com.spatiallauncher.app.sandbox`.

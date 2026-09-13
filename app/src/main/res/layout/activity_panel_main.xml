@@ -90,16 +90,55 @@
                     android:padding="8dp"
                     android:src="@drawable/ic_globe" />
 
+                <LinearLayout
+                    android:id="@+id/browser_translate_meter"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="8dp"
+                    android:gravity="center_horizontal"
+                    android:orientation="vertical"
+                    android:visibility="gone">
+
+                    <ProgressBar
+                        android:id="@+id/browser_translate_progress"
+                        style="@android:style/Widget.ProgressBar.Horizontal"
+                        android:layout_width="108dp"
+                        android:layout_height="10dp"
+                        android:max="100"
+                        android:progress="0"
+                        android:progressTint="#E65C00"
+                        android:progressBackgroundTint="#55FFFFFF" />
+
+                    <TextView
+                        android:id="@+id/browser_translate_eta"
+                        android:layout_width="108dp"
+                        android:layout_height="wrap_content"
+                        android:gravity="center"
+                        android:maxLines="2"
+                        android:textColor="#FFFFFF"
+                        android:textSize="10sp" />
+                </LinearLayout>
+
                 <Button
                     android:id="@+id/browser_translate_page"
                     android:layout_width="wrap_content"
                     android:layout_height="40dp"
                     android:layout_marginStart="6dp"
-                    android:minWidth="0dp"
+                    android:minWidth="88dp"
                     android:paddingStart="8dp"
                     android:paddingEnd="8dp"
                     android:text="@string/browser_translate_page"
                     android:textSize="11sp" />
+
+                <ImageButton
+                    android:id="@+id/browser_google_translate"
+                    android:layout_width="40dp"
+                    android:layout_height="40dp"
+                    android:layout_marginStart="4dp"
+                    android:background="@drawable/bg_circle_button"
+                    android:contentDescription="@string/browser_google_translate_description"
+                    android:padding="8dp"
+                    android:src="@drawable/ic_google_g" />
 
                 <Button
                     android:id="@+id/browser_read_page"
@@ -188,6 +227,36 @@
                         android:id="@+id/webView"
                         android:layout_width="match_parent"
                         android:layout_height="match_parent" />
+
+                    <LinearLayout
+                        android:id="@+id/epub_page_bar"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_gravity="bottom"
+                        android:orientation="horizontal"
+                        android:gravity="center"
+                        android:padding="10dp"
+                        android:background="#CC1A2332"
+                        android:visibility="gone">
+
+                        <Button
+                            android:id="@+id/epub_prev_page"
+                            android:layout_width="0dp"
+                            android:layout_height="48dp"
+                            android:layout_weight="1"
+                            android:layout_marginEnd="6dp"
+                            android:text="@string/epub_prev_page"
+                            android:textSize="14sp" />
+
+                        <Button
+                            android:id="@+id/epub_next_page"
+                            android:layout_width="0dp"
+                            android:layout_height="48dp"
+                            android:layout_weight="1"
+                            android:layout_marginStart="6dp"
+                            android:text="@string/epub_next_page"
+                            android:textSize="14sp" />
+                    </LinearLayout>
                 </FrameLayout>
 
                 <SurfaceView
@@ -245,6 +314,24 @@
                     android:elevation="9dp"
                     android:maxLines="4"
                     android:padding="10dp"
+                    android:textColor="@color/text_primary"
+                    android:textSize="16sp"
+                    android:visibility="gone" />
+
+                <TextView
+                    android:id="@+id/browser_translate_status"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_gravity="center"
+                    android:background="@drawable/bg_tts_karaoke"
+                    android:clickable="false"
+                    android:elevation="20dp"
+                    android:gravity="center"
+                    android:minWidth="220dp"
+                    android:paddingStart="18dp"
+                    android:paddingEnd="18dp"
+                    android:paddingTop="12dp"
+                    android:paddingBottom="12dp"
                     android:textColor="@color/text_primary"
                     android:textSize="16sp"
                     android:visibility="gone" />
@@ -335,7 +422,7 @@
                     android:layout_height="match_parent"
                     android:layout_gravity="end"
                     android:layout_margin="6dp"
-                    android:background="@drawable/bg_frosted_panel"
+                    android:background="@drawable/bg_settings_drawer"
                     android:elevation="8dp"
                     android:orientation="vertical"
                     android:padding="12dp"
@@ -352,7 +439,7 @@
                             android:layout_height="wrap_content"
                             android:layout_weight="1"
                             android:text="@string/settings_title"
-                            android:textColor="@color/text_primary"
+                            android:textColor="@color/help_text_primary"
                             android:textSize="16sp"
                             android:textStyle="bold" />
 
@@ -633,6 +720,16 @@
                                 android:text="@string/setting_reset_depth" />
 
                             <Switch
+                                android:id="@+id/toggle_3d_off_page_translate"
+                                android:layout_width="match_parent"
+                                android:layout_height="48dp"
+                                android:layout_marginTop="4dp"
+                                android:clickable="true"
+                                android:focusable="true"
+                                android:text="@string/setting_3d_off_page_translate"
+                                android:textColor="@color/text_primary" />
+
+                            <Switch
                                 android:id="@+id/toggle_tts"
                                 android:layout_width="match_parent"
                                 android:layout_height="48dp"
@@ -720,6 +817,46 @@
                                     android:layout_marginStart="8dp"
                                     android:layout_weight="1"
                                     android:text="@string/assist_mode_share" />
+                            </LinearLayout>
+
+                            <TextView
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:layout_marginTop="12dp"
+                                android:text="@string/setting_listen_smoothness"
+                                android:textColor="@color/text_primary"
+                                android:textSize="13sp" />
+
+                            <TextView
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:layout_marginTop="2dp"
+                                android:text="@string/setting_listen_smoothness_hint"
+                                android:textColor="@color/text_secondary"
+                                android:textSize="11sp" />
+
+                            <LinearLayout
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:gravity="center_vertical"
+                                android:orientation="horizontal">
+
+                                <SeekBar
+                                    android:id="@+id/seekbar_listen_smoothness"
+                                    android:layout_width="0dp"
+                                    android:layout_height="wrap_content"
+                                    android:layout_weight="1"
+                                    android:max="100"
+                                    android:progress="100" />
+
+                                <TextView
+                                    android:id="@+id/listen_smoothness_value"
+                                    android:layout_width="72dp"
+                                    android:layout_height="wrap_content"
+                                    android:gravity="end"
+                                    android:text="@string/listen_smoothness_smooth"
+                                    android:textColor="@color/text_secondary"
+                                    android:textSize="12sp" />
                             </LinearLayout>
 
                             <TextView
@@ -818,7 +955,71 @@
                         </LinearLayout>
                     </ScrollView>
                 </LinearLayout>
+
+                <LinearLayout
+                    android:id="@+id/help_drawer"
+                    android:layout_width="320dp"
+                    android:layout_height="match_parent"
+                    android:layout_gravity="end"
+                    android:layout_margin="6dp"
+                    android:background="@drawable/bg_help_drawer"
+                    android:elevation="8dp"
+                    android:orientation="vertical"
+                    android:padding="12dp"
+                    android:visibility="gone">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal">
+
+                        <TextView
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:text="@string/help_title"
+                            android:textColor="@color/help_text_primary"
+                            android:textSize="16sp"
+                            android:textStyle="bold" />
+
+                        <Button
+                            android:id="@+id/help_close_button"
+                            android:layout_width="wrap_content"
+                            android:layout_height="36dp"
+                            android:minWidth="0dp"
+                            android:text="@string/help_close" />
+                    </LinearLayout>
+
+                    <ScrollView
+                        android:layout_width="match_parent"
+                        android:layout_height="0dp"
+                        android:layout_marginTop="8dp"
+                        android:layout_weight="1">
+
+                        <LinearLayout
+                            android:id="@+id/help_content"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:orientation="vertical" />
+                    </ScrollView>
+                </LinearLayout>
             </FrameLayout>
+
+            <TextView
+                android:id="@+id/panel_message_bar"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:background="#E65C00"
+                android:paddingStart="12dp"
+                android:paddingEnd="12dp"
+                android:paddingTop="8dp"
+                android:paddingBottom="8dp"
+                android:textColor="#FFFFFF"
+                android:textSize="14sp"
+                android:maxLines="4"
+                android:ellipsize="none"
+                android:visibility="gone" />
 
             <LinearLayout
                 android:id="@+id/control_row"
@@ -924,6 +1125,17 @@
                     android:padding="10dp"
                     android:src="@drawable/ic_tts_speaker" />
 
+                <!-- Listen: one-tap setup (TTS auto + STT cast audio + 3D off). -->
+                <ImageButton
+                    android:id="@+id/listen_button"
+                    android:layout_width="48dp"
+                    android:layout_height="48dp"
+                    android:layout_marginStart="8dp"
+                    android:background="@drawable/bg_circle_button"
+                    android:contentDescription="@string/listen_button_description"
+                    android:padding="10dp"
+                    android:src="@drawable/ic_listen_ear" />
+
                 <!-- TTS player: prev / play / pause / stop / next. Hidden unless
                      TTS is on in manual mode. Speaker stays on the row as status. -->
                 <LinearLayout
@@ -999,6 +1211,16 @@
                     android:contentDescription="@string/ocr_region_button_description"
                     android:padding="10dp"
                     android:src="@drawable/ic_ocr_region" />
+
+                <ImageButton
+                    android:id="@+id/help_button"
+                    android:layout_width="48dp"
+                    android:layout_height="48dp"
+                    android:layout_marginStart="8dp"
+                    android:background="@drawable/bg_circle_button"
+                    android:contentDescription="@string/help_button_description"
+                    android:padding="10dp"
+                    android:src="@drawable/ic_help" />
 
                 <!-- Settings — opens the slide-out panel with the depth/convergence
                      sliders instead of cluttering the main surface with them. -->

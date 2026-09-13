@@ -9,6 +9,7 @@ import android.media.AudioTrack;
 import android.os.SystemClock;
 import android.util.Log;
 
+import com.spatiallauncher.app.R;
 import com.k2fsa.sherpa.onnx.GeneratedAudio;
 import com.k2fsa.sherpa.onnx.OfflineTts;
 import com.k2fsa.sherpa.onnx.OfflineTtsConfig;
@@ -32,8 +33,8 @@ final class PiperTtsEngine {
     private static final String FEMALE_ONNX = "en_US-amy-low.onnx";
     private static final String MALE_DIR = "vits-piper-en_US-ryan-low";
     private static final String MALE_ONNX = "en_US-ryan-low.onnx";
-    /** Cap backlog so TTS can catch up to live captions. */
-    private static final int MAX_QUEUE = 24;
+    /** Cap backlog so live captions can catch up; page Translate needs more headroom. */
+    private static final int MAX_QUEUE = 256;
 
     private final Context app;
     private final File modelsRoot;
@@ -73,6 +74,67 @@ final class PiperTtsEngine {
         return pumping || currentTrack != null;
     }
 
+    int queuedCount() {
+        synchronized (gate) {
+            return lineQueue.size();
+        }
+    }
+
+    /**
+     * Speak one line and block until it finishes (and the queue is idle).
+     * Used by page Translate-and-read so each JP line is heard before the next.
+     */
+    boolean speakAndWait(String text, long timeoutMs) {
+        if (text == null || text.trim().isEmpty()) {
+            return true;
+        }
+        ensureReadyAsync();
+        long deadline = SystemClock.elapsedRealtime() + Math.max(1_000L, timeoutMs);
+        // Wait until Piper finished loading so the pump actually runs.
+        while (!isReady() && SystemClock.elapsedRealtime() < deadline) {
+            try {
+                Thread.sleep(50);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return false;
+            }
+        }
+        if (!isReady()) {
+            Log.w(TAG, "speakAndWait: Piper not ready");
+            return false;
+        }
+        if (!waitUntilIdle(deadline)) {
+            return false;
+        }
+        if (!speak(text.trim(), true)) {
+            return false;
+        }
+        try {
+            Thread.sleep(40);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return false;
+        }
+        return waitUntilIdle(deadline);
+    }
+
+    private boolean waitUntilIdle(long deadlineMs) {
+        while (SystemClock.elapsedRealtime() < deadlineMs) {
+            synchronized (gate) {
+                if (!pumping && currentTrack == null && lineQueue.isEmpty()) {
+                    return true;
+                }
+            }
+            try {
+                Thread.sleep(50);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return false;
+            }
+        }
+        return false;
+    }
+
     boolean isPaused() {
         return paused;
     }
@@ -88,7 +150,6 @@ final class PiperTtsEngine {
         if (instance == null) {
             instance = new PiperTtsEngine(context.getApplicationContext());
         }
-        instance.ensureReadyAsync();
         return instance;
     }
 
@@ -99,6 +160,7 @@ final class PiperTtsEngine {
         maleVoice = prefs.getBoolean("tts_male_voice", false);
         int tone = Math.max(0, Math.min(100, prefs.getInt("tts_tone_percent", 50)));
         toneNoise = 0.40f + (tone / 100f) * 0.55f;
+        loadSherpaNativeLibs();
     }
 
     void setSpeechRate(float rate) {
@@ -110,7 +172,9 @@ final class PiperTtsEngine {
             return;
         }
         maleVoice = male;
-        reloadVoice();
+        if (ready.get()) {
+            reloadVoice();
+        }
     }
 
     /** 0–100, 50 = default Amy/Ryan tone. */
@@ -150,8 +214,52 @@ final class PiperTtsEngine {
         ensureReadyAsync();
     }
 
+    private static void loadSherpaNativeLibs() {
+        String[] libs = {
+                "onnxruntime",
+                "sherpa-onnx-c-api",
+                "sherpa-onnx-cxx-api",
+                "sherpa-onnx-jni"
+        };
+        for (String lib : libs) {
+            try {
+                System.loadLibrary(lib);
+            } catch (UnsatisfiedLinkError e) {
+                Log.w(TAG, "loadLibrary " + lib + " failed", e);
+            }
+        }
+    }
+
     float speechRate() {
         return speechRate;
+    }
+
+    /** Disk only — does not construct OfflineTts. */
+    void unpackVoiceArchives() {
+        try {
+            extractIfMissing(FEMALE_DIR, FEMALE_ONNX);
+        } catch (Throwable t) {
+            Log.w(TAG, "Piper archive unpack failed", t);
+        }
+    }
+
+    private void extractIfMissing(String dirName, String onnxName) throws Exception {
+        File dir = new File(modelsRoot, dirName);
+        File onnx = new File(dir, onnxName);
+        if (onnx.isFile()) {
+            return;
+        }
+        BundledArchive.extractTarBz2(app, "models/piper/" + dirName + ".tar.bz2", modelsRoot);
+    }
+
+    private void fetchMaleVoiceArchive() throws Exception {
+        File archive = new File(app.getFilesDir(), "piper-dl/" + MALE_DIR + ".tar.bz2");
+        OptionalHttp.download(
+                "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/"
+                        + MALE_DIR + ".tar.bz2",
+                archive,
+                1_000_000L);
+        BundledArchive.extractTarBz2File(archive, modelsRoot);
     }
 
     void ensureReadyAsync() {
@@ -167,8 +275,13 @@ final class PiperTtsEngine {
                 File dir = new File(modelsRoot, dirName);
                 File onnx = new File(dir, onnxName);
                 if (!onnx.isFile()) {
-                    BundledArchive.extractTarBz2(
-                            app, "models/piper/" + dirName + ".tar.bz2", modelsRoot);
+                    if (male) {
+                        PanelAlerts.show(app, R.string.tts_voice_downloading);
+                        fetchMaleVoiceArchive();
+                    } else {
+                        BundledArchive.extractTarBz2(
+                                app, "models/piper/" + dirName + ".tar.bz2", modelsRoot);
+                    }
                 }
                 File tokens = new File(dir, "tokens.txt");
                 File dataDir = new File(dir, "espeak-ng-data");
@@ -187,6 +300,7 @@ final class PiperTtsEngine {
                 OfflineTtsConfig config = new OfflineTtsConfig();
                 config.setModel(model);
                 applyTone(config, toneNoise);
+                loadSherpaNativeLibs();
                 tts = new OfflineTts(null, config);
                 loadedVoiceKey = voiceKey;
                 ready.set(true);
@@ -198,6 +312,7 @@ final class PiperTtsEngine {
                 }
             } catch (Throwable t) {
                 Log.w(TAG, "Piper init failed", t);
+                PanelAlerts.show(app, "TTS engine failed to start");
             } finally {
                 preparing.set(false);
             }

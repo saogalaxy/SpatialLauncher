@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24"
+    android:tint="@color/text_primary">
+    <!-- Cinema 3D glasses with hollow lenses -->
+    <path
+        android:fillColor="#FF000000"
+        android:fillType="evenOdd"
+        android:pathData="M2,8h7.25c1.1,0 2,0.9 2,2v3.5c0,1.1 -0.9,2 -2,2H2c-1.1,0 -2,-0.9 -2,-2V10c0,-1.1 0.9,-2 2,-2zM3.6,9.6h4.05v3.8H3.6V9.6zM14.75,8H22c1.1,0 2,0.9 2,2v3.5c0,1.1 -0.9,2 -2,2h-7.25c-1.1,0 -2,-0.9 -2,-2V10c0,-1.1 0.9,-2 2,-2zM16.35,9.6h4.05v3.8h-4.05V9.6z" />
+    <path
+        android:fillColor="#FF000000"
+        android:pathData="M10.1,10.75h3.8v2.5h-3.8zM2.5,5.75h19c0.41,0 0.75,0.34 0.75,0.75v0.7H1.75V6.5c0,-0.41 0.34,-0.75 0.75,-0.75z" />
+</vector>

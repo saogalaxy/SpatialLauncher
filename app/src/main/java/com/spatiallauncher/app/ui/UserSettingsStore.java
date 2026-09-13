@@ -26,7 +26,10 @@ public class UserSettingsStore {
     private static final String KEY_TTS_MANUAL = "tts_manual_mode";
     private static final String KEY_TTS_MALE = "tts_male_voice";
     private static final String KEY_TTS_TONE_PERCENT = "tts_tone_percent";
+    /** 100 = smoothest Listen chunks (original); 0 = smallest/fastest. */
+    private static final String KEY_LISTEN_SMOOTHNESS_PERCENT = "listen_smoothness_percent";
     private static final String KEY_ASSIST_MODE = "assist_mode";
+    private static final String KEY_3D_OFF_PAGE_TRANSLATE = "3d_off_page_translate";
     private static final String KEY_SESSION_MODE = "session_mode";
     private static final String KEY_SESSION_APP = "session_app_package";
     static final String SESSION_IDLE = "idle";
@@ -47,6 +50,8 @@ public class UserSettingsStore {
     /** 100 = normal Piper pace; slider range 50–200. */
     static final int DEFAULT_TTS_SPEED_PERCENT = 100;
     static final boolean DEFAULT_TTS_MANUAL = false;
+    /** Default matches the original smooth Listen flush (700ms / 8s). */
+    static final int DEFAULT_LISTEN_SMOOTHNESS_PERCENT = 100;
 
     private final SharedPreferences prefs;
 
@@ -238,6 +243,16 @@ public class UserSettingsStore {
         prefs.edit().putInt(KEY_TTS_TONE_PERCENT, Math.max(0, Math.min(100, percent))).apply();
     }
 
+    /** 0 = smaller/faster Listen chunks; 100 = smoother longer phrases (default). */
+    public int getListenSmoothnessPercent() {
+        return Math.max(0, Math.min(100,
+                prefs.getInt(KEY_LISTEN_SMOOTHNESS_PERCENT, DEFAULT_LISTEN_SMOOTHNESS_PERCENT)));
+    }
+
+    public void setListenSmoothnessPercent(int percent) {
+        prefs.edit().putInt(KEY_LISTEN_SMOOTHNESS_PERCENT, Math.max(0, Math.min(100, percent))).apply();
+    }
+
     /** Current OCR→Piper pipeline. Extra modes: on-screen translate, listen, share overlay. */
     public AssistMode getAssistMode() {
         return AssistMode.fromPref(prefs.getString(KEY_ASSIST_MODE, AssistMode.DEFAULT.prefKey));
@@ -246,6 +261,15 @@ public class UserSettingsStore {
     public void setAssistMode(AssistMode mode) {
         AssistMode next = mode == null ? AssistMode.DEFAULT : mode;
         prefs.edit().putString(KEY_ASSIST_MODE, next.prefKey).apply();
+    }
+
+    /** When true, page Translate turns 3D off for the job and restores it after. */
+    public boolean get3dOffForPageTranslate() {
+        return prefs.getBoolean(KEY_3D_OFF_PAGE_TRANSLATE, true);
+    }
+
+    public void set3dOffForPageTranslate(boolean off) {
+        prefs.edit().putBoolean(KEY_3D_OFF_PAGE_TRANSLATE, off).apply();
     }
 
     public String getSessionMode() {
