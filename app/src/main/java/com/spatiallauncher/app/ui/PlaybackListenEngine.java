@@ -227,7 +227,7 @@ final class PlaybackListenEngine {
             }
             Log.i(TAG, "ASR: " + text);
             final String raw = text;
-            listenMt.toEnglish(raw, en -> {
+            listenMt.toEnglish(raw, new UserSettingsStore(app).getUseOpusTranslate(), en -> {
                 Listener sink = listener;
                 if (sink != null) {
                     sink.onTranscript(en);

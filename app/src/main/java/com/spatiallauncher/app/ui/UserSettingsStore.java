@@ -28,7 +28,10 @@ public class UserSettingsStore {
     private static final String KEY_TTS_TONE_PERCENT = "tts_tone_percent";
     /** 100 = smoothest Listen chunks (original); 0 = smallest/fastest. */
     private static final String KEY_LISTEN_SMOOTHNESS_PERCENT = "listen_smoothness_percent";
+    /** 100 = slower OCR settle (fewer cuts/repeats); 0 = snappier (may miss growth). */
+    private static final String KEY_OCR_SMOOTHNESS_PERCENT = "ocr_smoothness_percent";
     private static final String KEY_ASSIST_MODE = "assist_mode";
+    private static final String KEY_USE_OPUS_TRANSLATE = "use_opus_translate";
     private static final String KEY_3D_OFF_PAGE_TRANSLATE = "3d_off_page_translate";
     private static final String KEY_SESSION_MODE = "session_mode";
     private static final String KEY_SESSION_APP = "session_app_package";
@@ -52,6 +55,8 @@ public class UserSettingsStore {
     static final boolean DEFAULT_TTS_MANUAL = false;
     /** Default matches the original smooth Listen flush (700ms / 8s). */
     static final int DEFAULT_LISTEN_SMOOTHNESS_PERCENT = 100;
+    /** Balanced OCR settle — fewer dropped lines than max-smooth, fewer cuts than max-fast. */
+    static final int DEFAULT_OCR_SMOOTHNESS_PERCENT = 55;
 
     private final SharedPreferences prefs;
 
@@ -253,6 +258,16 @@ public class UserSettingsStore {
         prefs.edit().putInt(KEY_LISTEN_SMOOTHNESS_PERCENT, Math.max(0, Math.min(100, percent))).apply();
     }
 
+    /** 0 = snappier OCR captions; 100 = longer settle (smoother, less cut/repeat). */
+    public int getOcrSmoothnessPercent() {
+        return Math.max(0, Math.min(100,
+                prefs.getInt(KEY_OCR_SMOOTHNESS_PERCENT, DEFAULT_OCR_SMOOTHNESS_PERCENT)));
+    }
+
+    public void setOcrSmoothnessPercent(int percent) {
+        prefs.edit().putInt(KEY_OCR_SMOOTHNESS_PERCENT, Math.max(0, Math.min(100, percent))).apply();
+    }
+
     /** Current OCR→Piper pipeline. Extra modes: on-screen translate, listen, share overlay. */
     public AssistMode getAssistMode() {
         return AssistMode.fromPref(prefs.getString(KEY_ASSIST_MODE, AssistMode.DEFAULT.prefKey));
@@ -261,6 +276,18 @@ public class UserSettingsStore {
     public void setAssistMode(AssistMode mode) {
         AssistMode next = mode == null ? AssistMode.DEFAULT : mode;
         prefs.edit().putString(KEY_ASSIST_MODE, next.prefKey).apply();
+    }
+
+    /**
+     * When true (default), Translate / Share / Listen run OPUS for non-English.
+     * When false, those modes stay on ML Kit OCR (or ASR) → Piper with no OPUS.
+     */
+    public boolean getUseOpusTranslate() {
+        return prefs.getBoolean(KEY_USE_OPUS_TRANSLATE, true);
+    }
+
+    public void setUseOpusTranslate(boolean useOpus) {
+        prefs.edit().putBoolean(KEY_USE_OPUS_TRANSLATE, useOpus).apply();
     }
 
     /** When true, page Translate turns 3D off for the job and restores it after. */

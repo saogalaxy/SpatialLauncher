@@ -19,11 +19,11 @@ import java.util.List;
  * drops those repeats before TTS.
  */
 final class ScreenFrameCapture {
-    static final long OPTION_A_PERIODIC_MS = 1500L;
+    static final long OPTION_A_PERIODIC_MS = 400L;
     /** Option B OCR is 20–50ms; VR still caps snapshots (see {@link #VR_READER_INTERVAL_MS}). */
     static final long OPTION_B_PERIODIC_MS = 50L;
-    /** ~5 FPS ceiling on Quest so reader + stereo + MiDaS stay thermally sane. */
-    static final long VR_READER_INTERVAL_MS = 200L;
+    /** ~10 FPS ceiling on Quest for continuous OCR (was 200ms / ~5 FPS). */
+    static final long VR_READER_INTERVAL_MS = 100L;
     static final long TAP_MIN_INTERVAL_MS = 120L;
     static final float DIALOGUE_ROI_TOP_FRACTION = 0.52f;
     static final float DIALOGUE_ROI_BOTTOM_FRACTION = 0.88f;
@@ -290,6 +290,8 @@ final class ScreenFrameCapture {
         synchronized (regionLock) {
             regions = new ArrayList<>(customRegions);
         }
+        // No custom zones → cast dialogue band only (not the whole app HUD / chrome).
+        // Draw a full-window box in OCR zones if you want the entire cast frame.
         if (regions.isEmpty()) {
             return cropDefaultSubtitleBand(src);
         }

@@ -21,6 +21,7 @@
     <!-- Cool slate — matches frosted dock chips, not Material purple. -->
     <color name="accent">#FF8A93A8</color>
     <color name="control_tint">#FF9AABB8</color>
+    <color name="assist_chip_active_bg">#FF16A34A</color>
     <color name="tts_once_bg">#FF16A34A</color>
     <color name="tts_loop_bg">#FF2563EB</color>
     <color name="listen_active_bg">#FFDC2626</color>

@@ -9,7 +9,7 @@ Tap a dock app → in the share sheet pick that app (**Just this window**). Leav
 **Important:** leave the casted app’s own window open so the stream stays live in Spatial Launcher.
 
 ### 2. Read on-screen subs / dialogue
-Cast the show → **OCR zones** (right sidebar) → box the subtitle band → Save → Done. Settings → **TTS on** → continuous (blue loop). Speech follows text in the boxes. Numbers on boxes are **read order** — add top boxes first.
+Cast the show → **OCR zones** (right sidebar) → box the subtitle band → Save → Done. Settings → **TTS on** → continuous (blue loop). Speech follows text in the boxes. With no custom boxes, only the lower cast dialogue band is read (not the whole app HUD). Numbers on boxes are **read order** — add top boxes first.
 
 ### 3. Listen when there are no subs
 Cast the app → tap the **ear** (turns red). Allow mic if asked. Translate uses bundled OPUS (JA/ZH/KO in the APK). Best with **pause breaks** between lines. Tap ear again to stop.
@@ -42,11 +42,20 @@ Tap **book** = My Books (tap again or **Close** to dismiss). Tap a title to open
 | **Books** | Tap = shelf · Long-press = PC import · Tap again closes shelf or open book |
 | **Dock apps** | Tap = cast · Long-press = remove from dock |
 
+## Settings sliders (reading)
+
+| Slider | Effect |
+|--------|--------|
+| **OCR smoothness** | Wait for a stable on-screen caption before speaking (Read / Translate / Share Assist) |
+| **Listen smoothness** | Audio Listen phrase length (ear button) |
+| **Read speed** | Piper speech pace |
+
 ## Useful combos
 
 - **Cast + 3D** — spatial view of a mirrored app  
-- **OCR + TTS continuous** — read on-screen dialogue  
-- **OCR + Assist Translate** — foreign text → English (spoken if TTS on)  
+- **OCR + Read** — OCR → Piper (English / as-read; no OPUS)  
+- **OCR + Assist Translate** — OCR → OPUS → Piper  
+- **OCR + Assist Share** — OCR → OPUS → Piper + caption overlay  
 - **Listen + cast** — talk / no-subs audio path  
 - **Browser + Translate / Google** — page MT + optional Read  
 - **Books long-press + PC** — Novel Translator EPUB import  
@@ -64,4 +73,4 @@ Tap **book** = My Books (tap again or **Close** to dismiss). Tap a title to open
 | Ear | Listen |
 | Boxes | OCR zones |
 | ? | This help |
-| Gear | Settings (depth, TTS, Assist, Listen smoothness) |
+| Gear | Settings (depth, TTS, Assist, OCR / Listen smoothness) |

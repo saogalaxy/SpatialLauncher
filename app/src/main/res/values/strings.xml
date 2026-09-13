@@ -88,7 +88,7 @@
     <string name="help_dual_dock_b">Long-press: remove</string>
     <string name="help_dual_dock_body">Tap a pinned app to launch and cast it. Long-press asks to remove it from the dock.</string>
     <string name="help_dual_assist_title">Settings → Assist modes</string>
-    <string name="help_dual_assist_body">Default = OCR→Piper path. Translate = foreign on-screen text. Listen = cast audio (same as ear). Share = overlay caption of the cast. Only one Assist mode at a time.</string>
+    <string name="help_dual_assist_body">Read = OCR→Piper. Translate / Share / Listen use OPUS when Translate engine = OPUS; switch to ML Kit OCR to skip OPUS and speak as-read. Settings shows Active pipeline.</string>
     <string name="help_dual_depth_title">Settings → Live / Static 3D</string>
     <string name="help_dual_depth_body">Live updates depth as the picture moves. Static holds a steadier depth look (good for stills / less motion). Separate slider profiles per mode.</string>
 
@@ -105,9 +105,9 @@
     <string name="help_btn_listen_title">Listen</string>
     <string name="help_btn_listen_body">Cast audio → translate → speak. Red when on. Best with pause breaks. See Dual-mode icons above.</string>
     <string name="help_btn_ocr_title">OCR zones</string>
-    <string name="help_btn_ocr_body">Opens a side panel to draw boxes over subtitles or dialogue so TTS / Translate read only those areas. The number on each box is read order (add top first). Save per app.</string>
+    <string name="help_btn_ocr_body">Opens a side panel to draw boxes over subtitles or dialogue so TTS / Translate read only those areas. With no boxes, only the lower cast dialogue band is read (not the whole app HUD). The number on each box is read order (add top first). Save per app.</string>
     <string name="help_btn_settings_title">Settings</string>
-    <string name="help_btn_settings_body">Depth, TTS voice/speed, Assist mode, Listen smoothness, and other options.</string>
+    <string name="help_btn_settings_body">Depth, TTS voice/speed, Assist mode, OCR / Listen smoothness, and other options.</string>
     <string name="help_btn_help_title">Help</string>
     <string name="help_btn_help_body">This guide.</string>
     <string name="help_btn_page_translate_title">Translate (browser)</string>
@@ -186,12 +186,23 @@
     <string name="setting_tts_speed">Read speed</string>
     <string name="setting_tts_tone">Voice tone</string>
     <string name="setting_tts_voice">Voice</string>
-    <string name="setting_assist_mode">Reader extras</string>
-    <string name="setting_assist_mode_hint">Default keeps today’s OCR → Piper path. Translate is for on-screen foreign text. Listen is for shows with no subs (3D off). Share overlays a translation of the cast.</string>
-    <string name="assist_mode_default">Default</string>
+    <string name="setting_assist_mode">Reader pipeline</string>
+    <string name="setting_assist_mode_hint">Pick a mode. Active pipeline below always shows the path in use.</string>
+    <string name="assist_mode_default">Read</string>
     <string name="assist_mode_translate">Translate</string>
     <string name="assist_mode_listen">Listen</string>
     <string name="assist_mode_share">Share</string>
+    <string name="assist_pipeline_read">Active: OCR → Piper  (ML Kit OCR · no OPUS)</string>
+    <string name="assist_pipeline_translate">Active: OCR → OPUS → Piper  (foreign on-screen → English)</string>
+    <string name="assist_pipeline_translate_ocr">Active: OCR → Piper  (Translate mode · OPUS off · ML Kit OCR)</string>
+    <string name="assist_pipeline_listen">Active: Audio → STT → OPUS → Piper  (3D off)</string>
+    <string name="assist_pipeline_listen_ocr">Active: Audio → STT → Piper  (Listen · OPUS off)</string>
+    <string name="assist_pipeline_share">Active: OCR → OPUS → Piper + caption  (share overlay)</string>
+    <string name="assist_pipeline_share_ocr">Active: OCR → Piper + caption  (Share · OPUS off · ML Kit OCR)</string>
+    <string name="setting_mt_engine">Translate engine</string>
+    <string name="setting_mt_engine_hint">OPUS = machine translate for Translate / Share / Listen. ML Kit OCR = recognize and speak as-read (no OPUS; best for English).</string>
+    <string name="mt_engine_opus">OPUS</string>
+    <string name="mt_engine_mlkit">ML Kit OCR</string>
     <string name="assist_listen_need_cast">Listen needs an app cast so it can hear that window</string>
     <string name="assist_listen_need_mic">Allow microphone access so Listen can tap the other app’s audio</string>
     <string name="assist_3d_off_for_listen">3D off while Listen is on</string>
@@ -201,6 +212,11 @@
     <string name="listen_mt_downloading">Preparing Listen translate…</string>
     <string name="listen_mt_ready">Listen translate ready</string>
     <string name="listen_mt_failed">Listen translate failed — will speak ASR text until OPUS is ready</string>
+    <string name="setting_ocr_smoothness">OCR smoothness</string>
+    <string name="setting_ocr_smoothness_hint">Higher = wait longer for a stable caption (fewer cuts/repeats). Lower = snappier, may speak partial lines.</string>
+    <string name="ocr_smoothness_smooth">Smooth</string>
+    <string name="ocr_smoothness_balanced">Balanced</string>
+    <string name="ocr_smoothness_fast">Fast</string>
     <string name="setting_listen_smoothness">Listen smoothness</string>
     <string name="setting_listen_smoothness_hint">Higher = longer phrases (smoother). Lower = smaller chunks (less lag behind video).</string>
     <string name="listen_smoothness_smooth">Smooth</string>
