@@ -56,6 +56,13 @@ final class ListenMtTranslator {
     }
 
     void toEnglish(String text, Consumer<String> out) {
+        toEnglish(text, true, out);
+    }
+
+    /**
+     * @param useOpus when false, return ASR text as-is (ML Kit / no-OPUS engine setting).
+     */
+    void toEnglish(String text, boolean useOpus, Consumer<String> out) {
         if (out == null) {
             return;
         }
@@ -64,7 +71,7 @@ final class ListenMtTranslator {
             return;
         }
         final String line = text.trim();
-        if (OnDeviceTranslator.looksPrimarilyEnglish(line)) {
+        if (!useOpus || OnDeviceTranslator.looksPrimarilyEnglish(line)) {
             out.accept(line);
             return;
         }

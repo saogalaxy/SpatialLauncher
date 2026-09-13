@@ -330,6 +330,12 @@ final class PiperTtsEngine {
             if (!force && isDuplicateLocked(incoming)) {
                 return true;
             }
+            if (!force && replaceExtensionInQueueLocked(line, incoming)) {
+                paused = false;
+                startPumpLocked();
+                ensureReadyAsync();
+                return true;
+            }
             if (force) {
                 lastSpokenNormalized = "";
             }
@@ -479,6 +485,39 @@ final class PiperTtsEngine {
             if (!DialogueDeduper.differsSignificantly(DialogueDeduper.normalize(queued), incoming)) {
                 return true;
             }
+        }
+        return false;
+    }
+
+    /**
+     * If the new caption is a longer version of the last queued line (OCR grew),
+     * replace that queue entry instead of speaking partial then full.
+     */
+    private boolean replaceExtensionInQueueLocked(String line, String incoming) {
+        if (lineQueue.isEmpty()) {
+            // Already speaking a shorter prefix of this line — don't stack a second copy.
+            if (!activeNormalized.isEmpty()
+                    && incoming.length() > activeNormalized.length() + 2
+                    && incoming.startsWith(activeNormalized)) {
+                Log.i(TAG, "Skip extension while speaking prefix: " + line);
+                return true;
+            }
+            return false;
+        }
+        String last = lineQueue.peekLast();
+        String lastNorm = DialogueDeduper.normalize(last);
+        if (lastNorm.isEmpty()) {
+            return false;
+        }
+        if (incoming.length() > lastNorm.length() + 2 && incoming.contains(lastNorm)) {
+            lineQueue.removeLast();
+            lineQueue.addLast(line);
+            Log.i(TAG, "Replaced queued OCR growth: " + line);
+            return true;
+        }
+        if (lastNorm.length() > incoming.length() + 2 && lastNorm.contains(incoming)) {
+            // Incoming is a shorter flicker of what's already queued.
+            return true;
         }
         return false;
     }

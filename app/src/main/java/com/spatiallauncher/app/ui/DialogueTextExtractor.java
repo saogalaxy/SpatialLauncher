@@ -83,12 +83,23 @@ final class DialogueTextExtractor {
     private final AtomicBoolean busy = new AtomicBoolean(false);
     private final DialogueDeduper deduper = new DialogueDeduper();
     private volatile String lastText = "";
-    private volatile ReadingStepMode mode = ReadingStepMode.OPTION_A_ON_DEVICE_VLM;
+    private volatile ReadingStepMode mode = ReadingStepMode.OPTION_B_FAST_OCR;
     private final QuantizedVisionRuntime visionRuntime;
     private BooleanSupplier deferHeavyVision;
     private Listener listener;
     /** Queued tap-to-speak frame when OCR is already busy. */
     private Bitmap pendingForcedFrame;
+    /** Latest continuous frame to run after the current OCR finishes (don't drop lines). */
+    private Bitmap pendingContinuousFrame;
+    /** Quiet before speak (ms). Mapped from Settings → OCR smoothness. */
+    private volatile long settleMs = 180L;
+    /** Max hold before flush even if OCR flickers (ms). */
+    private volatile long maxHoldMs = 500L;
+    /** Periodic OCR re-check when the frame fingerprint is unchanged (ms). */
+    private volatile long sampleIntervalMs = ScreenFrameCapture.VR_READER_INTERVAL_MS;
+    private String settlingText;
+    private long settleStartedElapsed;
+    private final Runnable settleEmit = this::flushSettledDialogue;
 
     DialogueTextExtractor(Context context) {
         appContext = context.getApplicationContext();
@@ -98,7 +109,20 @@ final class DialogueTextExtractor {
     }
 
     void setMode(ReadingStepMode mode) {
-        this.mode = mode != null ? mode : ReadingStepMode.OPTION_A_ON_DEVICE_VLM;
+        this.mode = mode != null ? mode : ReadingStepMode.OPTION_B_FAST_OCR;
+    }
+
+    /**
+     * @param smoothnessPercent 0 = snappy (short settle), 100 = smooth (long settle).
+     */
+    void setSmoothnessPercent(int smoothnessPercent) {
+        float t = Math.max(0, Math.min(100, smoothnessPercent)) / 100f;
+        // Fast → Smooth ranges tuned for cast subs on Quest.
+        settleMs = Math.round(90L + t * (420L - 90L));
+        maxHoldMs = Math.round(280L + t * (950L - 280L));
+        sampleIntervalMs = Math.round(80L + t * (320L - 80L));
+        Log.i(TAG, "OCR smoothness=" + smoothnessPercent
+                + " settle=" + settleMs + "ms hold=" + maxHoldMs + "ms sample=" + sampleIntervalMs + "ms");
     }
 
     void setTranslateToEnglish(boolean enabled) {
@@ -113,11 +137,10 @@ final class DialogueTextExtractor {
     }
 
     long recommendedCaptureIntervalMs() {
-        long modeMs = mode == ReadingStepMode.OPTION_B_FAST_OCR
+        long modeFloor = mode == ReadingStepMode.OPTION_B_FAST_OCR
                 ? ScreenFrameCapture.OPTION_B_PERIODIC_MS
                 : ScreenFrameCapture.OPTION_A_PERIODIC_MS;
-        // Quest: never feed the reader faster than ~5 FPS.
-        return Math.max(modeMs, ScreenFrameCapture.VR_READER_INTERVAL_MS);
+        return Math.max(modeFloor, sampleIntervalMs);
     }
 
     void setDeferHeavyVision(BooleanSupplier deferHeavyVision) {
@@ -182,7 +205,31 @@ final class DialogueTextExtractor {
     }
 
     private void runOcrTriggerThenMaybeVlm(Bitmap frame, boolean forceEmit) {
-        if (frame == null || frame.isRecycled() || !busy.compareAndSet(false, true)) {
+        if (frame == null || frame.isRecycled()) {
+            return;
+        }
+        if (!busy.compareAndSet(false, true)) {
+            if (forceEmit) {
+                return;
+            }
+            // Keep the newest continuous frame so subtitle changes aren't dropped.
+            Bitmap copy;
+            try {
+                copy = frame.copy(
+                        frame.getConfig() != null ? frame.getConfig() : Bitmap.Config.ARGB_8888,
+                        false);
+            } catch (RuntimeException e) {
+                return;
+            }
+            if (copy == null) {
+                return;
+            }
+            synchronized (this) {
+                if (pendingContinuousFrame != null) {
+                    pendingContinuousFrame.recycle();
+                }
+                pendingContinuousFrame = copy;
+            }
             return;
         }
         Bitmap copy;
@@ -241,7 +288,16 @@ final class DialogueTextExtractor {
             if (parsed == null || parsed.isEmpty()) {
                 return;
             }
-            if (!forceEmit && !deduper.wouldBeNew(parsed)) {
+        // Don't speak mid-growth; finishParsed still needs wouldBeNew to skip identical frames.
+            if (!forceEmit && !deduper.wouldBeNew(collapseDialogue(parsed))) {
+                // Still refresh settle if we're holding a growing version of the same line.
+                String collapsed = collapseDialogue(parsed);
+                if (settlingText != null
+                        && collapsed.length() > settlingText.length()
+                        && DialogueDeduper.normalize(collapsed)
+                        .contains(DialogueDeduper.normalize(settlingText))) {
+                    emitIfNew(collapsed);
+                }
                 return;
             }
             String out = parsed;
@@ -276,12 +332,20 @@ final class DialogueTextExtractor {
     private void finishFrame(Bitmap copy) {
         copy.recycle();
         Bitmap nextForced;
+        Bitmap nextContinuous;
         synchronized (this) {
             nextForced = pendingForcedFrame;
             pendingForcedFrame = null;
+            nextContinuous = pendingContinuousFrame;
+            pendingContinuousFrame = null;
         }
         if (nextForced != null) {
+            if (nextContinuous != null) {
+                nextContinuous.recycle();
+            }
             processCopiedFrame(nextForced, true);
+        } else if (nextContinuous != null) {
+            processCopiedFrame(nextContinuous, false);
         } else {
             busy.set(false);
         }
@@ -297,27 +361,74 @@ final class DialogueTextExtractor {
     }
 
     private boolean emitIfNew(String raw) {
-        if (raw == null || !deduper.isNew(raw)) {
+        if (raw == null) {
             return false;
         }
-        lastText = raw.trim();
-        Log.i(TAG, "Dialogue (deduped): " + lastText);
+        String line = collapseDialogue(raw);
+        if (line.isEmpty()) {
+            return false;
+        }
+        long now = android.os.SystemClock.elapsedRealtime();
+        if (settlingText == null) {
+            settleStartedElapsed = now;
+        } else if (DialogueDeduper.differsSignificantly(
+                DialogueDeduper.normalize(settlingText),
+                DialogueDeduper.normalize(line))) {
+            // Different caption — restart the hold window.
+            settleStartedElapsed = now;
+        } else if (line.length() > settlingText.length()) {
+            // Same caption growing (partial → full) — keep original hold start.
+            settlingText = line;
+            scheduleSettleFlush(now);
+            return true;
+        }
+        settlingText = line;
+        scheduleSettleFlush(now);
+        return true;
+    }
+
+    private void scheduleSettleFlush(long nowElapsed) {
+        main.removeCallbacks(settleEmit);
+        long held = Math.max(0L, nowElapsed - settleStartedElapsed);
+        long quiet = Math.max(20L, settleMs);
+        long maxHold = Math.max(quiet, maxHoldMs);
+        long delay = Math.min(quiet, Math.max(0L, maxHold - held));
+        if (delay == 0L) {
+            flushSettledDialogue();
+        } else {
+            main.postDelayed(settleEmit, delay);
+        }
+    }
+
+    private void flushSettledDialogue() {
+        String line = settlingText;
+        settlingText = null;
+        settleStartedElapsed = 0L;
+        if (line == null || line.isEmpty()) {
+            return;
+        }
+        if (!deduper.isNew(line)) {
+            return;
+        }
+        lastText = line;
+        Log.i(TAG, "Dialogue (settled): " + lastText);
         Listener sink = listener;
         if (sink != null) {
-            String spoken = lastText;
-            main.post(() -> sink.onDialogueText(spoken));
+            sink.onDialogueText(lastText);
         }
-        return true;
     }
 
     private void emitForced(String raw) {
         if (raw == null) {
             return;
         }
-        String line = raw.trim();
+        String line = collapseDialogue(raw);
         if (line.isEmpty()) {
             return;
         }
+        main.removeCallbacks(settleEmit);
+        settlingText = null;
+        settleStartedElapsed = 0L;
         deduper.isNew(line); // keep continuous dedupe in sync
         lastText = line;
         Log.i(TAG, "Dialogue (forced): " + lastText);
@@ -326,6 +437,17 @@ final class DialogueTextExtractor {
             String spoken = lastText;
             main.post(() -> sink.onDialogueTextForced(spoken));
         }
+    }
+
+    /** One spoken caption — OCR blocks joined with spaces, not newline chops. */
+    private static String collapseDialogue(String raw) {
+        if (raw == null) {
+            return "";
+        }
+        return raw.replace('\r', ' ')
+                .replace('\n', ' ')
+                .replaceAll("\\s+", " ")
+                .trim();
     }
 
     private synchronized TextRecognizer japanese() {

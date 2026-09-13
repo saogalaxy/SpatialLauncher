@@ -309,7 +309,8 @@ public class PanelMainActivity extends AppCompatActivity {
         epubLibraryStore = new EpubLibraryStore(this);
         ocrRegionStore = new OcrRegionStore(this);
         dialogueTextExtractor = new DialogueTextExtractor(this);
-        dialogueTextExtractor.setMode(DialogueTextExtractor.ReadingStepMode.OPTION_A_ON_DEVICE_VLM);
+        dialogueTextExtractor.setMode(DialogueTextExtractor.ReadingStepMode.OPTION_B_FAST_OCR);
+        dialogueTextExtractor.setSmoothnessPercent(settingsStore.getOcrSmoothnessPercent());
         dialogueTextExtractor.setDeferHeavyVision(depthInferenceBusy::get);
         screenFrameCapture.setPeriodicIntervalMs(dialogueTextExtractor.recommendedCaptureIntervalMs());
         forceStereoEnabled = settingsStore.getForceStereo();
@@ -709,9 +710,36 @@ public class PanelMainActivity extends AppCompatActivity {
         findViewById(R.id.assist_mode_translate).setOnClickListener(v -> setAssistMode(AssistMode.TRANSLATE));
         findViewById(R.id.assist_mode_listen).setOnClickListener(v -> setAssistMode(AssistMode.LISTEN));
         findViewById(R.id.assist_mode_share).setOnClickListener(v -> setAssistMode(AssistMode.SHARE));
+        findViewById(R.id.mt_engine_opus).setOnClickListener(v -> setUseOpusTranslate(true));
+        findViewById(R.id.mt_engine_mlkit).setOnClickListener(v -> setUseOpusTranslate(false));
         findViewById(R.id.listen_button).setOnClickListener(v -> toggleListenFromToolbar());
         applyAssistMode(assistMode, false);
         refreshListenButton();
+        refreshMtEngineButtons();
+
+        SeekBar seekbarOcrSmooth = findViewById(R.id.seekbar_ocr_smoothness);
+        TextView ocrSmoothValue = findViewById(R.id.ocr_smoothness_value);
+        int savedOcrSmooth = settingsStore.getOcrSmoothnessPercent();
+        seekbarOcrSmooth.setProgress(savedOcrSmooth);
+        ocrSmoothValue.setText(ocrSmoothnessLabel(savedOcrSmooth));
+        seekbarOcrSmooth.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override
+            public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
+                ocrSmoothValue.setText(ocrSmoothnessLabel(progress));
+                dialogueTextExtractor.setSmoothnessPercent(progress);
+                screenFrameCapture.setPeriodicIntervalMs(
+                        dialogueTextExtractor.recommendedCaptureIntervalMs());
+                if (fromUser) {
+                    settingsStore.setOcrSmoothnessPercent(progress);
+                }
+            }
+
+            @Override
+            public void onStartTrackingTouch(SeekBar seekBar) {}
+
+            @Override
+            public void onStopTrackingTouch(SeekBar seekBar) {}
+        });
 
         SeekBar seekbarListenSmooth = findViewById(R.id.seekbar_listen_smoothness);
         TextView listenSmoothValue = findViewById(R.id.listen_smoothness_value);
@@ -1620,9 +1648,12 @@ public class PanelMainActivity extends AppCompatActivity {
         if (userPicked) {
             settingsStore.setAssistMode(assistMode);
         }
-        boolean cjk = assistMode == AssistMode.TRANSLATE || assistMode == AssistMode.SHARE;
-        dialogueTextExtractor.setCjkOcr(cjk);
-        dialogueTextExtractor.setTranslateToEnglish(cjk);
+        // Read always OCR→Piper. Translate/Share add OPUS only when the engine switch is OPUS.
+        boolean wantTranslateModes = assistMode == AssistMode.TRANSLATE || assistMode == AssistMode.SHARE;
+        boolean useOpus = settingsStore.getUseOpusTranslate();
+        boolean translateOcr = wantTranslateModes && useOpus;
+        dialogueTextExtractor.setCjkOcr(wantTranslateModes);
+        dialogueTextExtractor.setTranslateToEnglish(translateOcr);
         if (shareCaption != null) {
             shareCaption.setVisibility(assistMode == AssistMode.SHARE ? View.VISIBLE : View.GONE);
             if (assistMode != AssistMode.SHARE) {
@@ -1630,8 +1661,9 @@ public class PanelMainActivity extends AppCompatActivity {
             }
         }
         refreshAssistModeButtons();
+        refreshMtEngineButtons();
         refreshListenButton();
-        if (assistMode == AssistMode.TRANSLATE || assistMode == AssistMode.SHARE) {
+        if (translateOcr) {
             OnDeviceTranslator.get(this).ensureReady(ok -> { });
         }
         if (assistMode == AssistMode.LISTEN) {
@@ -1656,17 +1688,36 @@ public class PanelMainActivity extends AppCompatActivity {
     }
 
     private void refreshAssistModeButtons() {
-        Button def = findViewById(R.id.assist_mode_default);
-        Button tr = findViewById(R.id.assist_mode_translate);
-        Button listen = findViewById(R.id.assist_mode_listen);
-        Button share = findViewById(R.id.assist_mode_share);
-        if (def == null || tr == null || listen == null || share == null) {
+        styleAssistChip(findViewById(R.id.assist_mode_default), assistMode == AssistMode.DEFAULT);
+        styleAssistChip(findViewById(R.id.assist_mode_translate), assistMode == AssistMode.TRANSLATE);
+        styleAssistChip(findViewById(R.id.assist_mode_listen), assistMode == AssistMode.LISTEN);
+        styleAssistChip(findViewById(R.id.assist_mode_share), assistMode == AssistMode.SHARE);
+        TextView pipeline = findViewById(R.id.assist_pipeline_status);
+        if (pipeline != null) {
+            pipeline.setText(assistMode.pipelineStringRes(settingsStore.getUseOpusTranslate()));
+        }
+    }
+
+    private void styleAssistChip(Button btn, boolean active) {
+        if (btn == null) {
             return;
         }
-        def.setAlpha(assistMode == AssistMode.DEFAULT ? 1f : 0.45f);
-        tr.setAlpha(assistMode == AssistMode.TRANSLATE ? 1f : 0.45f);
-        listen.setAlpha(assistMode == AssistMode.LISTEN ? 1f : 0.45f);
-        share.setAlpha(assistMode == AssistMode.SHARE ? 1f : 0.45f);
+        btn.setAlpha(1f);
+        btn.setBackgroundTintList(android.content.res.ColorStateList.valueOf(
+                getColor(active ? R.color.assist_chip_active_bg : R.color.dock_icon_bg)));
+        btn.setTextColor(active ? 0xFFFFFFFF : getColor(R.color.text_primary));
+    }
+
+    private void setUseOpusTranslate(boolean useOpus) {
+        settingsStore.setUseOpusTranslate(useOpus);
+        applyAssistMode(assistMode, false);
+        refreshMtEngineButtons();
+    }
+
+    private void refreshMtEngineButtons() {
+        boolean useOpus = settingsStore.getUseOpusTranslate();
+        styleAssistChip(findViewById(R.id.mt_engine_opus), useOpus);
+        styleAssistChip(findViewById(R.id.mt_engine_mlkit), !useOpus);
     }
 
     private void setSessionStereo(boolean on) {
@@ -2038,6 +2089,16 @@ public class PanelMainActivity extends AppCompatActivity {
         }
         female.setAlpha(male ? 0.45f : 1f);
         maleBtn.setAlpha(male ? 1f : 0.45f);
+    }
+
+    private String ocrSmoothnessLabel(int percent) {
+        if (percent >= 70) {
+            return getString(R.string.ocr_smoothness_smooth);
+        }
+        if (percent >= 35) {
+            return getString(R.string.ocr_smoothness_balanced);
+        }
+        return getString(R.string.ocr_smoothness_fast);
     }
 
     private String listenSmoothnessLabel(int percent) {
@@ -2712,10 +2773,8 @@ public class PanelMainActivity extends AppCompatActivity {
                     ? new Rect(halfWidth, 0, canvasW, canvasH)
                     : new Rect(0, 0, halfWidth, canvasH);
             int direction = rightEye ? -1 : 1;
-            Bitmap src = browserCaptureBitmap;
-            Rect dest = (src != null)
-                    ? containFit(eyeBounds, src.getWidth(), src.getHeight())
-                    : eyeBounds;
+            // Match drawStereoMirrorFrame: eyes fill the half-canvas (no letterbox).
+            Rect dest = eyeBounds;
             float destX = dest.left + nx * dest.width();
             float destY = dest.top + ny * dest.height();
             float[] uv = invertParallaxMesh(destX, destY, dest, cachedParallaxGrid, direction);
@@ -2792,22 +2851,6 @@ public class PanelMainActivity extends AppCompatActivity {
                 + s10 * fx * (1f - fy)
                 + s01 * (1f - fx) * fy
                 + s11 * fx * fy;
-    }
-
-    private static Rect containFit(Rect box, int srcW, int srcH) {
-        if (box.width() <= 0 || box.height() <= 0 || srcW <= 0 || srcH <= 0) {
-            return box;
-        }
-        float boxA = box.width() / (float) box.height();
-        float srcA = srcW / (float) srcH;
-        if (srcA > boxA) {
-            int h = Math.max(1, Math.round(box.width() / srcA));
-            int top = box.top + (box.height() - h) / 2;
-            return new Rect(box.left, top, box.right, top + h);
-        }
-        int w = Math.max(1, Math.round(box.height() * srcA));
-        int left = box.left + (box.width() - w) / 2;
-        return new Rect(left, box.top, left + w, box.bottom);
     }
 
     private static float clamp01(float value) {
@@ -3563,16 +3606,23 @@ public class PanelMainActivity extends AppCompatActivity {
      * actual shape.
      */
     private void fitSurfaceToCaptureAspectRatio() {
+        if (contentArea == null || gameRenderSurface == null) {
+            return;
+        }
         int areaW = contentArea.getWidth();
         int areaH = contentArea.getHeight();
         if (areaW <= 0 || areaH <= 0) {
             return;
         }
-        // Fill content_area edge-to-edge. Letterboxing the SurfaceView itself is what
-        // added the visible pad around the cast; the full captured window is drawn
-        // into this surface (see drawStereoMirrorFrame), so matching the area size
-        // keeps the stream on the panel edges without the old source-crop detector.
+        // Fill content_area edge-to-edge. Only touch LayoutParams when size actually
+        // changes — setLayoutParams on every layout pass caused an infinite
+        // requestLayout storm that blanked the SurfaceView (black cast).
         FrameLayout.LayoutParams params = (FrameLayout.LayoutParams) gameRenderSurface.getLayoutParams();
+        if (params.width == areaW
+                && params.height == areaH
+                && params.gravity == android.view.Gravity.FILL) {
+            return;
+        }
         params.width = areaW;
         params.height = areaH;
         params.gravity = android.view.Gravity.FILL;
@@ -4241,6 +4291,7 @@ public class PanelMainActivity extends AppCompatActivity {
     /**
      * Renders {@code frame} into the mirror surface. With 3D on: side-by-side eyes +
      * parallax mesh. With 3D off: one full-bleed image (no mesh, no half-width stretch).
+     * Fills each destination rect edge-to-edge (no letterbox bars in the panel).
      */
     private void drawStereoMirrorFrame(Bitmap frame) {
         if (stereoHandoff) {
@@ -4270,19 +4321,15 @@ public class PanelMainActivity extends AppCompatActivity {
         try {
             canvas.drawColor(Color.BLACK);
             if (!forceStereoEnabled) {
-                Rect fit = containFit(
-                        new Rect(0, 0, canvas.getWidth(), canvas.getHeight()),
-                        frame.getWidth(), frame.getHeight());
-                canvas.drawBitmap(frame, null, fit, MESH_PAINT);
+                Rect fill = new Rect(0, 0, canvas.getWidth(), canvas.getHeight());
+                canvas.drawBitmap(frame, null, fill, MESH_PAINT);
                 return;
             }
             int halfWidth = canvas.getWidth() / 2;
             float[][] parallaxGrid = cachedParallaxGrid;
-            Rect leftEye = containFit(new Rect(0, 0, halfWidth, canvas.getHeight()),
-                    frame.getWidth(), frame.getHeight());
+            Rect leftEye = new Rect(0, 0, halfWidth, canvas.getHeight());
             // Same width as left — avoid odd-pixel right eye looking wider.
-            Rect rightEye = containFit(new Rect(halfWidth, 0, halfWidth + halfWidth, canvas.getHeight()),
-                    frame.getWidth(), frame.getHeight());
+            Rect rightEye = new Rect(halfWidth, 0, halfWidth + halfWidth, canvas.getHeight());
             drawEyeWithParallaxMesh(canvas, frame, leftEye, parallaxGrid, 1);
             drawEyeWithParallaxMesh(canvas, frame, rightEye, parallaxGrid, -1);
         } finally {
