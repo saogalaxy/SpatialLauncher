@@ -5,7 +5,8 @@ Working draft for the Developer Dashboard. Source concepts came from the Google 
 updated for the **current** app (Listen, page translate, My Books, 3D glasses, leave-source-open cast).
 
 Screenshots live in [`screenshots/`](screenshots/). Shoot notes: [`SCREENSHOTS.md`](SCREENSHOTS.md).  
-Privacy policy for the listing URL: [`PRIVACY.md`](PRIVACY.md) (must be hosted publicly for submission).
+Privacy policy for the listing URL: [`PRIVACY.md`](PRIVACY.md). Once the repo is public, use  
+`https://github.com/saogalaxy/SpatialLauncher/blob/main/docs/PRIVACY.md` in the Developer Dashboard.
 
 ---
 
@@ -31,8 +32,7 @@ Translate untranslated mobile UIs, follow foreign dialogue, multitask a cast nex
 
 ### Notes
 
-- First **Listen** may download translate packs over Wi‑Fi once.  
-- Female TTS / SenseVoice / Japanese OCR path / page model are bundled; male voice and some ZH/KO packs are optional downloads.  
+- Female + male TTS, SenseVoice, OPUS JA/ZH/KO, page Qwen, and 3D depth ship in the APK (same pack for Meta Store and `easy_install`).  
 - See in-headset **?** Help or [`HELP.md`](HELP.md) for combos and dual-mode icons.
 
 ---
@@ -115,7 +115,7 @@ Use these files from `docs/screenshots/`. Meta wants representative in-headset s
 ## Privacy & data safety (dashboard)
 
 - Paste a **public** URL of [`PRIVACY.md`](PRIVACY.md) (GitHub Pages, public gist, or published Google Doc).  
-- Honest summary: **on-device by default**; optional Wi‑Fi for Listen ML Kit packs, male TTS, ZH/KO packs, Google Translate button, LAN book import.  
+- Honest summary: **on-device by default**; optional Wi‑Fi only for Google Translate button and LAN book import. No Play Store / no first-use model downloads.  
 - No developer analytics backend.
 
 ---

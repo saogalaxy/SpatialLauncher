@@ -38,14 +38,13 @@ The app declares `INTERNET` so these **optional** features can work. They run on
 
 | When | What leaves / downloads |
 |------|-------------------------|
-| First **Listen** (ear) | Google **ML Kit** language packs (JA/ZH/KO→EN) may download over Wi‑Fi |
-| **Male** TTS voice | Optional Piper voice download (female is bundled) |
-| First **Chinese / Korean** OCR caption packs | Optional OPUS model download (Japanese OCR path is bundled) |
 | Browser **Google** translate button | Page text may be sent to **Google Translate** over the network for that request |
 | **PC EPUB import** (long-press book) | Local **Wi‑Fi LAN** HTTP to your PC running Novel Translator — stays on your network; not a public cloud upload |
 | Sideload / updates | Normal package install via your tooling; not part of runtime telemetry |
 
-If you never turn on Listen, never pick Male TTS, never use Google Translate, and never start PC import, the app can run cast / OCR / female TTS / bundled translate without those downloads.
+If you never use Google Translate and never start PC import, the app can run cast / OCR / Listen / TTS / on-device translate **fully offline** (no Play Store, no model downloads). Male TTS and ZH/KO OPUS ship in the same APK as the Meta Store and desktop installer builds.
+
+Listen uses bundled OPUS (not Google ML Kit Translate).
 
 ## 5. Permissions (local use)
 
@@ -53,7 +52,7 @@ If you never turn on Listen, never pick Male TTS, never use Google Translate, an
 |------------|-----|
 | **MediaProjection** (share sheet) | Capture the window you select for cast, OCR, and Listen audio |
 | **RECORD_AUDIO** | Listen path (cast playback / mic as required by the OS) |
-| **INTERNET / NETWORK_STATE / WIFI_STATE** | Optional model packs, Google Translate, LAN book import |
+| **INTERNET / NETWORK_STATE / WIFI_STATE** | Optional Google Translate button, LAN book import |
 | **FOREGROUND_SERVICE** (+ media projection / data sync types) | Keep capture and import services alive while in use |
 | **POST_NOTIFICATIONS** | Foreground service / status as required by Android |
 | **Package visibility (queries)** | List installed apps for the dock “Add App” picker |
@@ -62,10 +61,10 @@ We do not use these permissions to build a profile or sell data.
 
 ## 6. Third parties
 
-- **Google ML Kit** — used for OCR and Listen translation packs; downloads/models follow Google’s on-device translate components when you enable those features.  
+- **Google ML Kit** — OCR text recognition only (language AARs bundled in the APK; no Play Store model download). Listen/OCR **translate** uses bundled OPUS, not ML Kit Translate.  
 - **Google Translate (optional button)** — only if you tap **Google** in the browser chrome.  
 - **Meta / Horizon OS** — standard system share sheet and store distribution; governed by Meta’s policies.  
-- **Piper / sherpa-onnx / SenseVoice / Qwen** — on-device model runtimes; optional male voice may download from a public model host when you choose Male.
+- **Piper / sherpa-onnx / SenseVoice / Qwen / OPUS** — on-device model runtimes; female + male Piper and JA/ZH/KO OPUS are packed into the APK at build time.
 
 We do not embed third-party ad or analytics SDKs.
 
@@ -86,4 +85,8 @@ Or contact the developer through the Meta Horizon app listing when published.
 
 ---
 
-**Store note:** Meta Horizon Store requires a **publicly reachable** privacy policy URL. This file in a **private** repo is not enough by itself — publish this same text (GitHub Pages, public gist, or a published Google Doc) and paste that URL into the Developer Dashboard.
+**Store note:** Meta Horizon Store needs a **publicly reachable** privacy policy URL. Once this repository is public, you can use:
+
+`https://github.com/saogalaxy/SpatialLauncher/blob/main/docs/PRIVACY.md`
+
+(or a GitHub Pages / raw.githubusercontent.com mirror). Until then, publish this same text via a public gist or a published Google Doc.

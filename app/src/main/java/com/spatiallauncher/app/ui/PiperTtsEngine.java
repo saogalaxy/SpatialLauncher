@@ -234,10 +234,11 @@ final class PiperTtsEngine {
         return speechRate;
     }
 
-    /** Disk only — does not construct OfflineTts. */
+    /** Disk only — does not construct OfflineTts. Female + male both ship in the APK. */
     void unpackVoiceArchives() {
         try {
             extractIfMissing(FEMALE_DIR, FEMALE_ONNX);
+            extractIfMissing(MALE_DIR, MALE_ONNX);
         } catch (Throwable t) {
             Log.w(TAG, "Piper archive unpack failed", t);
         }
@@ -250,16 +251,6 @@ final class PiperTtsEngine {
             return;
         }
         BundledArchive.extractTarBz2(app, "models/piper/" + dirName + ".tar.bz2", modelsRoot);
-    }
-
-    private void fetchMaleVoiceArchive() throws Exception {
-        File archive = new File(app.getFilesDir(), "piper-dl/" + MALE_DIR + ".tar.bz2");
-        OptionalHttp.download(
-                "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/"
-                        + MALE_DIR + ".tar.bz2",
-                archive,
-                1_000_000L);
-        BundledArchive.extractTarBz2File(archive, modelsRoot);
     }
 
     void ensureReadyAsync() {
@@ -275,13 +266,8 @@ final class PiperTtsEngine {
                 File dir = new File(modelsRoot, dirName);
                 File onnx = new File(dir, onnxName);
                 if (!onnx.isFile()) {
-                    if (male) {
-                        PanelAlerts.show(app, R.string.tts_voice_downloading);
-                        fetchMaleVoiceArchive();
-                    } else {
-                        BundledArchive.extractTarBz2(
-                                app, "models/piper/" + dirName + ".tar.bz2", modelsRoot);
-                    }
+                    BundledArchive.extractTarBz2(
+                            app, "models/piper/" + dirName + ".tar.bz2", modelsRoot);
                 }
                 File tokens = new File(dir, "tokens.txt");
                 File dataDir = new File(dir, "espeak-ng-data");

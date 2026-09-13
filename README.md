@@ -48,7 +48,7 @@ See [tools/README.md](tools/README.md).
 - **Dock cast** — mirror an app window; leave the source app open  
 - **3D** — stereo depth (glasses on / “3D” off)  
 - **OCR zones + TTS** — read on-screen dialogue (continuous blue loop)  
-- **Listen** — cast audio → SenseVoice → ML Kit → Piper (best with pause breaks)  
+- **Listen** — cast audio → SenseVoice → bundled OPUS → Piper (best with pause breaks)  
 - **Browser** — Widevine WebView; on-device Translate or Google; Read  
 - **My Books** — EPUB shelf; PC import over Wi‑Fi; tap book again to close  
 

@@ -5,7 +5,6 @@ import android.content.res.AssetManager;
 import android.util.Log;
 
 import java.io.File;
-import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.InputStream;
 
@@ -29,8 +28,10 @@ final class OfflineModelPack {
             Context app = context.getApplicationContext();
             try {
                 copyTranslatePair(app, "jaen");
+                copyTranslatePair(app, "zhen");
+                copyTranslatePair(app, "koen");
                 unpacked = true;
-                Log.i(TAG, "ja-en OPUS on disk");
+                Log.i(TAG, "ja/zh/ko OPUS on disk");
             } catch (Throwable t) {
                 Log.w(TAG, "unpack failed", t);
             }
@@ -64,8 +65,8 @@ final class OfflineModelPack {
     }
 
     /**
-     * Bundled ja-en from APK, or HTTPS pull for optional zh-en / ko-en the first
-     * time captions need that script.
+     * Unpack ja/zh/ko→en from APK assets (same pack for store + sideload installer).
+     * No network — models are fetched at Gradle build time into assets.
      */
     static File ensureTranslatePair(Context context, String pairId) throws Exception {
         if (translatePairReady(context, pairId)) {
@@ -78,21 +79,9 @@ final class OfflineModelPack {
         if (translatePairReady(context, pairId)) {
             return translateDir(context, pairId);
         }
-        if ("jaen".equals(pairId)) {
-            throw new IllegalStateException("bundled ja-en OPUS-MT is missing from the APK");
-        }
-        String repo = opusRepo(pairId);
-        if (repo == null) {
-            throw new IllegalStateException("unknown translate pair " + pairId);
-        }
-        String label = "zhen".equals(pairId) ? "Chinese" : "Korean";
-        PanelAlerts.show(context, "Downloading " + label + " captions…");
-        fetchOpusPair(context, pairId, repo);
-        if (!translatePairReady(context, pairId)) {
-            throw new IllegalStateException(label + " captions download failed");
-        }
-        PanelAlerts.show(context, label + " captions ready");
-        return translateDir(context, pairId);
+        throw new IllegalStateException(
+                "bundled OPUS-MT pair missing from APK: " + pairId
+                        + " (rebuild so downloadOfflineModels packs jaen/zhen/koen)");
     }
 
     static String pickCaptionPair(String text) {
@@ -106,81 +95,6 @@ final class OfflineModelPack {
             return "zhen";
         }
         return "jaen";
-    }
-
-    private static String opusRepo(String pairId) {
-        if ("zhen".equals(pairId)) {
-            return "Xenova/opus-mt-zh-en";
-        }
-        if ("koen".equals(pairId)) {
-            return "Xenova/opus-mt-ko-en";
-        }
-        return null;
-    }
-
-    private static void fetchOpusPair(Context context, String pairId, String repo) throws Exception {
-        File dest = translateDir(context, pairId);
-        dest.mkdirs();
-        String hf = "https://huggingface.co/" + repo + "/resolve/main";
-        OptionalHttp.download(hf + "/onnx/encoder_model_quantized.onnx",
-                new File(dest, "encoder.onnx"), 1_000_000L);
-        OptionalHttp.download(hf + "/onnx/decoder_model_quantized.onnx",
-                new File(dest, "decoder.onnx"), 1_000_000L);
-        OptionalHttp.download(hf + "/config.json", new File(dest, "config.json"), 64L);
-        File tok = new File(dest, "tokenizer.json");
-        File pieces = new File(dest, "pieces.tsv");
-        if (!pieces.isFile() || pieces.length() < 64) {
-            OptionalHttp.download(hf + "/tokenizer.json", tok, 1024L);
-            writePiecesTsv(tok, pieces);
-            if (tok.exists()) {
-                tok.delete();
-            }
-        }
-    }
-
-    private static void writePiecesTsv(File tokenizerJson, File pieces) throws Exception {
-        byte[] data = new byte[(int) tokenizerJson.length()];
-        try (FileInputStream in = new FileInputStream(tokenizerJson)) {
-            int off = 0;
-            while (off < data.length) {
-                int n = in.read(data, off, data.length - off);
-                if (n < 0) {
-                    break;
-                }
-                off += n;
-            }
-        }
-        String raw = new String(data, java.nio.charset.StandardCharsets.UTF_8);
-        org.json.JSONObject root = new org.json.JSONObject(raw);
-        Object vocab = root.getJSONObject("model").get("vocab");
-        try (java.io.OutputStreamWriter w = new java.io.OutputStreamWriter(
-                new FileOutputStream(pieces), java.nio.charset.StandardCharsets.UTF_8)) {
-            if (vocab instanceof org.json.JSONObject) {
-                org.json.JSONObject map = (org.json.JSONObject) vocab;
-                org.json.JSONArray names = map.names();
-                if (names != null) {
-                    for (int i = 0; i < names.length(); i++) {
-                        String piece = names.getString(i);
-                        w.write(escapePiece(piece) + "\t" + map.get(piece) + "\n");
-                    }
-                }
-            } else if (vocab instanceof org.json.JSONArray) {
-                org.json.JSONArray rows = (org.json.JSONArray) vocab;
-                for (int i = 0; i < rows.length(); i++) {
-                    Object row = rows.get(i);
-                    if (row instanceof org.json.JSONArray) {
-                        org.json.JSONArray pair = (org.json.JSONArray) row;
-                        w.write(escapePiece(pair.optString(0, "")) + "\t" + pair.opt(1) + "\n");
-                    } else {
-                        w.write(escapePiece(String.valueOf(row)) + "\t0\n");
-                    }
-                }
-            }
-        }
-    }
-
-    private static String escapePiece(String piece) {
-        return piece.replace("\\", "\\\\").replace("\t", "\\t");
     }
 
     private static void copyTranslatePair(Context context, String pairId) throws Exception {

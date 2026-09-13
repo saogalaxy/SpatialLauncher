@@ -778,7 +778,7 @@ public class PanelMainActivity extends AppCompatActivity {
             settingsStore.setTtsMaleVoice(true);
             PiperTtsEngine.get(this).setMaleVoice(true);
             refreshVoiceButtons(true);
-            PanelAlerts.show(this, R.string.tts_voice_downloading);
+            PanelAlerts.show(this, R.string.tts_voice_switched_male);
             scheduleTtsVoicePreview(1400);
         });
 
@@ -1637,7 +1637,7 @@ public class PanelMainActivity extends AppCompatActivity {
         if (assistMode == AssistMode.LISTEN) {
             if (previous != AssistMode.LISTEN) {
                 stereoBeforeListen = forceStereoEnabled;
-                // Settings chip path — warm ML Kit packs (toolbar already called warmListenMt).
+                // Settings chip path — warm bundled OPUS (toolbar already called warmListenMt).
                 ListenMtTranslator.get(this).ensureReady((ok, message) -> { });
             }
             setSessionStereo(false);

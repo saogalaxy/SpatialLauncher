@@ -77,8 +77,8 @@ dependencies {
     implementation 'com.google.mlkit:text-recognition-japanese:16.0.1'
     implementation 'com.google.mlkit:text-recognition-chinese:16.0.1'
     implementation 'com.google.mlkit:text-recognition-korean:16.0.1'
-    // Listen talk turns: offline MT (JA/ZH/KO → EN) after SenseVoice ASR.
-    implementation 'com.google.mlkit:translate:17.0.3'
+    // Listen talk turns: same bundled OPUS-MT as OCR (see ListenMtTranslator / TranslateMtService).
+    // Do NOT add com.google.mlkit:translate — it pulls Play Services model downloads.
 
     // Piper first so pickFirst libonnxruntime.so is sherpa's (OrtGetApiBase).
     implementation 'com.github.k2-fsa.sherpa-onnx:sherpa-onnx:v1.13.5'
@@ -132,29 +132,28 @@ def downloadTo = { Object... args ->
 }
 
 tasks.register("downloadOfflineModels") {
-    description = "Pack Piper, SenseVoice, OPUS ja-en, and Qwen 1.5B into APK assets."
+    description = "Pack Piper (F+M), SenseVoice, OPUS ja/zh/ko→en, and Qwen 1.5B into APK assets (store + sideload)."
     doLast {
         downloadTo(
                 "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-piper-en_US-amy-low.tar.bz2",
                 new File(piperAssets, "vits-piper-en_US-amy-low.tar.bz2"))
-        def staleRyan = new File(piperAssets, "vits-piper-en_US-ryan-low.tar.bz2")
-        if (staleRyan.exists()) {
-            staleRyan.delete()
-            logger.lifecycle("Removed bundled male Piper (optional download)")
-        }
+        downloadTo(
+                "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-piper-en_US-ryan-low.tar.bz2",
+                new File(piperAssets, "vits-piper-en_US-ryan-low.tar.bz2"))
         downloadTo(
                 "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17.tar.bz2",
                 new File(asrAssets, "sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17.tar.bz2"))
 
-        ["zhen", "enflow"].each { id ->
-            File stale = new File(translateAssets, id)
-            if (stale.exists()) {
-                stale.deleteDir()
-                logger.lifecycle("Removed bundled ${id} (optional or unused)")
-            }
+        // Drop unused fluency pack if a local tree still has it.
+        File staleEnflow = new File(translateAssets, "enflow")
+        if (staleEnflow.exists()) {
+            staleEnflow.deleteDir()
+            logger.lifecycle("Removed unused enflow pack")
         }
         def pairs = [
-                [id: "jaen", repo: "Xenova/opus-mt-ja-en"]
+                [id: "jaen", repo: "Xenova/opus-mt-ja-en"],
+                [id: "zhen", repo: "Xenova/opus-mt-zh-en"],
+                [id: "koen", repo: "Xenova/opus-mt-ko-en"]
         ]
         pairs.each { pair ->
             def dir = new File(translateAssets, pair.id)
