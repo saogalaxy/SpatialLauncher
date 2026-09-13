@@ -27,3 +27,6 @@ app/src/main/assets/models/qwen/
 !docs/screenshots/*.jpeg
 !docs/screenshots/*.webp
 !docs/screenshots/*.md
+
+# Raw Meta Cam pull working set
+docs/screenshots/_from_headset/

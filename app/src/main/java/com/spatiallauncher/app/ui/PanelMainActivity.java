@@ -3219,18 +3219,38 @@ public class PanelMainActivity extends AppCompatActivity {
         }
     }
 
+    /** Pinned apps per dock row while idle; a 5th app starts a new row that grows upward. */
+    private static final int DOCK_APPS_PER_ROW = 4;
+
+    /** Last dock layout mode: true = compact content row, false = idle (may wrap). */
+    private Boolean dockLaidOutCompact;
+
     /**
      * Rebuilds the dock: one item per pinned, still-installed package (in the order
      * they were added), followed by an always-present "Add Game" control. Deliberately
      * shows zero per-game icons until the user has actually pinned one — the dock pill
      * itself still renders (as the way to reach "Add Game"), matching the requirement
      * that game icons only appear once a game has been added.
+     * <p>
+     * Idle home: after four pinned apps, further icons wrap onto rows above so the TTS
+     * player can stay open without chopping the dock. Casting / browser / books collapse
+     * back to a single compact icon row under the content.
      */
     private void refreshDock() {
+        rebuildDockForCompact(isContentViewActive());
+    }
+
+    /** True while cast, browser, or book is filling the content area. */
+    private boolean isContentViewActive() {
+        return mirroringApp != null || isBrowserOpen();
+    }
+
+    private void rebuildDockForCompact(boolean compact) {
         dockContainer.removeAllViews();
 
         Set<String> pinnedPackages = libraryStore.getPinnedPackages();
         List<String> stalePackages = new ArrayList<>();
+        List<View> appItems = new ArrayList<>();
 
         for (String packageName : pinnedPackages) {
             InstalledAppInfo app = resolveInstalledApp(packageName);
@@ -3238,15 +3258,72 @@ public class PanelMainActivity extends AppCompatActivity {
                 stalePackages.add(packageName);
                 continue;
             }
-            dockContainer.addView(createDockItemView(app));
+            appItems.add(createDockItemView(app));
         }
 
         for (String stalePackage : stalePackages) {
             libraryStore.removePinnedPackage(stalePackage);
         }
 
-        dockContainer.addView(createAddGameItemView());
-        setHomeRowCompact(mirroringApp != null || isBrowserOpen());
+        dockLaidOutCompact = compact;
+        layoutDockItems(appItems, /*wrapUp=*/ !compact);
+        applyHomeRowCompact(compact);
+    }
+
+    /**
+     * @param wrapUp idle multi-row (expand upward after 4 apps); false = one content row
+     */
+    private void layoutDockItems(List<View> appItems, boolean wrapUp) {
+        int appCount = appItems.size();
+        if (!wrapUp) {
+            LinearLayout row = newDockRow();
+            for (View item : appItems) {
+                row.addView(item);
+            }
+            row.addView(createAddGameItemView());
+            dockContainer.addView(row);
+            return;
+        }
+
+        // First four apps stay on the bottom row (aligned with TTS). Extra apps wrap
+        // onto rows above so the dock expands upward into the cast area.
+        int appRowCount = Math.max(1, (appCount + DOCK_APPS_PER_ROW - 1) / DOCK_APPS_PER_ROW);
+        if (appCount == 0) {
+            appRowCount = 1;
+        }
+        boolean addNeedsOwnRow = appCount > 0 && (appCount % DOCK_APPS_PER_ROW == 0);
+        int rowCount = appRowCount + (addNeedsOwnRow ? 1 : 0);
+
+        // Add top→bottom: overflow rows first, primary (first 4 apps) last.
+        for (int visual = 0; visual < rowCount; visual++) {
+            int rowIndex = rowCount - 1 - visual;
+            LinearLayout row = newDockRow();
+            if (addNeedsOwnRow && rowIndex == appRowCount) {
+                row.addView(createAddGameItemView());
+            } else {
+                int start = rowIndex * DOCK_APPS_PER_ROW;
+                int end = Math.min(start + DOCK_APPS_PER_ROW, appCount);
+                for (int i = start; i < end; i++) {
+                    row.addView(appItems.get(i));
+                }
+                boolean isLastAppRow = rowIndex == appRowCount - 1;
+                if (appCount == 0 || (isLastAppRow && !addNeedsOwnRow)) {
+                    row.addView(createAddGameItemView());
+                }
+            }
+            dockContainer.addView(row);
+        }
+    }
+
+    private LinearLayout newDockRow() {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(android.view.Gravity.CENTER_VERTICAL | android.view.Gravity.START);
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT);
+        row.setLayoutParams(params);
+        return row;
     }
 
     private View createDockItemView(InstalledAppInfo app) {
@@ -4449,11 +4526,20 @@ public class PanelMainActivity extends AppCompatActivity {
     }
 
     /**
-     * Idle dock is the full icon+label tiles. While a cast is running it collapses into
-     * a thin home row under the stream (icons only, smaller buttons) so the row never
-     * covers the content being mirrored.
+     * Idle dock is the full icon+label tiles (and may wrap upward after 4 apps). While
+     * cast / browser / book fills the content area it collapses into a thin single home
+     * row under the stream (icons only, smaller buttons) so the dock never covers the
+     * content being viewed.
      */
     private void setHomeRowCompact(boolean compact) {
+        if (dockLaidOutCompact == null || dockLaidOutCompact != compact) {
+            rebuildDockForCompact(compact);
+            return;
+        }
+        applyHomeRowCompact(compact);
+    }
+
+    private void applyHomeRowCompact(boolean compact) {
         int rowPadH = dp(compact ? 8 : 10);
         int rowPadV = dp(compact ? 4 : 8);
         controlRow.setPadding(rowPadH, rowPadV, rowPadH, rowPadV);
@@ -4490,31 +4576,42 @@ public class PanelMainActivity extends AppCompatActivity {
         int tileSize = compact ? dp(40) : Math.max(dp(56), buttonSize + dp(16));
         int itemPad = dp(compact ? 6 : 8);
         int itemMargin = dp(compact ? 6 : 8);
-        for (int i = 0; i < dockContainer.getChildCount(); i++) {
-            View item = dockContainer.getChildAt(i);
-            LinearLayout.LayoutParams itemParams = (LinearLayout.LayoutParams) item.getLayoutParams();
-            itemParams.width = tileSize;
-            itemParams.height = compact ? tileSize : LinearLayout.LayoutParams.WRAP_CONTENT;
-            itemParams.setMarginEnd(itemMargin);
-            item.setLayoutParams(itemParams);
-            item.setPadding(itemPad, itemPad, itemPad, itemPad);
-            item.setBackgroundResource(
-                    compact ? R.drawable.bg_dock_icon_compact : R.drawable.bg_dock_icon);
-
-            ImageView icon = item.findViewById(R.id.dock_item_icon);
-            if (icon != null) {
-                LinearLayout.LayoutParams iconParams = (LinearLayout.LayoutParams) icon.getLayoutParams();
-                iconParams.width = iconSize;
-                iconParams.height = iconSize;
-                icon.setLayoutParams(iconParams);
+        int rowGap = dp(compact ? 4 : 6);
+        for (int r = 0; r < dockContainer.getChildCount(); r++) {
+            View rowView = dockContainer.getChildAt(r);
+            if (!(rowView instanceof LinearLayout)) {
+                continue;
             }
-            TextView label = item.findViewById(R.id.dock_item_label);
-            if (label != null) {
-                label.setVisibility(compact ? View.GONE : View.VISIBLE);
+            LinearLayout row = (LinearLayout) rowView;
+            LinearLayout.LayoutParams rowParams = (LinearLayout.LayoutParams) row.getLayoutParams();
+            rowParams.topMargin = r == 0 ? 0 : rowGap;
+            row.setLayoutParams(rowParams);
+            for (int i = 0; i < row.getChildCount(); i++) {
+                View item = row.getChildAt(i);
+                LinearLayout.LayoutParams itemParams = (LinearLayout.LayoutParams) item.getLayoutParams();
+                itemParams.width = tileSize;
+                itemParams.height = compact ? tileSize : LinearLayout.LayoutParams.WRAP_CONTENT;
+                itemParams.setMarginEnd(itemMargin);
+                item.setLayoutParams(itemParams);
+                item.setPadding(itemPad, itemPad, itemPad, itemPad);
+                item.setBackgroundResource(
+                        compact ? R.drawable.bg_dock_icon_compact : R.drawable.bg_dock_icon);
+
+                ImageView icon = item.findViewById(R.id.dock_item_icon);
+                if (icon != null) {
+                    LinearLayout.LayoutParams iconParams = (LinearLayout.LayoutParams) icon.getLayoutParams();
+                    iconParams.width = iconSize;
+                    iconParams.height = iconSize;
+                    icon.setLayoutParams(iconParams);
+                }
+                TextView label = item.findViewById(R.id.dock_item_label);
+                if (label != null) {
+                    label.setVisibility(compact ? View.GONE : View.VISIBLE);
+                }
             }
         }
 
-        if (mirroringApp != null || isBrowserOpen()) {
+        if (isContentViewActive()) {
             contentArea.post(() -> {
                 fitSurfaceToCaptureAspectRatio();
                 activeStereoSurface().post(this::lockSurfaceBufferSize);

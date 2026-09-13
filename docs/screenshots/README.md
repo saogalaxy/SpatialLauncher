@@ -1,23 +1,34 @@
 # Screenshots
 
-Only verified shots live here. Replace / add files using names from [SCREENSHOTS.md](../SCREENSHOTS.md).
+Store / GitHub images for Spatial Launcher. Pulled from Quest Meta Cam captures in
+`/sdcard/Oculus/Screenshots` and mapped to the shoot list in [SCREENSHOTS.md](../SCREENSHOTS.md).
 
-## Current
+## Gallery
 
-![Dock / home](01-dock-home.png)
+![Dock / home](01-dock-home.jpg)
 
-## Still needed (from VR shoot)
+![Share dialog](01b-share-dialog.jpg)
 
-- `01b-share-dialog.png`
-- `02-cast-source-open.png` (source app open beside launcher)
-- `03-3d-off.png`
-- `04-settings-depth.png`
-- `05-ocr-zones.png`
-- `06-tts-continuous.png`
-- `07-listen.png`
-- `08-browser.png`
-- `09-page-translate.png`
-- `10-my-books.png`
-- `10b-book-open.png`
-- `11-help.png`
-- `12-ocr-book-reading.png`
+![Cast + source open](02-cast-source-open.jpg)
+
+![3D off](03-3d-off.jpg)
+
+![Settings depth](04-settings-depth.jpg)
+
+![OCR zones](05-ocr-zones.jpg)
+
+![TTS continuous](06-tts-continuous.jpg)
+
+![Listen](07-listen.jpg)
+
+![Browser](08-browser.jpg)
+
+![Page translate](09-page-translate.jpg)
+
+![My Books](10-my-books.jpg)
+
+![Book open](10b-book-open.jpg)
+
+![Help](11-help.jpg)
+
+![OCR + book reading](12-ocr-book-reading.jpg)
