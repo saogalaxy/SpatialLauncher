@@ -46,7 +46,7 @@
     <string name="help_start_subs_title">2. Read on-screen subs / dialogue</string>
     <string name="help_start_subs_body">Cast the show → OCR zones → box the subtitle band → Save → Done. Settings → turn TTS on → continuous (blue loop). Speech follows text in the boxes.</string>
     <string name="help_start_listen_title">3. Listen when there are no subs</string>
-    <string name="help_start_listen_body">Cast the app → tap the ear (turns red). Allow mic if asked. First Listen needs Wi‑Fi to download translate packs (see First-use downloads). Best with pause breaks between lines. Tap ear again to stop.</string>
+    <string name="help_start_listen_body">Cast the app → tap the ear (turns red). Allow mic if asked. Translate uses bundled OPUS (JA/ZH/KO in the APK). Best with pause breaks between lines. Tap ear again to stop.</string>
     <string name="help_start_translate_ocr_title">4. Translate on-screen foreign text</string>
     <string name="help_start_translate_ocr_body">OCR zones on the text → Settings → Assist → Translate → TTS on if you want it spoken. Cast or open the page that shows the text.</string>
     <string name="help_start_browser_title">5. Browser page translate / read</string>
@@ -54,18 +54,18 @@
     <string name="help_start_books_title">6. Open or import a book</string>
     <string name="help_start_books_body">Tap book = My Books shelf (tap again or Close to dismiss). Tap a title to open it. Tap book again while reading to close. Long-press book = PC import on/off.</string>
 
-    <string name="help_dl_intro_title">Needs Wi‑Fi once</string>
-    <string name="help_dl_intro_body">Some features pull models the first time you use them. After that they work offline. Stay on Wi‑Fi for the first run of each item below.</string>
+    <string name="help_dl_intro_title">Optional network</string>
+    <string name="help_dl_intro_body">Core cast / OCR / Listen / TTS / on-device page Translate work offline from the APK. Only the items below need Wi‑Fi when you use them.</string>
     <string name="help_dl_listen_title">Listen translate (ear button)</string>
-    <string name="help_dl_listen_body">First Listen downloads ML Kit packs (Japanese / Chinese / Korean → English). You’ll see “Downloading Listen translate…”. SenseVoice speech recognition is already in the app — no separate ASR download.</string>
+    <string name="help_dl_listen_body">Bundled in the APK with OCR — SenseVoice ASR + OPUS JA/ZH/KO→EN. No Play Store or first-use model download.</string>
     <string name="help_dl_male_title">Male TTS voice</string>
-    <string name="help_dl_male_body">Female Piper voice is bundled. Choosing Male in Settings downloads that voice once (~tens of MB from GitHub).</string>
+    <string name="help_dl_male_body">Female and male Piper voices are both in the APK. Pick Male in Settings — unpacks locally, no download.</string>
     <string name="help_dl_captions_title">Chinese / Korean OCR captions</string>
-    <string name="help_dl_captions_body">Japanese→English for on-screen Translate/OCR is bundled. First time you hit Chinese or Korean captions, those OPUS packs download once (“Downloading Chinese/Korean captions…”).</string>
+    <string name="help_dl_captions_body">Japanese, Chinese, and Korean→English OPUS packs ship in the APK (same for store and desktop installer builds).</string>
     <string name="help_dl_google_title">Google Translate (browser)</string>
     <string name="help_dl_google_body">Needs network each time you use it — not a one-time offline pack. On-device page Translate does not need that download.</string>
     <string name="help_dl_bundled_title">Already in the app (no download)</string>
-    <string name="help_dl_bundled_body">Female TTS, Listen speech-to-text (SenseVoice), Japanese OCR translate, page Qwen model, and 3D depth — unpack from the APK locally, no Wi‑Fi required.</string>
+    <string name="help_dl_bundled_body">Female + male TTS, SenseVoice, OPUS JA/ZH/KO, page Qwen, 3D depth, ML Kit OCR AARs — unpack from the APK locally.</string>
 
     <string name="help_dual_3d_title">3D — on / off</string>
     <string name="help_dual_3d_a">Off (“3D”)</string>
@@ -198,9 +198,9 @@
     <string name="listen_button_description">Listen mode — hear cast audio, translate, and speak (turns 3D off)</string>
     <string name="listen_mode_on">Listen on — TTS auto, 3D off. Cast an app to hear it.</string>
     <string name="listen_mode_off">Listen off</string>
-    <string name="listen_mt_downloading">Downloading Listen translate (offline)…</string>
+    <string name="listen_mt_downloading">Preparing Listen translate…</string>
     <string name="listen_mt_ready">Listen translate ready</string>
-    <string name="listen_mt_failed">Listen translate download failed — will speak ASR text until packs are ready</string>
+    <string name="listen_mt_failed">Listen translate failed — will speak ASR text until OPUS is ready</string>
     <string name="setting_listen_smoothness">Listen smoothness</string>
     <string name="setting_listen_smoothness_hint">Higher = longer phrases (smoother). Lower = smaller chunks (less lag behind video).</string>
     <string name="listen_smoothness_smooth">Smooth</string>
@@ -208,7 +208,7 @@
     <string name="listen_smoothness_fast">Fast</string>
     <string name="tts_voice_female">Female</string>
     <string name="tts_voice_male">Male</string>
-    <string name="tts_voice_downloading">Downloading male voice…</string>
+    <string name="tts_voice_switched_male">Male voice (bundled)</string>
     <string name="ocr_pick_app">Select the app or browser page these zones belong to, then save.</string>
     <string name="ocr_zones_for">Zones for: %1$s</string>
     <string name="ocr_browser">Browser</string>

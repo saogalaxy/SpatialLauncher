@@ -12,7 +12,7 @@ Tap a dock app → in the share sheet pick that app (**Just this window**). Leav
 Cast the show → **OCR zones** → box the subtitle band → Save → Done. Settings → **TTS on** → continuous (blue loop). Speech follows text in the boxes.
 
 ### 3. Listen when there are no subs
-Cast the app → tap the **ear** (turns red). Allow mic if asked. First Listen needs Wi‑Fi once for translate packs. Best with **pause breaks** between lines. Tap ear again to stop.
+Cast the app → tap the **ear** (turns red). Allow mic if asked. Translate uses bundled OPUS (JA/ZH/KO in the APK). Best with **pause breaks** between lines. Tap ear again to stop.
 
 ### 4. Translate on-screen foreign text
 OCR zones on the text → Settings → Assist → **Translate** → TTS on if you want it spoken.
@@ -23,16 +23,14 @@ OCR zones on the text → Settings → Assist → **Translate** → TTS on if yo
 ### 6. Open or import a book
 Tap **book** = My Books (tap again or **Close** to dismiss). Tap a title to open. Tap **book** again while reading to close. Long-press book = PC EPUB import on/off (same Wi‑Fi as Novel Translator).
 
-## First-use downloads (Wi‑Fi once)
+## Optional network
 
-| Feature | What downloads |
-|--------|----------------|
-| **Listen** (ear) | ML Kit JA/ZH/KO→EN packs |
-| **Male TTS** | Male Piper voice when you pick Male in Settings (female is bundled) |
-| **Chinese / Korean OCR captions** | OPUS packs on first use (Japanese is bundled) |
-| **Google Translate** | Needs network each time (not a one-time pack) |
+| Feature | What needs Wi‑Fi |
+|--------|------------------|
+| **Google Translate** | Network each time (browser button) |
+| **PC EPUB import** | Same Wi‑Fi as Novel Translator on your PC |
 
-**Already in the APK:** female TTS, SenseVoice ASR, Japanese OCR translate, page Qwen model, 3D depth.
+**Already in the APK (store + desktop installer):** female + male TTS, SenseVoice, OPUS JA/ZH/KO, page Qwen, 3D depth, ML Kit OCR AARs.
 
 ## Dual-mode icons
 

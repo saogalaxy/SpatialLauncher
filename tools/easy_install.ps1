@@ -1,5 +1,6 @@
 # Spatial Launcher Easy Installer (Quest)
-# Checks JDK / Node / headset, builds the debug APK if needed, installs with metavr.
+# Checks JDK / Node / headset, builds the debug APK if needed (full offline model pack
+# via downloadOfflineModels — same assets as Meta Store), installs with metavr.
 # Compatible with Windows PowerShell 5.1+
 
 param(
