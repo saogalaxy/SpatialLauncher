@@ -4,11 +4,24 @@ Private Meta Quest app: cast 2D apps into a spatial panel with optional **3D dep
 
 **Private repo:** https://github.com/saogalaxy/SpatialLauncher
 
+## Preview
+
+| Home | Cast + 3D | OCR zones |
+|------|-----------|-----------|
+| ![Home](docs/screenshots/01-dock-home.png) | ![Cast 3D](docs/screenshots/02b-cast-3d-depth.png) | ![OCR](docs/screenshots/05-ocr-zones.png) |
+
+| Browser | Translate | Settings |
+|---------|-----------|----------|
+| ![Browser](docs/screenshots/08-browser.png) | ![Translate](docs/screenshots/09-page-translate.png) | ![Settings](docs/screenshots/04-settings-depth.png) |
+
+More shots: [docs/screenshots/](docs/screenshots/) · shoot guide: [docs/SCREENSHOTS.md](docs/SCREENSHOTS.md)
+
 ## Quick install (Quest)
 
 1. Enable **Developer Mode** on the Quest  
 2. Plug in USB (or Wi‑Fi ADB) and accept debugging  
-3. Double-click **`Install to Quest.bat`**
+3. Prefer **`git clone`** this private repo (not only the ZIP) so Gradle wrapper + assets stay intact  
+4. Double-click **`Install to Quest.bat`**
 
 That runs `tools/easy_install.ps1`: checks JDK + Node/metavr + headset, builds the debug APK if needed, installs with replace + permissions, and launches the app.
 
