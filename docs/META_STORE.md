@@ -5,8 +5,8 @@ Working draft for the Developer Dashboard. Source concepts came from the Google 
 updated for the **current** app (Listen, page translate, My Books, 3D glasses, leave-source-open cast).
 
 Screenshots live in [`screenshots/`](screenshots/). Shoot notes: [`SCREENSHOTS.md`](SCREENSHOTS.md).  
-Privacy policy for the listing URL: [`PRIVACY.md`](PRIVACY.md). Once the repo is public, use  
-`https://github.com/saogalaxy/SpatialLauncher/blob/main/docs/PRIVACY.md` in the Developer Dashboard.
+Privacy policy for the listing URL: [`PRIVACY.md`](PRIVACY.md) —  
+`https://github.com/saogalaxy/SpatialLauncher/blob/main/docs/PRIVACY.md`
 
 ---
 
@@ -21,8 +21,10 @@ Cast apps in 3D, OCR→TTS dialogue, Listen when there are no subs, translate pa
 ### What you can do
 
 - **Cast an app in 3D** — Pin a game or browser to the dock, pick **Just this window** in the share sheet, leave **3D** on (glasses icon). **Keep the source app’s window open** so the stream stays live.
-- **Read on-screen subs / dialogue** — Draw **OCR zones** from the right sidebar, save them per app, turn **TTS** on in Settings, use continuous (blue loop) to follow text in the boxes. Box numbers are read order (add top first).
-- **Listen when there are no subs** — Tap the **ear** (turns red). Cast audio → on-device speech recognition → translate → Piper speech. Best with short pause breaks between lines.
+- **Read on-screen subs / dialogue** — **Reader pipeline → Read**, **Translate engine → ML Kit OCR**, OCR zones, TTS continuous. English / as-read: OCR → Piper.
+- **Translate foreign on-screen text** — **Reader pipeline → Translate**, **Translate engine → OPUS**. OCR → OPUS → Piper.
+- **Share caption overlay** — **Reader pipeline → Share** with OPUS (foreign) or ML Kit OCR (English). Shows text on the panel; optional TTS.
+- **Listen when there are no subs** — Tap the **ear** (turns red). Cast audio → SenseVoice → OPUS (optional) → Piper. Best with short pause breaks between lines.
 - **Browser translate / read** — Open the **globe**, use on-device **Translate** or optional **Google**, then **Read** with TTS.
 - **My Books** — Tap the **book** icon for your EPUB shelf; open a title to read with Prev/Next. Long-press book to import from PC over Wi‑Fi (Novel Translator).
 
@@ -47,7 +49,8 @@ flowchart TD
   D --> E[Leave source app open]
   E --> F{What do you need?}
   F -->|Spatial view| G[3D glasses on]
-  F -->|On-screen text| H[OCR zones + TTS continuous]
+  F -->|English text| H[Read + ML Kit OCR + TTS]
+  F -->|Foreign text| H2[Translate/Share + OPUS + TTS]
   F -->|No subs / talk| I[Ear Listen]
   F -->|Web page| J[Globe + Translate / Read]
   F -->|EPUB| K[Book → My Books]
@@ -58,10 +61,12 @@ flowchart TD
 1. **Dock** — Add App → pin NIKKE / Firefox / etc.  
 2. **Cast** — Tap app → select **Just this window** → Share → **leave that app open**.  
 3. **3D** — Glasses = on; **“3D”** text = off.  
-4. **OCR** — Boxes icon → draw zones → Save for app → Done → Settings → TTS on → continuous.  
-5. **Listen** — Ear red (turns TTS continuous + 3D off while active).  
-6. **Browser** — Globe → Translate or Google → Read.  
-7. **Books** — Book icon → open title; long-press for PC import.
+4. **OCR** — Boxes icon → draw zones → Save for app → Done.  
+5. **Reader pipeline** — Settings → Read (English) or Translate/Share (foreign) + OPUS vs ML Kit OCR engine. **Active:** line shows the path.  
+6. **TTS** — Settings → TTS on → continuous (blue loop).  
+7. **Listen** — Ear red (turns TTS continuous + 3D off while active).  
+8. **Browser** — Globe → Translate or Google → Read.  
+9. **Books** — Book icon → open title; long-press for PC import.
 
 ---
 

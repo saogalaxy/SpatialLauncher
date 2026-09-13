@@ -44,11 +44,11 @@
     <string name="help_start_cast_title">1. Cast an app in 3D</string>
     <string name="help_start_cast_body">Tap a dock app → in the share sheet pick that app (Just this window). Leave 3D on (glasses). Tap power to stop.</string>
     <string name="help_start_subs_title">2. Read on-screen subs / dialogue</string>
-    <string name="help_start_subs_body">Cast the show → OCR zones (sidebar) → box the subtitle band → Save → Done. Settings → turn TTS on → continuous (blue loop). Speech follows text in the boxes. Numbers on boxes are read order — add top boxes first.</string>
+    <string name="help_start_subs_body">Cast the show → OCR zones (sidebar) → box the subtitle band → Save → Done. Settings → Reader pipeline Read → Translate engine ML Kit OCR → TTS on → continuous (blue loop). Numbers on boxes are read order — add top first.</string>
     <string name="help_start_listen_title">3. Listen when there are no subs</string>
     <string name="help_start_listen_body">Cast the app → tap the ear (turns red). Allow mic if asked. Translate uses bundled OPUS (JA/ZH/KO in the APK). Best with pause breaks between lines. Tap ear again to stop.</string>
     <string name="help_start_translate_ocr_title">4. Translate on-screen foreign text</string>
-    <string name="help_start_translate_ocr_body">OCR zones on the text → Settings → Assist → Translate → TTS on if you want it spoken. Cast or open the page that shows the text.</string>
+    <string name="help_start_translate_ocr_body">OCR zones on the text → Settings → Reader pipeline Translate → Translate engine OPUS → TTS on if you want it spoken.</string>
     <string name="help_start_browser_title">5. Browser page translate / read</string>
     <string name="help_start_browser_body">Globe → open a page → Translate (on-device) or Google Translate (needs network). Turn TTS on, then Read, to hear it.</string>
     <string name="help_start_books_title">6. Open or import a book</string>
@@ -87,8 +87,8 @@
     <string name="help_dual_dock_a">Tap: cast</string>
     <string name="help_dual_dock_b">Long-press: remove</string>
     <string name="help_dual_dock_body">Tap a pinned app to launch and cast it. Long-press asks to remove it from the dock.</string>
-    <string name="help_dual_assist_title">Settings → Assist modes</string>
-    <string name="help_dual_assist_body">Read = OCR→Piper. Translate / Share / Listen use OPUS when Translate engine = OPUS; switch to ML Kit OCR to skip OPUS and speak as-read. Settings shows Active pipeline.</string>
+    <string name="help_dual_assist_title">Settings → Reader pipeline</string>
+    <string name="help_dual_assist_body">Read = OCR→Piper (English). Translate/Share = OCR→OPUS→Piper when engine is OPUS. Share adds a caption overlay. Listen = audio→STT→OPUS→Piper. ML Kit OCR engine skips OPUS (as-read). Active: line shows the path; selected buttons are green.</string>
     <string name="help_dual_depth_title">Settings → Live / Static 3D</string>
     <string name="help_dual_depth_body">Live updates depth as the picture moves. Static holds a steadier depth look (good for stills / less motion). Separate slider profiles per mode.</string>
 
@@ -107,7 +107,7 @@
     <string name="help_btn_ocr_title">OCR zones</string>
     <string name="help_btn_ocr_body">Opens a side panel to draw boxes over subtitles or dialogue so TTS / Translate read only those areas. With no boxes, only the lower cast dialogue band is read (not the whole app HUD). The number on each box is read order (add top first). Save per app.</string>
     <string name="help_btn_settings_title">Settings</string>
-    <string name="help_btn_settings_body">Depth, TTS voice/speed, Assist mode, OCR / Listen smoothness, and other options.</string>
+    <string name="help_btn_settings_body">Depth, TTS voice/speed, Reader pipeline, Translate engine (OPUS / ML Kit OCR), OCR / Listen smoothness, and other options.</string>
     <string name="help_btn_help_title">Help</string>
     <string name="help_btn_help_body">This guide.</string>
     <string name="help_btn_page_translate_title">Translate (browser)</string>
@@ -118,10 +118,12 @@
     <string name="help_btn_read_body">Speaks the current page with Piper when TTS is enabled.</string>
     <string name="help_combo_cast_3d_title">Cast + 3D</string>
     <string name="help_combo_cast_3d_body">Mirror an app from the dock, then leave 3D on for a spatial view of that window.</string>
-    <string name="help_combo_ocr_tts_title">OCR zones + TTS continuous</string>
-    <string name="help_combo_ocr_tts_body">Box the subtitle band, turn TTS on (continuous), cast the show. Reads on-screen text as it appears.</string>
-    <string name="help_combo_ocr_translate_title">OCR + Assist Translate</string>
-    <string name="help_combo_ocr_translate_body">In Settings set Assist to Translate, place OCR boxes on foreign text, enable TTS if you want it spoken in English.</string>
+    <string name="help_combo_ocr_tts_title">English game — Read + ML Kit OCR</string>
+    <string name="help_combo_ocr_tts_body">Reader pipeline Read, Translate engine ML Kit OCR, OCR zones, TTS continuous. OCR→Piper, no OPUS.</string>
+    <string name="help_combo_ocr_translate_title">Foreign subs — Translate + OPUS</string>
+    <string name="help_combo_ocr_translate_body">Reader pipeline Translate, Translate engine OPUS, OCR boxes on foreign text, TTS on. OCR→OPUS→Piper.</string>
+    <string name="help_combo_ocr_share_title">Share caption overlay</string>
+    <string name="help_combo_ocr_share_body">Reader pipeline Share. OPUS for foreign text or ML Kit OCR for English as-read. Shows caption on panel; speaks if TTS continuous is on.</string>
     <string name="help_combo_listen_title">Listen (ear) + cast</string>
     <string name="help_combo_listen_body">Cast the app, tap the ear. No subs needed — it listens to audio. Prefer scenes with natural pauses. Use Settings → Listen smoothness if speech lags or feels choppy.</string>
     <string name="help_combo_browser_translate_title">Browser + Translate / Google</string>
