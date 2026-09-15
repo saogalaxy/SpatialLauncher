@@ -16,7 +16,7 @@ Public Meta Quest app: cast 2D apps into a spatial panel with optional **3D dept
 
 ![Browser](docs/screenshots/08-browser.jpg)
 
-Full set: [docs/screenshots/](docs/screenshots/). Shoot order: [docs/SCREENSHOTS.md](docs/SCREENSHOTS.md)
+Full set: [docs/screenshots/](docs/screenshots/).
 
 ## Quick install (Quest)
 
@@ -56,8 +56,6 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\desktop_easy_install
 | [docs/HELP.md](docs/HELP.md) | Same guide as the in-headset **?** Help (modes, pipelines, downloads, combos) |
 | [docs/DESKTOP.md](docs/DESKTOP.md) | Spatial Launcher Desktop — PC session + Quest Link |
 | [docs/PRIVACY.md](docs/PRIVACY.md) | Privacy policy (public URL for Meta Store) |
-| [docs/META_STORE.md](docs/META_STORE.md) | Horizon Store listing copy, flow, screenshot map |
-| [docs/SCREENSHOTS.md](docs/SCREENSHOTS.md) | Screenshot shoot order |
 | [docs/screenshots/](docs/screenshots/) | Store / GitHub images |
 | [desktop/README.md](desktop/README.md) | Desktop app build / install |
 
@@ -92,8 +90,7 @@ tools/
 docs/
   HELP.md
   PRIVACY.md                  # store privacy policy text
-  META_STORE.md               # Horizon listing copy + screenshot map
-  SCREENSHOTS.md
+  DESKTOP.md                  # PC session + Quest Link
   screenshots/                # store & GitHub images
 app/
   build.gradle

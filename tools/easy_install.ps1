@@ -129,5 +129,5 @@ if (-not $NoLaunch) {
 Write-Host ""
 Write-Host "READY TO GO: YES" -ForegroundColor Green
 Write-Host "Spatial Launcher is on the headset." -ForegroundColor Green
-Write-Host "In-headset help: tap the ? button. Docs: docs\HELP.md and docs\SCREENSHOTS.md"
+Write-Host "In-headset help: tap the ? button. Docs: docs\HELP.md"
 exit 0
