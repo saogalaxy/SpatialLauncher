@@ -18,7 +18,12 @@ android {
     sourceSets {
         main {
             manifest.srcFile 'src/main/AndroidManifest.xml'
-            java.srcDirs = ['src/main/java']
+            java {
+                srcDirs = ['src/main/java']
+                // Sandbox PoC stays in-tree under com.spatiallauncher.app.sandbox but
+                // must not ship in Quest APKs.
+                exclude '**/com/spatiallauncher/app/sandbox/**'
+            }
             res.srcDirs = ['src/main/res']
             jniLibs.srcDirs += ['src/main/jniLibs', "${buildDir}/sherpaJni"]
         }

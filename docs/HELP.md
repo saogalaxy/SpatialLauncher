@@ -28,6 +28,9 @@ Settings → **Reader pipeline → Share** → **Translate engine → OPUS** (fo
 ### 7. Open or import a book
 Tap **book** = My Books (tap again or **Close** to dismiss). Tap a title to open. Tap **book** again while reading to close. Long-press book = PC EPUB import on/off (same Wi‑Fi as Novel Translator).
 
+### 8. Desktop Link (PC → Quest 3D)
+On Windows, install **Spatial Launcher Desktop**, Start Session (LAN advertise on). On Quest tap the **monitor** toolbar button — it **auto-finds** the PC. PC owns depth + OCR/TTS/Listen; Quest is a thin SBS viewer with Horizon 3D. See [DESKTOP.md](DESKTOP.md).
+
 ## Reader pipeline (Settings)
 
 Pick one mode. The **Active:** line under the buttons shows the exact path. Selected mode buttons are **green**.
@@ -97,6 +100,7 @@ Pick one mode. The **Active:** line under the buttons shows the exact path. Sele
 | Book | My Books / close reader |
 | Speaker | TTS speak |
 | Ear | Listen |
+| Monitor | Desktop Link (PC SBS stream) |
 | Boxes | OCR zones |
 | ? | This help |
 | Gear | Settings (depth, TTS, Reader pipeline, OCR / Listen smoothness) |

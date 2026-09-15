@@ -1216,6 +1216,16 @@
                     android:padding="10dp"
                     android:src="@drawable/ic_listen_ear" />
 
+                <ImageButton
+                    android:id="@+id/desktop_link_button"
+                    android:layout_width="48dp"
+                    android:layout_height="48dp"
+                    android:layout_marginStart="8dp"
+                    android:background="@drawable/bg_circle_button"
+                    android:contentDescription="@string/desktop_link_button_description"
+                    android:padding="10dp"
+                    android:src="@drawable/ic_desktop_link" />
+
                 <!-- TTS player: prev / play / pause / stop / next. Hidden unless
                      TTS is on in manual mode. Speaker stays on the row as status. -->
                 <LinearLayout

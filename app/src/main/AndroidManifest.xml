@@ -32,6 +32,8 @@
         android:largeHeap="true"
         android:resizeableActivity="true"
         android:maxAspectRatio="10.0"
+        android:usesCleartextTraffic="true"
+        android:networkSecurityConfig="@xml/network_security_config"
         tools:targetApi="34">
 
         <!-- Android 12+ hides vendor .so unless declared. llama.cpp OpenCL needs these. -->
@@ -50,6 +52,23 @@
         <uses-native-library
             android:name="libvndksupport.so"
             android:required="false" />
+
+        <activity
+            android:name=".ui.DesktopLinkActivity"
+            android:label="@string/desktop_link_title"
+            android:exported="true"
+            android:resizeableActivity="true"
+            android:configChanges="density|screenSize|screenLayout|smallestScreenSize|orientation|keyboardHidden|keyboard|navigation|uiMode">
+            <layout
+                android:defaultWidth="960dp"
+                android:defaultHeight="640dp"
+                android:minWidth="480dp"
+                android:minHeight="320dp" />
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity>
 
         <activity
             android:name=".ui.PanelMainActivity"
@@ -84,14 +103,6 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
-
-        <!-- Isolated PoC only — not a production launcher entry. -->
-        <activity
-            android:name=".sandbox.VirtualSandboxTestActivity"
-            android:label="@string/sandbox_open"
-            android:exported="false"
-            android:resizeableActivity="true"
-            android:configChanges="density|screenSize|screenLayout|smallestScreenSize|orientation|keyboardHidden|keyboard|navigation|uiMode" />
 
         <!-- Satisfies the MediaProjection foreground-service requirement — see
              MirrorCaptureService's doc comment for the exact crash this fixes. -->

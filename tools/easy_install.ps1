@@ -50,6 +50,11 @@ function Invoke-NpxMetavr {
 Write-Host ""
 Write-Host "Spatial Launcher Easy Installer" -ForegroundColor White
 Write-Host "Looks for what is needed, builds if needed, installs to Quest." -ForegroundColor DarkGray
+Write-Host ""
+Write-Host "STORAGE" -ForegroundColor Yellow
+Write-Host "  Sideloads to the Quest headset (not a Windows Program Files install)." -ForegroundColor DarkGray
+Write-Host "  Headset needs ~2.5+ GB free (debug APK includes offline models)." -ForegroundColor DarkGray
+Write-Host "  PC keeps build outputs under this repo folder only." -ForegroundColor DarkGray
 
 Write-Step "Checking JDK"
 if (-not (Test-Java)) {
