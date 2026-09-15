@@ -1,7 +1,7 @@
 # Privacy Policy — Spatial Launcher
 
-**Effective date:** September 12, 2026  
-**App:** Spatial Launcher (`com.spatiallauncher.app`) for Meta Quest / Horizon OS  
+**Effective date:** September 13, 2026  
+**App:** Spatial Launcher (`com.spatiallauncher.app`) for Meta Quest / Horizon OS, and **Spatial Launcher Desktop** (Windows companion)  
 **Developer:** saogalaxy  
 
 This policy describes how Spatial Launcher handles information. It replaces earlier drafts that claimed *no* network use; the current build is still **primarily on-device**, with a few **optional, user-triggered** downloads.
@@ -24,6 +24,7 @@ Screen capture buffers and ASR audio are used in memory for the active feature a
 | Feature | Local processing |
 |--------|-------------------|
 | App cast / 3D depth | MediaProjection frames → local stereo / depth |
+| Desktop Link | Optional LAN MJPEG from Spatial Launcher Desktop (same Wi‑Fi); frames stay on your network |
 | OCR zones | ML Kit (and related) OCR on-device |
 | Piper TTS | On-device speech synthesis (female voice bundled) |
 | Listen | Cast audio → SenseVoice ASR → optional bundled OPUS → Piper |
@@ -41,6 +42,7 @@ The app declares `INTERNET` so these **optional** features can work. They run on
 |------|-------------------------|
 | Browser **Google** translate button | Page text may be sent to **Google Translate** over the network for that request |
 | **PC EPUB import** (long-press book) | Local **Wi‑Fi LAN** HTTP to your PC running Novel Translator — stays on your network; not a public cloud upload |
+| **Desktop Link** (Quest ↔ Spatial Launcher Desktop) | SBS video frames on your **LAN only** (HTTP MJPEG to the headset). Not uploaded to our servers |
 | Sideload / updates | Normal package install via your tooling; not part of runtime telemetry |
 
 If you never use Google Translate and never start PC import, the app can run cast / OCR / Listen / TTS / on-device translate **fully offline** (no Play Store, no model downloads). Male TTS and ZH/KO OPUS ship in the same APK as the Meta Store and desktop installer builds.

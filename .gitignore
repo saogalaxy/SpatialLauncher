@@ -22,6 +22,9 @@ app/src/main/assets/models/qwen/
 /quest-*.jpg
 /ocr-settings-shot.png
 /branding/
+desktop/**/bin/
+desktop/**/obj/
+desktop/installer/publish/
 !docs/screenshots/*.png
 !docs/screenshots/*.jpg
 !docs/screenshots/*.jpeg

@@ -1,0 +1,15 @@
+<Window x:Class="SpatialLauncher.Desktop.SbsViewerWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Spatial Launcher Desktop — SBS Viewer (F11 fullscreen)"
+        Width="1280" Height="720"
+        Background="Black"
+        WindowStartupLocation="CenterScreen">
+  <Grid>
+    <Image x:Name="ViewerImage" Stretch="Uniform"/>
+    <TextBlock x:Name="HintText"
+               Text="SBS output — F11 fullscreen · set Half SBS in Virtual Desktop / Bigscreen"
+               Foreground="#88FFFFFF" HorizontalAlignment="Center" VerticalAlignment="Center"
+               TextWrapping="Wrap" Margin="24" TextAlignment="Center"/>
+  </Grid>
+</Window>

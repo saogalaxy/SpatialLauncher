@@ -713,6 +713,11 @@ public class PanelMainActivity extends AppCompatActivity {
         findViewById(R.id.mt_engine_opus).setOnClickListener(v -> setUseOpusTranslate(true));
         findViewById(R.id.mt_engine_mlkit).setOnClickListener(v -> setUseOpusTranslate(false));
         findViewById(R.id.listen_button).setOnClickListener(v -> toggleListenFromToolbar());
+        findViewById(R.id.desktop_link_button).setOnClickListener(v -> {
+            // Thin client: pause Quest-side depth / OCR / Listen — PC owns those while Desktop Link runs.
+            pausePipelinesForDesktopLink();
+            startActivity(new android.content.Intent(this, DesktopLinkActivity.class));
+        });
         applyAssistMode(assistMode, false);
         refreshListenButton();
         refreshMtEngineButtons();
@@ -3103,6 +3108,7 @@ public class PanelMainActivity extends AppCompatActivity {
         addHelpCombo(content, R.string.help_start_translate_ocr_title, R.string.help_start_translate_ocr_body);
         addHelpCombo(content, R.string.help_start_browser_title, R.string.help_start_browser_body);
         addHelpCombo(content, R.string.help_start_books_title, R.string.help_start_books_body);
+        addHelpCombo(content, R.string.help_start_desktop_link_title, R.string.help_start_desktop_link_body);
 
         addHelpSection(content, R.string.help_section_downloads);
         addHelpCombo(content, R.string.help_dl_intro_title, R.string.help_dl_intro_body);
@@ -4521,6 +4527,27 @@ public class PanelMainActivity extends AppCompatActivity {
         canvas.restore();
     }
 
+    /**
+     * Desktop Link is a thin SBS viewer — PC owns depth/OCR/TTS/Listen.
+     * Pause Quest-side heavy pipelines so they do not run alongside the PC stream.
+     */
+    private void pausePipelinesForDesktopLink() {
+        if (listenEngine != null) {
+            listenEngine.stop();
+        }
+        if (assistMode == AssistMode.LISTEN) {
+            setAssistMode(AssistMode.DEFAULT);
+        }
+        setSessionStereo(false);
+        // Keep cast surface if any, but stop forcing Quest depth composition for Desktop Link.
+        setStereoComposition(false);
+        if (shareCaption != null) {
+            shareCaption.setVisibility(View.GONE);
+        }
+        PanelAlerts.show(this,
+                "Needs Spatial Launcher Desktop on PC (github.com/saogalaxy/SpatialLauncher). Quest depth/OCR/Listen paused while linked.");
+    }
+
     private void stopMirroring() {
         if (listenEngine != null) {
             listenEngine.stop();
@@ -4611,6 +4638,7 @@ public class PanelMainActivity extends AppCompatActivity {
         resizeSquareView(findViewById(R.id.tts_prev_button), buttonSize, buttonPad);
         resizeSquareView(findViewById(R.id.tts_speak_button), buttonSize, buttonPad);
         resizeSquareView(findViewById(R.id.listen_button), buttonSize, buttonPad);
+        resizeSquareView(findViewById(R.id.desktop_link_button), buttonSize, buttonPad);
         resizeSquareView(findViewById(R.id.tts_play_button), buttonSize, buttonPad);
         resizeSquareView(findViewById(R.id.tts_pause_button), buttonSize, buttonPad);
         resizeSquareView(findViewById(R.id.tts_stop_button), buttonSize, buttonPad);

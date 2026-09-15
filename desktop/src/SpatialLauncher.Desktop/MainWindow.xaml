@@ -1,0 +1,178 @@
+<Window x:Class="SpatialLauncher.Desktop.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Spatial Launcher Desktop"
+        Width="1280" Height="800"
+        MinWidth="900" MinHeight="560"
+        Background="{StaticResource BgBrush}"
+        Foreground="{StaticResource TextBrush}"
+        WindowStartupLocation="CenterScreen"
+        StateChanged="Window_StateChanged"
+        Closing="Window_Closing">
+  <Grid Margin="8">
+    <Grid.ColumnDefinitions>
+      <ColumnDefinition Width="340" MinWidth="260"/>
+      <ColumnDefinition Width="6"/>
+      <ColumnDefinition Width="*" MinWidth="280"/>
+      <ColumnDefinition Width="6"/>
+      <ColumnDefinition Width="280" MinWidth="220"/>
+    </Grid.ColumnDefinitions>
+
+    <!-- Left: sources + session (list grows when window grows) -->
+    <Border Grid.Column="0" Background="{StaticResource PanelBrush}" CornerRadius="10" Padding="12">
+      <Grid>
+        <Grid.RowDefinitions>
+          <RowDefinition Height="Auto"/>
+          <RowDefinition Height="*" MinHeight="120"/>
+          <RowDefinition Height="6"/>
+          <RowDefinition Height="*" MinHeight="160"/>
+        </Grid.RowDefinitions>
+
+        <StackPanel Grid.Row="0">
+          <TextBlock Text="Session" FontSize="16" FontWeight="SemiBold" Margin="0,0,0,4"/>
+          <TextBlock TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" FontSize="11" Margin="0,0,0,8"
+                     Text="Pick Primary monitor for fullscreen games, then Start Session. Quest Desktop Link auto-finds this PC."/>
+          <DockPanel Margin="0,0,0,6">
+            <Button DockPanel.Dock="Right" Content="Refresh" Padding="10,4" Click="RefreshSources_Click"/>
+            <TextBlock Text="Sources" VerticalAlignment="Center" FontWeight="SemiBold"/>
+          </DockPanel>
+        </StackPanel>
+
+        <ListBox x:Name="SourceList" Grid.Row="1"
+                 Background="#22000000" BorderThickness="0"
+                 Foreground="{StaticResource TextBrush}"
+                 ScrollViewer.VerticalScrollBarVisibility="Auto"
+                 ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                 SelectionChanged="SourceList_SelectionChanged"
+                 DisplayMemberPath="DisplayName"/>
+
+        <GridSplitter Grid.Row="2" Height="6" HorizontalAlignment="Stretch"
+                      Background="#33FFFFFF" ResizeDirection="Rows" ShowsPreview="True"/>
+
+        <ScrollViewer Grid.Row="3" VerticalScrollBarVisibility="Auto">
+          <StackPanel>
+            <Button x:Name="StartButton" Content="Start Session" Height="36" Margin="0,0,0,8" Click="StartSession_Click"/>
+            <Button x:Name="StopButton" Content="Stop" Height="36" Margin="0,0,0,8" Click="StopSession_Click" IsEnabled="False"/>
+
+            <TextBlock Text="Depth model" FontWeight="SemiBold" Margin="0,4,0,2"/>
+            <TextBlock TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" FontSize="10" Margin="0,0,0,4"
+                       Text="Gaming = DA-V2 Small (fast). Movies = Depth Anything 3 + stronger SBS (heavier GPU)."/>
+            <WrapPanel Margin="0,0,0,6">
+              <Button x:Name="PresetGaming" Style="{StaticResource ChipButtonActive}" Content="Gaming" Click="DepthPreset_Click" Tag="Gaming"/>
+              <Button x:Name="PresetMovies" Style="{StaticResource ChipButton}" Content="Movies" Click="DepthPreset_Click" Tag="Movies"/>
+            </WrapPanel>
+
+            <TextBlock Text="Stream format" FontWeight="SemiBold" Margin="0,4,0,2"/>
+            <WrapPanel Margin="0,0,0,4">
+              <Button x:Name="CodecMjpeg" Style="{StaticResource ChipButtonActive}" Content="JPEG" Click="Codec_Click" Tag="mjpeg"/>
+              <Button x:Name="CodecH264" Style="{StaticResource ChipButton}" Content="MPEG (H.264)" Click="Codec_Click" Tag="h264"/>
+              <Button x:Name="CodecAv1" Style="{StaticResource ChipButton}" Content="AV1" Click="Codec_Click" Tag="av1"/>
+            </WrapPanel>
+            <TextBlock TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" FontSize="10" Margin="0,0,0,6"
+                       Text="Switch anytime. Quest Desktop Link follows the advertised URL (reconnect if already live). AV1 needs Quest 3 / 3S."/>
+
+            <TextBlock Text="Audio" FontWeight="SemiBold" Margin="0,4,0,2"/>
+            <WrapPanel Margin="0,0,0,4">
+              <Button x:Name="AudioPc" Style="{StaticResource ChipButtonActive}" Content="PC speakers" Click="Audio_Click" Tag="pc"/>
+              <Button x:Name="AudioHeadset" Style="{StaticResource ChipButton}" Content="Headset" Click="Audio_Click" Tag="headset"/>
+            </WrapPanel>
+            <TextBlock TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" FontSize="10" Margin="0,0,0,6"
+                       Text="Works with JPEG / MPEG / AV1. Headset mutes PC speakers and pipes loopback audio to Quest."/>
+
+            <CheckBox x:Name="Live3dCheck" Content="Live 3D — depth warp on PC" IsChecked="True" Margin="0,6,0,2" Checked="SettingsChanged" Unchecked="SettingsChanged"/>
+            <CheckBox x:Name="FullSbsCheck" Content="Full SBS — for Virtual Desktop / Immersed" Margin="0,2,0,2" Checked="SettingsChanged" Unchecked="SettingsChanged"/>
+            <TextBlock TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" FontSize="10" Margin="0,0,0,6"
+                       Text="OFF = Half SBS for Spatial Launcher on Quest. ON = Full SBS for VD (set VD to Full SBS)."/>
+
+            <TextBlock x:Name="StreamWidthLabel" Text="Stream width 1920 — capture size sent to Quest" Margin="0,4,0,2" FontSize="12"/>
+            <Slider x:Name="StreamWidthSlider" Minimum="1280" Maximum="2560" Value="1920" TickFrequency="160" IsSnapToTickEnabled="True" ValueChanged="SettingsChanged"/>
+            <TextBlock x:Name="JpegQualityLabel" Text="JPEG quality 85 — higher = sharper, bigger frames" Margin="0,6,0,2" FontSize="12"/>
+            <Slider x:Name="JpegQualitySlider" Minimum="50" Maximum="98" Value="85" TickFrequency="1" IsSnapToTickEnabled="True" ValueChanged="SettingsChanged"/>
+            <TextBlock x:Name="SharpenLabel" Text="Sharpen 25 — edge crispness before encode" Margin="0,6,0,2" FontSize="12"/>
+            <Slider x:Name="SharpenSlider" Minimum="0" Maximum="80" Value="25" TickFrequency="1" IsSnapToTickEnabled="True" ValueChanged="SettingsChanged"/>
+
+            <TextBlock Text="3D look" FontWeight="SemiBold" Margin="0,12,0,4"/>
+            <TextBlock x:Name="DepthStrengthLabel" Text="Depth strength 100% — how strong the 3D pop is" Margin="0,0,0,2" FontSize="12"/>
+            <Slider x:Name="DepthStrengthSlider" Minimum="10" Maximum="200" Value="100" TickFrequency="1" IsSnapToTickEnabled="True" ValueChanged="SettingsChanged"/>
+            <TextBlock x:Name="ConvergenceLabel" Text="Convergence 50% — zero-parallax plane (lower if eyestrain)" Margin="0,6,0,2" FontSize="12"/>
+            <Slider x:Name="ConvergenceSlider" Minimum="0" Maximum="100" Value="50" TickFrequency="1" IsSnapToTickEnabled="True" ValueChanged="SettingsChanged"/>
+            <TextBlock x:Name="DepthHzLabel" Text="Depth update 20 Hz — how often the depth map refreshes" Margin="0,6,0,2" FontSize="12"/>
+            <Slider x:Name="DepthHzSlider" Minimum="5" Maximum="60" Value="20" TickFrequency="1" IsSnapToTickEnabled="True" ValueChanged="SettingsChanged"/>
+            <TextBlock x:Name="DepthSmoothLabel" Text="Depth smooth 40% — blends depth frames (less shimmer)" Margin="0,6,0,2" FontSize="12"/>
+            <Slider x:Name="DepthSmoothSlider" Minimum="0" Maximum="90" Value="40" TickFrequency="1" IsSnapToTickEnabled="True" ValueChanged="SettingsChanged"/>
+
+            <CheckBox x:Name="QuestLinkCheck" Content="Stream to Quest (Desktop Link)" IsChecked="True" Margin="0,12,0,4"/>
+            <CheckBox x:Name="LanAdvertiseCheck" Content="Advertise on LAN (auto-find)" IsChecked="True" Margin="0,0,0,4"
+                      Checked="SettingsChanged" Unchecked="SettingsChanged"/>
+            <CheckBox x:Name="TrayCheck" Content="Minimize (_) goes to tray" IsChecked="True" Margin="0,0,0,4"
+                      Checked="SettingsChanged" Unchecked="SettingsChanged"/>
+            <TextBlock Text="Quest Link URL" FontSize="11" Margin="0,4,0,2"/>
+            <TextBox x:Name="QuestLinkUrlBox" IsReadOnly="True" TextWrapping="Wrap"
+                     Background="#22000000" Foreground="{StaticResource TextBrush}" BorderThickness="0" Padding="6"/>
+            <TextBlock TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" FontSize="10" Margin="0,6,0,0"
+                       Text="Change depth/quality from Quest Desktop Link controls while streaming — no need to leave fullscreen on PC."/>
+            <Button Content="Open SBS Viewer (optional)" Margin="0,8,0,0" Height="28" Click="OpenViewer_Click"/>
+          </StackPanel>
+        </ScrollViewer>
+      </Grid>
+    </Border>
+
+    <GridSplitter Grid.Column="1" Width="6" HorizontalAlignment="Stretch"
+                  Background="Transparent" ResizeBehavior="PreviousAndNext" ShowsPreview="True"/>
+
+    <Border Grid.Column="2" Background="Black" CornerRadius="10">
+      <Grid>
+        <Image x:Name="PreviewImage" Stretch="Uniform"/>
+        <TextBlock x:Name="PreviewHint" Text="Select a source to preview - Start Session to stream"
+                   HorizontalAlignment="Center" VerticalAlignment="Center"
+                   Foreground="{StaticResource MutedBrush}" TextAlignment="Center"/>
+      </Grid>
+    </Border>
+
+    <GridSplitter Grid.Column="3" Width="6" HorizontalAlignment="Stretch"
+                  Background="Transparent" ResizeBehavior="PreviousAndNext" ShowsPreview="True"/>
+
+    <Border Grid.Column="4" Background="{StaticResource PanelBrush}" CornerRadius="10" Padding="12">
+      <ScrollViewer VerticalScrollBarVisibility="Auto">
+        <StackPanel>
+          <TextBlock Text="Reader (optional)" FontSize="16" FontWeight="SemiBold"/>
+          <TextBlock TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" FontSize="11" Margin="0,4,0,8"
+                     Text="Off by default for 3D/cast testing. Turn on only when you want OCR/TTS on PC."/>
+          <CheckBox x:Name="CaptionsCheck" Content="Captions / OCR (sidebar)" Margin="0,0,0,8"
+                    Checked="SettingsChanged" Unchecked="SettingsChanged"/>
+
+          <WrapPanel>
+            <Button x:Name="ModeRead" Style="{StaticResource ChipButtonActive}" Content="Read" Click="Mode_Click" Tag="Read"/>
+            <Button x:Name="ModeTranslate" Style="{StaticResource ChipButton}" Content="Translate" Click="Mode_Click" Tag="Translate"/>
+            <Button x:Name="ModeShare" Style="{StaticResource ChipButton}" Content="Share" Click="Mode_Click" Tag="Share"/>
+            <Button x:Name="ModeListen" Style="{StaticResource ChipButton}" Content="Listen" Click="Mode_Click" Tag="Listen"/>
+          </WrapPanel>
+
+          <TextBlock x:Name="PipelineStatus" Text="Active: OCR -> Piper"
+                     FontFamily="Consolas" FontSize="11" TextWrapping="Wrap" Margin="0,4,0,12"/>
+
+          <TextBlock Text="Translate engine" FontWeight="SemiBold"/>
+          <WrapPanel Margin="0,4,0,0">
+            <Button x:Name="EngineOpus" Style="{StaticResource ChipButtonActive}" Content="OPUS" Click="Engine_Click" Tag="opus"/>
+            <Button x:Name="EngineOcr" Style="{StaticResource ChipButton}" Content="OCR only" Click="Engine_Click" Tag="ocr"/>
+          </WrapPanel>
+
+          <CheckBox x:Name="TtsCheck" Content="TTS enabled" Margin="0,12,0,4" Checked="SettingsChanged" Unchecked="SettingsChanged"/>
+          <CheckBox x:Name="TtsContinuousCheck" Content="TTS continuous" IsChecked="True" Margin="0,0,0,8" Checked="SettingsChanged" Unchecked="SettingsChanged"/>
+
+          <TextBlock Text="OCR smoothness" Margin="0,4,0,2"/>
+          <Slider x:Name="OcrSmoothSlider" Minimum="0" Maximum="100" Value="55" ValueChanged="SettingsChanged"/>
+          <TextBlock Text="Read speed" Margin="0,8,0,2"/>
+          <Slider x:Name="TtsSpeedSlider" Minimum="50" Maximum="200" Value="100" ValueChanged="SettingsChanged"/>
+
+          <TextBlock Text="Share caption" FontWeight="SemiBold" Margin="0,16,0,4"/>
+          <TextBlock x:Name="ShareCaptionText" TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}"
+                     Text="(off — enable Captions / OCR)"/>
+
+          <TextBlock Text="Status" FontWeight="SemiBold" Margin="0,16,0,4"/>
+          <TextBlock x:Name="StatusText" TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" Text="Ready"/>
+        </StackPanel>
+      </ScrollViewer>
+    </Border>
+  </Grid>
+</Window>

@@ -27,21 +27,39 @@ Full set: [docs/screenshots/](docs/screenshots/). Shoot order: [docs/SCREENSHOTS
 
 That runs `tools/easy_install.ps1`: checks JDK + Node/metavr + headset, builds the debug APK if needed, installs with replace + permissions, and launches the app.
 
+**Storage:** the headset install is large (~**2.5+ GB**) because the debug APK packs offline models. Build outputs stay in this repo folder on the PC; there is no separate Quest “Program Files” install on Windows.
+
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\easy_install.ps1
 ```
 
 See [tools/README.md](tools/README.md).
 
+## Quick install (Windows Desktop)
+
+1. Install [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0)  
+2. Double-click **`Install Spatial Launcher Desktop.bat`**
+
+Owl-style PC session (window/monitor → Live 3D SBS on PC) streams to Quest via **Desktop Link** (auto-find on LAN; Quest is a thin SBS viewer). Details: [desktop/README.md](desktop/README.md) · [docs/DESKTOP.md](docs/DESKTOP.md)
+
+**Storage:** no drive picker — installs to `%LocalAppData%\SpatialLauncherDesktop\` on the **user-profile drive (usually C:)**. Expect ~**900 MB** (~450 MB app + ~470 MB depth models). Uninstall from **Settings → Apps**.
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\desktop_easy_install.ps1
+```
+
 ## Docs
 
 | Doc | What |
 |-----|------|
+| [CHANGELOG.md](CHANGELOG.md) | What changed (keep updated with each notable fix/feature) |
 | [docs/HELP.md](docs/HELP.md) | Same guide as the in-headset **?** Help (modes, pipelines, downloads, combos) |
+| [docs/DESKTOP.md](docs/DESKTOP.md) | Spatial Launcher Desktop — PC session + Quest Link |
 | [docs/PRIVACY.md](docs/PRIVACY.md) | Privacy policy (public URL for Meta Store) |
 | [docs/META_STORE.md](docs/META_STORE.md) | Horizon Store listing copy, flow, screenshot map |
 | [docs/SCREENSHOTS.md](docs/SCREENSHOTS.md) | Screenshot shoot order |
 | [docs/screenshots/](docs/screenshots/) | Store / GitHub images |
+| [desktop/README.md](desktop/README.md) | Desktop app build / install |
 
 ## What it does
 
@@ -118,4 +136,3 @@ npx -y metavr app launch com.spatiallauncher.app
 
 - Store / installer builds pack Piper, SenseVoice, OPUS JA/ZH/KO, Qwen, and ML Kit OCR AARs into the APK — no Play Store downloads.  
 - Large model archives under `assets/models/` may be gitignored locally; `downloadOfflineModels` fetches them at build time.  
-- Sandbox experiments stay under `com.spatiallauncher.app.sandbox`.
