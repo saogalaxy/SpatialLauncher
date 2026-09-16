@@ -54,7 +54,13 @@
             <Button x:Name="StartButton" Content="Start Session" Height="36" Margin="0,0,0,8" Click="StartSession_Click"/>
             <Button x:Name="StopButton" Content="Stop" Height="36" Margin="0,0,0,8" Click="StopSession_Click" IsEnabled="False"/>
 
-            <TextBlock Text="Depth model" FontWeight="SemiBold" Margin="0,4,0,2"/>
+            <!-- Stream section -->
+            <DockPanel Margin="0,8,0,2">
+              <Button DockPanel.Dock="Right" Content="Save" Padding="10,2" Margin="8,0,0,0"
+                      Tag="stream" Click="SaveSection_Click" ToolTip="Save stream settings"/>
+              <TextBlock Text="Stream" FontWeight="SemiBold" VerticalAlignment="Center"/>
+            </DockPanel>
+            <TextBlock Text="Depth model" FontWeight="SemiBold" Margin="0,4,0,2" FontSize="12"/>
             <TextBlock TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" FontSize="10" Margin="0,0,0,4"
                        Text="Gaming = DA-V2 Small (fast). Movies = Depth Anything 3 + stronger SBS (heavier GPU)."/>
             <WrapPanel Margin="0,0,0,6">
@@ -62,7 +68,7 @@
               <Button x:Name="PresetMovies" Style="{StaticResource ChipButton}" Content="Movies" Click="DepthPreset_Click" Tag="Movies"/>
             </WrapPanel>
 
-            <TextBlock Text="Stream format" FontWeight="SemiBold" Margin="0,4,0,2"/>
+            <TextBlock Text="Stream format" FontWeight="SemiBold" Margin="0,4,0,2" FontSize="12"/>
             <WrapPanel Margin="0,0,0,4">
               <Button x:Name="CodecMjpeg" Style="{StaticResource ChipButtonActive}" Content="JPEG" Click="Codec_Click" Tag="mjpeg"/>
               <Button x:Name="CodecH264" Style="{StaticResource ChipButton}" Content="MPEG (H.264)" Click="Codec_Click" Tag="h264"/>
@@ -71,15 +77,7 @@
             <TextBlock TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" FontSize="10" Margin="0,0,0,6"
                        Text="Switch anytime. Quest Desktop Link follows the advertised URL (reconnect if already live). AV1 needs Quest 3 / 3S."/>
 
-            <TextBlock Text="Audio" FontWeight="SemiBold" Margin="0,4,0,2"/>
-            <WrapPanel Margin="0,0,0,4">
-              <Button x:Name="AudioPc" Style="{StaticResource ChipButtonActive}" Content="PC speakers" Click="Audio_Click" Tag="pc"/>
-              <Button x:Name="AudioHeadset" Style="{StaticResource ChipButton}" Content="Headset" Click="Audio_Click" Tag="headset"/>
-            </WrapPanel>
-            <TextBlock TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" FontSize="10" Margin="0,0,0,6"
-                       Text="Works with JPEG / MPEG / AV1. Headset mutes PC speakers and pipes loopback audio to Quest."/>
-
-            <CheckBox x:Name="Live3dCheck" Content="Live 3D — depth warp on PC" IsChecked="True" Margin="0,6,0,2" Checked="SettingsChanged" Unchecked="SettingsChanged"/>
+            <CheckBox x:Name="Live3dCheck" Content="Live 3D — depth warp on PC" IsChecked="True" Margin="0,2,0,2" Checked="SettingsChanged" Unchecked="SettingsChanged"/>
             <CheckBox x:Name="FullSbsCheck" Content="Full SBS — for Virtual Desktop / Immersed" Margin="0,2,0,2" Checked="SettingsChanged" Unchecked="SettingsChanged"/>
             <TextBlock TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" FontSize="10" Margin="0,0,0,6"
                        Text="OFF = Half SBS for Spatial Launcher on Quest. ON = Full SBS for VD (set VD to Full SBS)."/>
@@ -91,17 +89,58 @@
             <TextBlock x:Name="SharpenLabel" Text="Sharpen 25 — edge crispness before encode" Margin="0,6,0,2" FontSize="12"/>
             <Slider x:Name="SharpenSlider" Minimum="0" Maximum="80" Value="25" TickFrequency="1" IsSnapToTickEnabled="True" ValueChanged="SettingsChanged"/>
 
-            <TextBlock Text="3D look" FontWeight="SemiBold" Margin="0,12,0,4"/>
-            <TextBlock x:Name="DepthStrengthLabel" Text="Depth strength 100% — how strong the 3D pop is" Margin="0,0,0,2" FontSize="12"/>
-            <Slider x:Name="DepthStrengthSlider" Minimum="10" Maximum="200" Value="100" TickFrequency="1" IsSnapToTickEnabled="True" ValueChanged="SettingsChanged"/>
-            <TextBlock x:Name="ConvergenceLabel" Text="Convergence 50% — zero-parallax plane (lower if eyestrain)" Margin="0,6,0,2" FontSize="12"/>
-            <Slider x:Name="ConvergenceSlider" Minimum="0" Maximum="100" Value="50" TickFrequency="1" IsSnapToTickEnabled="True" ValueChanged="SettingsChanged"/>
-            <TextBlock x:Name="DepthHzLabel" Text="Depth update 20 Hz — how often the depth map refreshes" Margin="0,6,0,2" FontSize="12"/>
-            <Slider x:Name="DepthHzSlider" Minimum="5" Maximum="60" Value="20" TickFrequency="1" IsSnapToTickEnabled="True" ValueChanged="SettingsChanged"/>
-            <TextBlock x:Name="DepthSmoothLabel" Text="Depth smooth 40% — blends depth frames (less shimmer)" Margin="0,6,0,2" FontSize="12"/>
-            <Slider x:Name="DepthSmoothSlider" Minimum="0" Maximum="90" Value="40" TickFrequency="1" IsSnapToTickEnabled="True" ValueChanged="SettingsChanged"/>
+            <!-- Audio / Sound section -->
+            <DockPanel Margin="0,14,0,2">
+              <Button DockPanel.Dock="Right" Content="Save" Padding="10,2" Margin="8,0,0,0"
+                      Tag="audio" Click="SaveSection_Click" ToolTip="Save audio settings"/>
+              <TextBlock Text="Sound" FontWeight="SemiBold" VerticalAlignment="Center"/>
+            </DockPanel>
+            <WrapPanel Margin="0,0,0,4">
+              <Button x:Name="AudioPc" Style="{StaticResource ChipButtonActive}" Content="PC speakers" Click="Audio_Click" Tag="pc"/>
+              <Button x:Name="AudioHeadset" Style="{StaticResource ChipButton}" Content="Headset" Click="Audio_Click" Tag="headset"/>
+            </WrapPanel>
+            <TextBlock Text="Headset audio" FontWeight="SemiBold" FontSize="12" Margin="0,4,0,2"/>
+            <TextBlock TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" FontSize="10" Margin="0,0,0,4"
+                       Text="Headset mirrors your current Windows speakers to the Quest — both play at once. Leave Windows Sound on Speakers (Aha). Virtual sinks below are optional / legacy."/>
+            <ComboBox x:Name="AudioSinkCombo" Margin="0,0,0,4"
+                      DisplayMemberPath="DisplayName"
+                      SelectionChanged="AudioSinkCombo_SelectionChanged"/>
+            <TextBlock x:Name="AudioSinkHint" TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" FontSize="10" Margin="0,0,0,6"
+                       Text="Tap Headset while a session is running and something is playing on the PC."/>
+            <WrapPanel Margin="0,0,0,4">
+              <Button Content="Refresh sinks" Padding="8,2" Margin="0,0,8,0"
+                      Click="RefreshAudioSinks_Click"/>
+              <Button x:Name="InstallAudioDriverBtn" Content="Install Spatial Launcher Audio driver" Padding="8,2"
+                      Click="InstallAudioDriver_Click"
+                      ToolTip="Elevated install of the Spatial Launcher Audio virtual speaker"/>
+            </WrapPanel>
 
-            <CheckBox x:Name="QuestLinkCheck" Content="Stream to Quest (Desktop Link)" IsChecked="True" Margin="0,12,0,4"/>
+            <!-- 3D look section -->
+            <DockPanel Margin="0,14,0,2">
+              <Button DockPanel.Dock="Right" Content="Save" Padding="10,2" Margin="8,0,0,0"
+                      Tag="look3d" Click="SaveSection_Click" ToolTip="Save 3D look settings"/>
+              <TextBlock Text="3D look" FontWeight="SemiBold" VerticalAlignment="Center"/>
+            </DockPanel>
+            <TextBlock TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" FontSize="10" Margin="0,0,0,6"
+                       Text="Halos around people: raise Edge smear clean and lower Motion ghosting."/>
+            <TextBlock x:Name="DepthStrengthLabel" Text="3D pop 21% — how far things stick out" Margin="0,0,0,2" FontSize="12"/>
+            <Slider x:Name="DepthStrengthSlider" Minimum="10" Maximum="200" Value="21" TickFrequency="1" IsSnapToTickEnabled="True" ValueChanged="SettingsChanged"/>
+            <TextBlock x:Name="ConvergenceLabel" Text="Focus plane 50% — lower if eyestrain / screen feels too close" Margin="0,6,0,2" FontSize="12"/>
+            <Slider x:Name="ConvergenceSlider" Minimum="0" Maximum="100" Value="50" TickFrequency="1" IsSnapToTickEnabled="True" ValueChanged="SettingsChanged"/>
+            <TextBlock x:Name="DepthHzLabel" Text="Depth refresh 20 Hz — how often depth updates" Margin="0,6,0,2" FontSize="12"/>
+            <Slider x:Name="DepthHzSlider" Minimum="5" Maximum="60" Value="20" TickFrequency="1" IsSnapToTickEnabled="True" ValueChanged="SettingsChanged"/>
+            <TextBlock x:Name="DepthSmoothLabel" Text="Motion ghosting 25% — lower = cleaner moving people" Margin="0,6,0,2" FontSize="12"/>
+            <Slider x:Name="DepthSmoothSlider" Minimum="0" Maximum="90" Value="25" TickFrequency="1" IsSnapToTickEnabled="True" ValueChanged="SettingsChanged"/>
+            <TextBlock x:Name="EdgeCleanLabel" Text="Edge smear clean 60% — higher reduces halos around people" Margin="0,6,0,2" FontSize="12"/>
+            <Slider x:Name="EdgeCleanSlider" Minimum="0" Maximum="100" Value="60" TickFrequency="1" IsSnapToTickEnabled="True" ValueChanged="SettingsChanged"/>
+
+            <!-- Quest Link section -->
+            <DockPanel Margin="0,14,0,2">
+              <Button DockPanel.Dock="Right" Content="Save" Padding="10,2" Margin="8,0,0,0"
+                      Tag="quest" Click="SaveSection_Click" ToolTip="Save Quest Link settings"/>
+              <TextBlock Text="Quest Link" FontWeight="SemiBold" VerticalAlignment="Center"/>
+            </DockPanel>
+            <CheckBox x:Name="QuestLinkCheck" Content="Stream to Quest (Desktop Link)" IsChecked="True" Margin="0,0,0,4"/>
             <CheckBox x:Name="LanAdvertiseCheck" Content="Advertise on LAN (auto-find)" IsChecked="True" Margin="0,0,0,4"
                       Checked="SettingsChanged" Unchecked="SettingsChanged"/>
             <CheckBox x:Name="TrayCheck" Content="Minimize (_) goes to tray" IsChecked="True" Margin="0,0,0,4"
@@ -135,8 +174,12 @@
     <Border Grid.Column="4" Background="{StaticResource PanelBrush}" CornerRadius="10" Padding="12">
       <ScrollViewer VerticalScrollBarVisibility="Auto">
         <StackPanel>
-          <TextBlock Text="Reader (optional)" FontSize="16" FontWeight="SemiBold"/>
-          <TextBlock TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" FontSize="11" Margin="0,4,0,8"
+          <DockPanel Margin="0,0,0,4">
+            <Button DockPanel.Dock="Right" Content="Save" Padding="10,2" Margin="8,0,0,0"
+                    Tag="reader" Click="SaveSection_Click" ToolTip="Save reader settings"/>
+            <TextBlock Text="Reader (optional)" FontSize="16" FontWeight="SemiBold" VerticalAlignment="Center"/>
+          </DockPanel>
+          <TextBlock TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" FontSize="11" Margin="0,0,0,8"
                      Text="Off by default for 3D/cast testing. Turn on only when you want OCR/TTS on PC."/>
           <CheckBox x:Name="CaptionsCheck" Content="Captions / OCR (sidebar)" Margin="0,0,0,8"
                     Checked="SettingsChanged" Unchecked="SettingsChanged"/>

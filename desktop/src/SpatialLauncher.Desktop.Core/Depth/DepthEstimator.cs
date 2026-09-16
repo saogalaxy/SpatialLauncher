@@ -124,7 +124,17 @@ public sealed class DepthEstimator : IDisposable
             var blended = new float[h, w];
             for (int y = 0; y < h; y++)
             for (int x = 0; x < w; x++)
-                blended[y, x] = _prevDepth[y, x] * alpha + fresh[y, x] * (1f - alpha);
+            {
+                float prev = _prevDepth[y, x];
+                float next = fresh[y, x];
+                // Large depth jumps (moving people) keep more of the new sample so
+                // temporal blend does not leave a ghost trail / smear.
+                float delta = Math.Abs(next - prev);
+                float a = alpha;
+                if (delta > 0.08f)
+                    a *= 1f - Math.Clamp((delta - 0.08f) * 5f, 0f, 0.92f);
+                blended[y, x] = prev * a + next * (1f - a);
+            }
             _prevDepth = blended;
             return blended;
         }

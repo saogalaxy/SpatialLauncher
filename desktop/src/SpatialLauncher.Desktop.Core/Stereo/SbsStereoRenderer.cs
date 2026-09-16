@@ -7,6 +7,7 @@ namespace SpatialLauncher.Desktop.Core.Stereo;
 /// <summary>
 /// Warps a 2D frame into Half/Full SBS.
 /// Gaming: fast backward sample. Movies: forward-fill + hole inpaint (iw3-inspired).
+/// EdgeClean reduces silhouette halos by biasing discontinuities toward background depth.
 /// </summary>
 public static class SbsStereoRenderer
 {
@@ -16,11 +17,12 @@ public static class SbsStereoRenderer
         double divergence,
         double convergence,
         bool fullSbs,
-        DepthPreset preset = DepthPreset.Gaming)
+        DepthPreset preset = DepthPreset.Gaming,
+        int edgeCleanPercent = 60)
     {
         // DA3 Movies still uses the proven backward warp for SBS packing.
         // Forward-fill is reserved for a later pass (it was blanking the right eye).
-        return RenderGaming(frame, depth01, divergence, convergence, fullSbs);
+        return RenderGaming(frame, depth01, divergence, convergence, fullSbs, edgeCleanPercent);
     }
 
     private static Bitmap RenderGaming(
@@ -28,7 +30,8 @@ public static class SbsStereoRenderer
         float[,] depth01,
         double divergence,
         double convergence,
-        bool fullSbs)
+        bool fullSbs,
+        int edgeCleanPercent)
     {
         int srcW = frame.Width;
         int srcH = frame.Height;
@@ -38,6 +41,7 @@ public static class SbsStereoRenderer
         var output = new Bitmap(outW, eyeH, PixelFormat.Format32bppArgb);
 
         ComputeDepthStats(depth01, convergence, divergence, out float mean, out float convBias, out float div);
+        float edgeClean = Math.Clamp(edgeCleanPercent / 100f, 0f, 1f);
 
         var srcData = frame.LockBits(
             new Rectangle(0, 0, srcW, srcH),
@@ -58,7 +62,7 @@ public static class SbsStereoRenderer
             Parallel.For(0, eyeH, y => WarpLineBackward(
                 srcPtr, dstPtr, srcStride, dstStride,
                 y, eyeW, eyeH, srcW, srcH, dw, dh,
-                depth01, mean, convBias, div));
+                depth01, mean, convBias, div, edgeClean));
         }
         finally
         {
@@ -251,15 +255,16 @@ public static class SbsStereoRenderer
         float[,] depth01,
         float mean,
         float convBias,
-        float divergence)
+        float divergence,
+        float edgeClean)
     {
         float v = (y + 0.5f) / eyeH;
         int sy = Math.Clamp((int)(v * srcH), 0, srcH - 1);
         int dy = Math.Clamp((int)(v * dh), 0, dh - 1);
         byte* srcRow = (byte*)srcPtr + sy * srcStride;
         byte* dstRow = (byte*)dstPtr + y * dstStride;
-        WarpRowBackward(srcRow, dstRow, 0, +1, eyeW, srcW, dw, dy, depth01, mean, convBias, divergence);
-        WarpRowBackward(srcRow, dstRow, eyeW, -1, eyeW, srcW, dw, dy, depth01, mean, convBias, divergence);
+        WarpRowBackward(srcRow, dstRow, 0, +1, eyeW, srcW, dw, dy, depth01, mean, convBias, divergence, edgeClean);
+        WarpRowBackward(srcRow, dstRow, eyeW, -1, eyeW, srcW, dw, dy, depth01, mean, convBias, divergence, edgeClean);
     }
 
     private static unsafe void WarpRowBackward(
@@ -274,14 +279,30 @@ public static class SbsStereoRenderer
         float[,] depth01,
         float mean,
         float convBias,
-        float divergence)
+        float divergence,
+        float edgeClean)
     {
         for (int x = 0; x < eyeW; x++)
         {
             float u = (x + 0.5f) / eyeW;
             int dx = Math.Clamp((int)(u * dw), 0, dw - 1);
             float d = depth01[dy, dx];
-            float shift = divergence * (d - mean - convBias) * direction;
+            float dL = depth01[dy, Math.Max(0, dx - 1)];
+            float dR = depth01[dy, Math.Min(dw - 1, dx + 1)];
+            float edge = Math.Max(Math.Abs(d - dL), Math.Abs(d - dR));
+
+            // At silhouettes, prefer farther depth and shrink parallax so foreground
+            // doesn't stretch a bright halo into the background.
+            float shiftScale = 1f;
+            if (edgeClean > 0f && edge > 0.06f)
+            {
+                float t = Math.Clamp(edge * 5f, 0f, 1f) * edgeClean;
+                float far = Math.Min(d, Math.Min(dL, dR));
+                d = d * (1f - t) + far * t;
+                shiftScale = 1f - 0.75f * t;
+            }
+
+            float shift = divergence * (d - mean - convBias) * direction * shiftScale;
             float srcU = u + shift * 0.04f;
             int sx = Math.Clamp((int)(srcU * srcW), 0, srcW - 1);
             byte* srcPx = srcRow + sx * 4;

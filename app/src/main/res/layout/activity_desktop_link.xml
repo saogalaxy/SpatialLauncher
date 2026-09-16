@@ -373,6 +373,14 @@
                     android:textStyle="bold" />
 
                 <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:text="@string/desktop_link_3d_hint"
+                    android:textColor="@color/text_secondary"
+                    android:textSize="11sp" />
+
+                <TextView
                     android:id="@+id/desktop_link_depth_label"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
@@ -393,14 +401,14 @@
                         android:layout_height="wrap_content"
                         android:layout_weight="1"
                         android:max="190"
-                        android:progress="90" />
+                        android:progress="11" />
 
                     <TextView
                         android:id="@+id/desktop_link_depth_value"
                         android:layout_width="44dp"
                         android:layout_height="wrap_content"
                         android:gravity="end"
-                        android:text="100%"
+                        android:text="21%"
                         android:textColor="@color/text_secondary"
                         android:textSize="12sp" />
                 </LinearLayout>
@@ -492,14 +500,47 @@
                         android:layout_height="wrap_content"
                         android:layout_weight="1"
                         android:max="90"
-                        android:progress="40" />
+                        android:progress="25" />
 
                     <TextView
                         android:id="@+id/desktop_link_smooth_value"
                         android:layout_width="44dp"
                         android:layout_height="wrap_content"
                         android:gravity="end"
-                        android:text="40%"
+                        android:text="25%"
+                        android:textColor="@color/text_secondary"
+                        android:textSize="12sp" />
+                </LinearLayout>
+
+                <TextView
+                    android:id="@+id/desktop_link_edge_label"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:text="@string/desktop_link_edge_clean"
+                    android:textColor="@color/text_primary"
+                    android:textSize="13sp" />
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal">
+
+                    <SeekBar
+                        android:id="@+id/desktop_link_edge"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:max="100"
+                        android:progress="60" />
+
+                    <TextView
+                        android:id="@+id/desktop_link_edge_value"
+                        android:layout_width="44dp"
+                        android:layout_height="wrap_content"
+                        android:gravity="end"
+                        android:text="60%"
                         android:textColor="@color/text_secondary"
                         android:textSize="12sp" />
                 </LinearLayout>

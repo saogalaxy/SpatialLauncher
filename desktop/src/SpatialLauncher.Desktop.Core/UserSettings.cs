@@ -25,12 +25,20 @@ public sealed class UserSettings
     public DepthPreset DepthPreset { get; set; } = DepthPreset.Gaming;
     public StreamCodec StreamCodec { get; set; } = StreamCodec.Mjpeg;
     public Stream.AudioOutputMode AudioMode { get; set; } = Stream.AudioOutputMode.Pc;
-    public double Divergence { get; set; } = 1.0;
+    /// <summary>
+    /// Windows MMDevice ID for Spatial Launcher Audio (virtual sink). Empty = auto-pick.
+    /// </summary>
+    public string PreferredAudioSinkId { get; set; } = "";
+    /// <summary>Friendly name shown for Spatial Launcher Audio (cached for UI).</summary>
+    public string PreferredAudioSinkName { get; set; } = "";
+    public double Divergence { get; set; } = 0.21;
     public double Convergence { get; set; } = 0.5;
     /// <summary>Target depth inferences per second (Gaming default ~20, Movies ~30).</summary>
     public int DepthHz { get; set; } = 20;
-    /// <summary>0..100 temporal blend of new depth into previous map.</summary>
-    public int DepthTemporalSmoothPercent { get; set; } = 40;
+    /// <summary>0..100 temporal blend of new depth into previous map. High values smear moving people.</summary>
+    public int DepthTemporalSmoothPercent { get; set; } = 25;
+    /// <summary>0..100 cleans halos at depth edges (people vs background). Higher = less edge smear.</summary>
+    public int EdgeCleanPercent { get; set; } = 60;
     public bool TtsEnabled { get; set; }
     public bool TtsContinuous { get; set; } = true;
     public int OcrSmoothnessPercent { get; set; } = 55;
@@ -52,12 +60,14 @@ public sealed class UserSettings
         if (DepthPreset == DepthPreset.Gaming)
         {
             DepthHz = 20;
-            DepthTemporalSmoothPercent = 45;
+            DepthTemporalSmoothPercent = 25;
+            EdgeCleanPercent = 60;
         }
         else
         {
             DepthHz = 30;
-            DepthTemporalSmoothPercent = 35;
+            DepthTemporalSmoothPercent = 20;
+            EdgeCleanPercent = 55;
         }
     }
 }

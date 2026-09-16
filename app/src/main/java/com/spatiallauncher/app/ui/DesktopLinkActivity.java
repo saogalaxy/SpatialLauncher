@@ -47,6 +47,7 @@ import java.net.SocketTimeoutException;
 import java.net.URL;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayDeque;
 
 /**
  * Thin Quest viewer for Spatial Launcher Desktop: LAN auto-find + JPEG/MPEG SBS +
@@ -95,6 +96,7 @@ public class DesktopLinkActivity extends AppCompatActivity implements SurfaceHol
     private SeekBar sharpenSeek;
     private SeekBar hzSeek;
     private SeekBar smoothSeek;
+    private SeekBar edgeSeek;
     private TextView widthValue;
     private TextView jpegValue;
     private TextView sharpenValue;
@@ -102,6 +104,7 @@ public class DesktopLinkActivity extends AppCompatActivity implements SurfaceHol
     private TextView convValue;
     private TextView hzValue;
     private TextView smoothValue;
+    private TextView edgeValue;
     private Button codecJpegBtn;
     private Button codecMpegBtn;
     private Button codecAv1Btn;
@@ -179,6 +182,7 @@ public class DesktopLinkActivity extends AppCompatActivity implements SurfaceHol
         sharpenSeek = findViewById(R.id.desktop_link_sharpen);
         hzSeek = findViewById(R.id.desktop_link_hz);
         smoothSeek = findViewById(R.id.desktop_link_smooth);
+        edgeSeek = findViewById(R.id.desktop_link_edge);
         widthValue = findViewById(R.id.desktop_link_width_value);
         jpegValue = findViewById(R.id.desktop_link_jpeg_value);
         sharpenValue = findViewById(R.id.desktop_link_sharpen_value);
@@ -186,6 +190,7 @@ public class DesktopLinkActivity extends AppCompatActivity implements SurfaceHol
         convValue = findViewById(R.id.desktop_link_conv_value);
         hzValue = findViewById(R.id.desktop_link_hz_value);
         smoothValue = findViewById(R.id.desktop_link_smooth_value);
+        edgeValue = findViewById(R.id.desktop_link_edge_value);
         codecJpegBtn = findViewById(R.id.desktop_link_codec_jpeg);
         codecMpegBtn = findViewById(R.id.desktop_link_codec_mpeg);
         codecAv1Btn = findViewById(R.id.desktop_link_codec_av1);
@@ -874,9 +879,9 @@ public class DesktopLinkActivity extends AppCompatActivity implements SurfaceHol
             track.play();
             audioTrack = track;
 
-            byte[] recv = new byte[4 + AUDIO_SAMPLE_RATE / 50 * AUDIO_CHANNELS * 2];
+            byte[] recv = new byte[4 + AUDIO_SAMPLE_RATE / 50 * AUDIO_CHANNELS * 2 * 2];
             DatagramPacket packet = new DatagramPacket(recv, recv.length);
-            int lastGen = -1;
+            long lastSeq = -1;
             Thread player = new Thread(() -> {
                 int playGen = -1;
                 while (wantAudio && !Thread.currentThread().isInterrupted()) {
@@ -901,6 +906,10 @@ public class DesktopLinkActivity extends AppCompatActivity implements SurfaceHol
                         continue;
                     }
                     playGen = gen;
+                    // Odd length = corrupt / truncated UDP — skip (avoids channel swap static).
+                    if ((pcm.length & 1) != 0) {
+                        continue;
+                    }
                     AudioTrack t = audioTrack;
                     if (t != null) {
                         try {
@@ -923,14 +932,28 @@ public class DesktopLinkActivity extends AppCompatActivity implements SurfaceHol
                 if (len <= 4) {
                     continue;
                 }
-                byte[] pcm = new byte[len - 4];
-                System.arraycopy(packet.getData(), packet.getOffset() + 4, pcm, 0, pcm.length);
+                byte[] data = packet.getData();
+                int off = packet.getOffset();
+                long seq = ((data[off] & 0xFFL) << 24)
+                        | ((data[off + 1] & 0xFFL) << 16)
+                        | ((data[off + 2] & 0xFFL) << 8)
+                        | (data[off + 3] & 0xFFL);
+                // Drop duplicates / reorders (unicast+broadcast leftovers, Wi-Fi retries).
+                if (lastSeq >= 0 && seq <= lastSeq) {
+                    continue;
+                }
+                lastSeq = seq;
+                int pcmLen = len - 4;
+                if ((pcmLen & 1) != 0) {
+                    continue;
+                }
+                byte[] pcm = new byte[pcmLen];
+                System.arraycopy(data, off + 4, pcm, 0, pcmLen);
                 synchronized (audioLock) {
                     pendingPcm = pcm;
                     pendingPcmGen++;
                     audioLock.notifyAll();
                 }
-                lastGen = pendingPcmGen;
             }
             player.interrupt();
         } catch (Exception e) {
@@ -1728,6 +1751,7 @@ public class DesktopLinkActivity extends AppCompatActivity implements SurfaceHol
         sharpenSeek.setOnSeekBarChangeListener(push);
         hzSeek.setOnSeekBarChangeListener(push);
         smoothSeek.setOnSeekBarChangeListener(push);
+        edgeSeek.setOnSeekBarChangeListener(push);
         live3dToggle.setOnCheckedChangeListener((b, checked) -> {
             if (!applyingRemote) pushRemoteSettings(false);
         });
@@ -1805,13 +1829,15 @@ public class DesktopLinkActivity extends AppCompatActivity implements SurfaceHol
         int sharpen = sharpenSeek.getProgress();
         int hz = 5 + hzSeek.getProgress();
         int smooth = smoothSeek.getProgress();
+        int edge = edgeSeek != null ? edgeSeek.getProgress() : 60;
         if (widthValue != null) widthValue.setText(String.valueOf(width));
         if (jpegValue != null) jpegValue.setText(String.valueOf(jpeg));
         if (sharpenValue != null) sharpenValue.setText(String.valueOf(sharpen));
         if (depthValue != null) depthValue.setText(depth + "%");
         if (convValue != null) convValue.setText(conv + "%");
-        if (hzValue != null) hzValue.setText(String.valueOf(hz));
+        if (hzValue != null) hzValue.setText(hz + " Hz");
         if (smoothValue != null) smoothValue.setText(smooth + "%");
+        if (edgeValue != null) edgeValue.setText(edge + "%");
     }
 
     private String settingsUrl() {
@@ -1850,7 +1876,7 @@ public class DesktopLinkActivity extends AppCompatActivity implements SurfaceHol
         applyingRemote = true;
         try {
             if (o.has("depthStrength")) {
-                depthSeek.setProgress(Math.max(0, o.optInt("depthStrength", 100) - 10));
+                depthSeek.setProgress(Math.max(0, o.optInt("depthStrength", 21) - 10));
             }
             if (o.has("convergence")) {
                 convSeek.setProgress(o.optInt("convergence", 50));
@@ -1874,7 +1900,10 @@ public class DesktopLinkActivity extends AppCompatActivity implements SurfaceHol
                 hzSeek.setProgress(Math.max(0, Math.min(55, o.optInt("depthHz", 20) - 5)));
             }
             if (o.has("depthSmooth")) {
-                smoothSeek.setProgress(Math.max(0, Math.min(90, o.optInt("depthSmooth", 40))));
+                smoothSeek.setProgress(Math.max(0, Math.min(90, o.optInt("depthSmooth", 25))));
+            }
+            if (o.has("edgeClean") && edgeSeek != null) {
+                edgeSeek.setProgress(Math.max(0, Math.min(100, o.optInt("edgeClean", 60))));
             }
             if (o.has("codec")) {
                 String c = o.optString("codec", selectedCodec).toLowerCase();
@@ -1928,6 +1957,7 @@ public class DesktopLinkActivity extends AppCompatActivity implements SurfaceHol
         final int sharpen = sharpenSeek.getProgress();
         final int depthHz = 5 + hzSeek.getProgress();
         final int depthSmooth = smoothSeek.getProgress();
+        final int edgeClean = edgeSeek != null ? edgeSeek.getProgress() : 60;
         final String codec = selectedCodec;
         final String audio = selectedAudio;
         final String depthPreset = selectedPreset;
@@ -1944,6 +1974,7 @@ public class DesktopLinkActivity extends AppCompatActivity implements SurfaceHol
                 body.put("sharpen", sharpen);
                 body.put("depthHz", depthHz);
                 body.put("depthSmooth", depthSmooth);
+                body.put("edgeClean", edgeClean);
                 body.put("codec", codec);
                 body.put("audio", audio);
                 body.put("depthPreset", depthPreset);

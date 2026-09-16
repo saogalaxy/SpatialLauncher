@@ -161,6 +161,23 @@ if ("$existing" -notmatch "8765") {
     Write-Host "  URL ACL already present"
 }
 
+Write-Step "Spatial Launcher Audio driver (virtual speaker)"
+$audioInstall = Join-Path $PSScriptRoot "install_spatial_audio_driver.ps1"
+$audioDist = Join-Path $DesktopDir "audio-driver\dist\x64"
+$audioInstallDir = Join-Path $env:LOCALAPPDATA "SpatialLauncherDesktop\audio-driver"
+if (Test-Path $audioDist) {
+    New-Item -ItemType Directory -Force -Path $audioInstallDir | Out-Null
+    Copy-Item -Path (Join-Path $audioDist "*") -Destination $audioInstallDir -Force -ErrorAction SilentlyContinue
+    Copy-Item -Path $audioInstall -Destination (Join-Path $audioInstallDir "install_spatial_audio_driver.ps1") -Force -ErrorAction SilentlyContinue
+    Write-Host "  Installing / refreshing Spatial Launcher Audio (UAC prompt)..."
+    Start-Process -FilePath "powershell.exe" -Verb RunAs -ArgumentList @(
+        "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "`"$audioInstall`""
+    ) -Wait -ErrorAction SilentlyContinue
+    Write-Host "  If Sound still lacks 'Spatial Launcher Audio', run tools\install_spatial_audio_driver.ps1 as Admin."
+} else {
+    Write-Host "  Skipped - package missing at $audioDist" -ForegroundColor Yellow
+}
+
 Write-Step "Model folder + depth ONNX fetch"
 $modelRoot = Join-Path $env:LOCALAPPDATA "SpatialLauncherDesktop\models"
 New-Item -ItemType Directory -Force -Path $modelRoot | Out-Null
@@ -191,8 +208,8 @@ function Get-ModelFile([string]$Url, [string]$Dest, [string]$Label) {
 }
 
 # Depth models:
-#  Gaming  — Depth Anything V2 Small
-#  Movies  — Depth Anything 3 Base (preferred), DA3 Small, then DA-V2 Base fallback
+#  Gaming  - Depth Anything V2 Small
+#  Movies  - Depth Anything 3 Base (preferred), DA3 Small, then DA-V2 Base fallback
 Get-ModelFile `
     "https://huggingface.co/onnx-community/depth-anything-v2-small/resolve/main/onnx/model.onnx" `
     (Join-Path $modelRoot "depth_anything_v2_vits.onnx") `

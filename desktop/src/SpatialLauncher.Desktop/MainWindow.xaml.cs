@@ -10,6 +10,7 @@ using SpatialLauncher.Desktop.Core.Capture;
 using SpatialLauncher.Desktop.Core.Listen;
 using SpatialLauncher.Desktop.Core.Reader;
 using SpatialLauncher.Desktop.Core.Session;
+using SpatialLauncher.Desktop.Core.Stream;
 using Button = System.Windows.Controls.Button;
 using Forms = System.Windows.Forms;
 
@@ -20,17 +21,22 @@ public partial class MainWindow : Window
     private readonly MirrorSession _session = new();
     private readonly ReaderPipeline _reader = new();
     private readonly ListenEngine _listen = new();
-    private readonly UserSettings _settings = new();
+    private readonly UserSettingsStore _settingsStore = new();
+    private UserSettings _settings;
     private SbsViewerWindow? _viewer;
     private AssistMode _mode = AssistMode.Read;
     private bool _useOpus = true;
     private bool _uiReady;
+    private bool _audioSinkComboReady;
     private Forms.NotifyIcon? _tray;
     private readonly DispatcherTimer _sourceRefreshTimer = new() { Interval = TimeSpan.FromSeconds(3) };
     private string? _selectedSourceId;
 
     public MainWindow()
     {
+        _settings = _settingsStore.Load();
+        _mode = _settings.AssistMode;
+        _useOpus = _settings.UseOpusTranslate;
         InitializeComponent();
         Loaded += OnLoaded;
         Closed += (_, _) => ShutdownAll();
@@ -41,7 +47,16 @@ public partial class MainWindow : Window
         InitTray();
         RefreshSources(preserveSelection: false);
         _session.SbsFrameReady += OnSbsFrame;
-        _session.StatusChanged += msg => Dispatcher.Invoke(() => StatusText.Text = msg);
+        _session.StatusChanged += msg => Dispatcher.Invoke(() =>
+        {
+            StatusText.Text = msg;
+            if (msg.StartsWith("Audio", StringComparison.OrdinalIgnoreCase)
+                || msg.Contains("virtual", StringComparison.OrdinalIgnoreCase))
+            {
+                RefreshAudioSinkHint();
+                UpdatePipelineLabel();
+            }
+        });
         _session.QuestLink.SettingsGetJson = () => SessionSettingsJson.ToJson(_settings);
         _session.QuestLink.SettingsApplyJson = json =>
         {
@@ -71,6 +86,7 @@ public partial class MainWindow : Window
         });
         _reader.FrameProvider = () => _session.Capture.CloneLatestFrame();
         ApplyUiFromSettings();
+        PopulateAudioSinkCombo();
         UpdatePipelineLabel();
         _uiReady = true;
         SyncSettingsFromUi();
@@ -327,10 +343,145 @@ public partial class MainWindow : Window
     {
         if (sender is not Button btn || btn.Tag is not string tag) return;
         _settings.AudioMode = tag == "headset"
-            ? SpatialLauncher.Desktop.Core.Stream.AudioOutputMode.Headset
-            : SpatialLauncher.Desktop.Core.Stream.AudioOutputMode.Pc;
+            ? AudioOutputMode.Headset
+            : AudioOutputMode.Pc;
         StyleAudioButtons();
         SyncSettingsFromUi();
+    }
+
+    private void RefreshAudioSinks_Click(object sender, RoutedEventArgs e)
+    {
+        PopulateAudioSinkCombo();
+        RefreshAudioSinkHint();
+        StatusText.Text = AudioSinkCombo.Items.Count > 0
+            ? "Found " + AudioSinkCombo.Items.Count + " optional virtual sink(s) — Headset mirrors PC speakers without them"
+            : "Headset mirrors PC speakers (no virtual sink required)";
+    }
+
+    private void InstallAudioDriver_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            string localPkg = System.IO.Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "SpatialLauncherDesktop", "audio-driver");
+            string cmd = System.IO.Path.Combine(localPkg, "INSTALL.cmd");
+            string script = System.IO.Path.Combine(localPkg, "install_spatial_audio_driver.ps1");
+            if (!File.Exists(script))
+            {
+                string root = FindRepoRoot();
+                script = System.IO.Path.Combine(root, "tools", "install_spatial_audio_driver.ps1");
+                cmd = System.IO.Path.Combine(root, "tools", "install_spatial_audio_driver.cmd");
+            }
+            if (!File.Exists(script) && !File.Exists(cmd))
+            {
+                StatusText.Text = "Install package not found. Re-run desktop_easy_install.ps1.";
+                return;
+            }
+            StatusText.Text = "Launching Spatial Launcher Audio installer (approve UAC)...";
+            var psi = new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = File.Exists(cmd) ? cmd : "powershell.exe",
+                Arguments = File.Exists(cmd)
+                    ? ""
+                    : "-NoProfile -ExecutionPolicy Bypass -File \"" + script + "\"",
+                WorkingDirectory = System.IO.Path.GetDirectoryName(File.Exists(cmd) ? cmd : script) ?? localPkg,
+                UseShellExecute = true,
+                Verb = "runas"
+            };
+            var proc = System.Diagnostics.Process.Start(psi);
+            proc?.WaitForExit(180000);
+            PopulateAudioSinkCombo();
+            RefreshAudioSinkHint();
+            StatusText.Text = AudioEndpointSwitcher.HasSpatialLauncherAudio()
+                ? "Spatial Launcher Audio ready — pick it under Sound, tap Headset."
+                : "Installer finished — open Windows Sound; if missing, Refresh sinks. Log: %LocalAppData%\\SpatialLauncherDesktop\\logs\\audio_driver_install.log";
+        }
+        catch (Exception ex)
+        {
+            StatusText.Text = "Driver install cancelled or failed: " + ex.Message;
+        }
+    }
+
+    private static string FindRepoRoot()
+    {
+        // Dev: cwd / exe under repo. Installed: LocalAppData\SpatialLauncherDesktop\app
+        string? dir = AppContext.BaseDirectory;
+        for (int i = 0; i < 8 && !string.IsNullOrEmpty(dir); i++)
+        {
+            if (File.Exists(System.IO.Path.Combine(dir, "tools", "install_spatial_audio_driver.ps1")))
+                return dir;
+            if (File.Exists(System.IO.Path.Combine(dir, "desktop", "audio-driver", "dist", "x64", "VirtualAudioDriver.inf")))
+                return dir;
+            dir = System.IO.Path.GetDirectoryName(dir);
+        }
+        return Directory.GetCurrentDirectory();
+    }
+
+    private void AudioSinkCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (!_uiReady || !_audioSinkComboReady) return;
+        if (AudioSinkCombo.SelectedItem is AudioEndpointSwitcher.EndpointInfo sink)
+        {
+            _settings.PreferredAudioSinkId = sink.Id;
+            _settings.PreferredAudioSinkName = sink.FriendlyName;
+            SyncSettingsFromUi();
+            RefreshAudioSinkHint();
+        }
+    }
+
+    private void SaveSection_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not Button btn || btn.Tag is not string section) return;
+        SyncSettingsFromUi();
+        try
+        {
+            _settingsStore.Save(_settings);
+            string label = section switch
+            {
+                "stream" => "Stream",
+                "audio" => "Sound",
+                "look3d" => "3D look",
+                "quest" => "Quest Link",
+                "reader" => "Reader",
+                _ => "Settings"
+            };
+            StatusText.Text = "Saved " + label + " settings";
+            RefreshAudioSinkHint();
+            UpdatePipelineLabel();
+        }
+        catch (Exception ex)
+        {
+            StatusText.Text = "Save failed: " + ex.Message;
+        }
+    }
+
+    private void PopulateAudioSinkCombo()
+    {
+        _audioSinkComboReady = false;
+        var sinks = AudioEndpointSwitcher.ListVirtualSinks();
+        AudioSinkCombo.ItemsSource = sinks;
+        AudioEndpointSwitcher.EndpointInfo? selected = null;
+        if (!string.IsNullOrWhiteSpace(_settings.PreferredAudioSinkId))
+        {
+            foreach (var s in sinks)
+            {
+                if (string.Equals(s.Id, _settings.PreferredAudioSinkId, StringComparison.OrdinalIgnoreCase))
+                {
+                    selected = s;
+                    break;
+                }
+            }
+        }
+        selected ??= sinks.Count > 0 ? sinks[0] : null;
+        AudioSinkCombo.SelectedItem = selected;
+        if (selected != null)
+        {
+            _settings.PreferredAudioSinkId = selected.Id;
+            _settings.PreferredAudioSinkName = selected.FriendlyName;
+        }
+        _audioSinkComboReady = true;
+        RefreshAudioSinkHint();
     }
 
     private void Mode_Click(object sender, RoutedEventArgs e)
@@ -390,6 +541,7 @@ public partial class MainWindow : Window
         _settings.Convergence = ConvergenceSlider.Value / 100.0;
         _settings.DepthHz = (int)DepthHzSlider.Value;
         _settings.DepthTemporalSmoothPercent = (int)DepthSmoothSlider.Value;
+        _settings.EdgeCleanPercent = (int)EdgeCleanSlider.Value;
         _settings.TtsEnabled = TtsCheck.IsChecked == true;
         _settings.TtsContinuous = TtsContinuousCheck.IsChecked == true;
         _settings.CaptionsEnabled = CaptionsCheck.IsChecked == true;
@@ -408,14 +560,20 @@ public partial class MainWindow : Window
             JpegQualityLabel.Text = "JPEG quality " + _settings.JpegQuality + " — higher = sharper, bigger frames";
         }
         SharpenLabel.Text = "Sharpen " + _settings.SharpenPercent + " — edge crispness before encode";
-        DepthStrengthLabel.Text = "Depth strength " + (int)DepthStrengthSlider.Value + "% — how strong the 3D pop is";
-        ConvergenceLabel.Text = "Convergence " + (int)ConvergenceSlider.Value + "% — zero-parallax plane (lower if eyestrain)";
-        DepthHzLabel.Text = "Depth update " + _settings.DepthHz + " Hz — how often the depth map refreshes";
-        DepthSmoothLabel.Text = "Depth smooth " + _settings.DepthTemporalSmoothPercent + "% — blends depth frames (less shimmer)";
+        DepthStrengthLabel.Text = "3D pop " + (int)DepthStrengthSlider.Value + "% — how far things stick out";
+        ConvergenceLabel.Text = "Focus plane " + (int)ConvergenceSlider.Value + "% — lower if eyestrain / screen feels too close";
+        DepthHzLabel.Text = "Depth refresh " + _settings.DepthHz + " Hz — how often depth updates";
+        DepthSmoothLabel.Text = "Motion ghosting " + _settings.DepthTemporalSmoothPercent + "% — lower = cleaner moving people";
+        EdgeCleanLabel.Text = "Edge smear clean " + _settings.EdgeCleanPercent + "% — higher reduces halos around people";
         _settings.OcrSmoothnessPercent = (int)OcrSmoothSlider.Value;
         _settings.TtsSpeedPercent = (int)TtsSpeedSlider.Value;
         _settings.AdvertiseOnLan = LanAdvertiseCheck.IsChecked == true;
         _settings.RunInBackground = TrayCheck.IsChecked == true;
+        if (AudioSinkCombo.SelectedItem is AudioEndpointSwitcher.EndpointInfo sink)
+        {
+            _settings.PreferredAudioSinkId = sink.Id;
+            _settings.PreferredAudioSinkName = sink.FriendlyName;
+        }
         _session.ApplySettings(_settings);
         if (!string.IsNullOrEmpty(_session.QuestLinkUrl))
             QuestLinkUrlBox.Text = _session.QuestLinkUrl;
@@ -450,6 +608,7 @@ public partial class MainWindow : Window
         ConvergenceSlider.Value = Math.Clamp(_settings.Convergence * 100, 0, 100);
         DepthHzSlider.Value = _settings.DepthHz;
         DepthSmoothSlider.Value = _settings.DepthTemporalSmoothPercent;
+        EdgeCleanSlider.Value = _settings.EdgeCleanPercent;
         TtsCheck.IsChecked = _settings.TtsEnabled;
         TtsContinuousCheck.IsChecked = _settings.TtsContinuous;
         CaptionsCheck.IsChecked = _settings.CaptionsEnabled;
@@ -482,8 +641,34 @@ public partial class MainWindow : Window
 
     private void StyleAudioButtons()
     {
-        SetChip(AudioPc, _settings.AudioMode == SpatialLauncher.Desktop.Core.Stream.AudioOutputMode.Pc);
-        SetChip(AudioHeadset, _settings.AudioMode == SpatialLauncher.Desktop.Core.Stream.AudioOutputMode.Headset);
+        SetChip(AudioPc, _settings.AudioMode == AudioOutputMode.Pc);
+        SetChip(AudioHeadset, _settings.AudioMode == AudioOutputMode.Headset);
+        RefreshAudioSinkHint();
+    }
+
+    private void RefreshAudioSinkHint()
+    {
+        var selected = AudioSinkCombo.SelectedItem as AudioEndpointSwitcher.EndpointInfo
+                       ?? AudioEndpointSwitcher.TryFindVirtualSink(_settings.PreferredAudioSinkId);
+        string active = _session.Audio.ActiveSinkName ?? "";
+        if (_settings.AudioMode == AudioOutputMode.Headset && !string.IsNullOrEmpty(active))
+        {
+            AudioSinkHint.Text = "Headset on · mirroring '" + active
+                + "' to Quest. PC speakers stay on — play any audio on the PC to hear it in the headset.";
+        }
+        else if (_settings.AudioMode == AudioOutputMode.Headset)
+        {
+            AudioSinkHint.Text = "Headset will mirror Windows default speakers to Quest (both play). Start Session, connect Quest, tap Headset.";
+        }
+        else if (selected != null)
+        {
+            AudioSinkHint.Text = "PC speakers mode. Optional virtual sink listed: " + selected.FriendlyName
+                + " (not required for Headset anymore).";
+        }
+        else
+        {
+            AudioSinkHint.Text = "PC speakers only. Tap Headset to also send the same mix to Quest.";
+        }
     }
 
     private void StyleModeButtons()
@@ -521,8 +706,10 @@ public partial class MainWindow : Window
                                   _ => "JPEG"
                               })
                               + $" q{_settings.JpegQuality} sharp{_settings.SharpenPercent}"
-                              + (_settings.AudioMode == SpatialLauncher.Desktop.Core.Stream.AudioOutputMode.Headset
-                                  ? " · audio→Quest"
+                              + (_settings.AudioMode == AudioOutputMode.Headset
+                                  ? (!string.IsNullOrEmpty(_session.Audio.ActiveSinkName)
+                                      ? " · audio→Quest (mirror " + _session.Audio.ActiveSinkName + ")"
+                                      : " · audio→Quest (mirror speakers)")
                                   : " · audio→PC");
     }
 

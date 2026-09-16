@@ -41,6 +41,8 @@ public static class SessionSettingsJson
                 target.DepthHz = Math.Clamp(patch.DepthHz.Value, 5, 60);
             if (patch.DepthSmooth.HasValue)
                 target.DepthTemporalSmoothPercent = Math.Clamp(patch.DepthSmooth.Value, 0, 90);
+            if (patch.EdgeClean.HasValue)
+                target.EdgeCleanPercent = Math.Clamp(patch.EdgeClean.Value, 0, 100);
             if (!string.IsNullOrWhiteSpace(patch.Codec))
                 target.StreamCodec = ParseCodec(patch.Codec);
             if (!string.IsNullOrWhiteSpace(patch.Audio))
@@ -101,6 +103,7 @@ public static class SessionSettingsJson
         public int? Sharpen { get; set; }
         public int? DepthHz { get; set; }
         public int? DepthSmooth { get; set; }
+        public int? EdgeClean { get; set; }
         public string? Codec { get; set; }
         public string? Audio { get; set; }
         public string? DepthPreset { get; set; }
@@ -118,6 +121,7 @@ public static class SessionSettingsJson
             Sharpen = s.SharpenPercent;
             DepthHz = s.DepthHz;
             DepthSmooth = s.DepthTemporalSmoothPercent;
+            EdgeClean = s.EdgeCleanPercent;
             Codec = CodecLabel(s.StreamCodec);
             Audio = s.AudioMode == AudioOutputMode.Headset ? "headset" : "pc";
             DepthPreset = s.DepthPreset == global::SpatialLauncher.Desktop.Core.DepthPreset.Movies

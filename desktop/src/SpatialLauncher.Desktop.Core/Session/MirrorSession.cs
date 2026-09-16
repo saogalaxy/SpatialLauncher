@@ -69,6 +69,10 @@ public sealed class MirrorSession : IDisposable
     {
         if (_audioHooked) return;
         _audio.StatusChanged += msg => StatusChanged?.Invoke(msg);
+        _questLink.ViewerAddressChanged += ip =>
+        {
+            try { _audio.SetQuestEndpoint(ip); } catch { /* ignore */ }
+        };
         _audioHooked = true;
     }
 
@@ -77,6 +81,11 @@ public sealed class MirrorSession : IDisposable
         EnsureAudioHooked();
         try
         {
+            _audio.PreferredSinkId = string.IsNullOrWhiteSpace(_settings.PreferredAudioSinkId)
+                ? null
+                : _settings.PreferredAudioSinkId;
+            if (_questLink.LastViewerAddress != null)
+                _audio.SetQuestEndpoint(_questLink.LastViewerAddress);
             _audio.ApplyMode(_settings.AudioMode);
         }
         catch (Exception ex)
@@ -278,7 +287,7 @@ public sealed class MirrorSession : IDisposable
                 {
                     sbs = SbsStereoRenderer.Render(
                         frame, depth, _settings.Divergence, _settings.Convergence, fullSbs,
-                        _settings.DepthPreset);
+                        _settings.DepthPreset, _settings.EdgeCleanPercent);
                 }
                 else
                 {

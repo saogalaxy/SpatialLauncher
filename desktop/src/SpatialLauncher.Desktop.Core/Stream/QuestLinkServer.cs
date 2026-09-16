@@ -43,6 +43,10 @@ public sealed class QuestLinkServer : IDisposable
     public bool SessionActive { get; set; }
     public int ViewerCount => _viewerCount;
     private int _viewerCount;
+    private IPAddress? _lastViewerAddress;
+    /// <summary>LAN address of the most recent Quest video client (for audio unicast).</summary>
+    public IPAddress? LastViewerAddress => _lastViewerAddress;
+    public event Action<IPAddress?>? ViewerAddressChanged;
     public StreamCodec Codec
     {
         get => _codec;
@@ -326,7 +330,7 @@ public sealed class QuestLinkServer : IDisposable
 
     private void WriteMjpegLoop(TcpClient client, NetworkStream stream)
     {
-        if (!TryAcquireViewerSlot(stream))
+        if (!TryAcquireViewerSlot(client, stream))
             return;
         try
         {
@@ -375,7 +379,7 @@ public sealed class QuestLinkServer : IDisposable
 
     private void WriteLengthPrefixedLoop(TcpClient client, NetworkStream stream, StreamCodec expected, string xCodec)
     {
-        if (!TryAcquireViewerSlot(stream))
+        if (!TryAcquireViewerSlot(client, stream))
             return;
         try
         {
@@ -431,7 +435,7 @@ public sealed class QuestLinkServer : IDisposable
     /// At most two live stream pumps. Reconnect storms were leaving 30+ half-dead
     /// clients and starving the real headset of the first AU after a codec switch.
     /// </summary>
-    private bool TryAcquireViewerSlot(NetworkStream stream)
+    private bool TryAcquireViewerSlot(TcpClient client, NetworkStream stream)
     {
         int n = Interlocked.Increment(ref _viewerCount);
         if (n > 2)
@@ -445,6 +449,7 @@ public sealed class QuestLinkServer : IDisposable
             catch { /* client gone */ }
             return false;
         }
+        NoteViewerAddress(client);
         StatusChanged?.Invoke(
             SessionActive
                 ? $"Quest connected ({n}) · streaming"
@@ -452,9 +457,30 @@ public sealed class QuestLinkServer : IDisposable
         return true;
     }
 
+    private void NoteViewerAddress(TcpClient client)
+    {
+        try
+        {
+            if (client.Client.RemoteEndPoint is IPEndPoint ep)
+            {
+                _lastViewerAddress = ep.Address;
+                ViewerAddressChanged?.Invoke(_lastViewerAddress);
+            }
+        }
+        catch
+        {
+            // ignore
+        }
+    }
+
     private void NoteViewerLeft()
     {
         int n = Math.Max(0, Interlocked.Decrement(ref _viewerCount));
+        if (n == 0)
+        {
+            _lastViewerAddress = null;
+            ViewerAddressChanged?.Invoke(null);
+        }
         StatusChanged?.Invoke(
             n > 0
                 ? $"Quest viewers: {n}"

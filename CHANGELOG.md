@@ -17,20 +17,32 @@ Format: newest first. Dates are local (US).
 - **AV1 `av1c` once-only on PC:** stop appending sequence-header OBUs every keyframe (was bloating `csd-0` to 15KB+).
 - Quest rejects oversized `av1c` (over 2KB), skips cold-start surface recycle when already valid, waits for surface before claiming a viewer slot, and resumes stream on `surfaceCreated`/`onResume`.
 - **Codec upswitch (JPEG→AV1/H.264):** stop resetting `surfaceProducer` on reconnect (that skipped the canvas→codec handoff). Replace the `SurfaceView` on producer changes so BLAST is clean — hide/show was dropping the surface on the way back up to AV1.
+- **Edge smear clean** (PC + Quest Desktop Link): bias depth discontinuities toward background and shrink edge parallax to cut halos around people. Defaults lower **Motion ghosting** (was “Depth smooth”).
+- **Spatial Launcher Audio driver:** ships signed Virtual Audio Driver package under `desktop/audio-driver/dist/x64`, installs via elevated `tools/install_spatial_audio_driver.ps1` (also from Desktop Sound UI), renames Windows Sound endpoint to **Spatial Launcher Audio**. Headset prefers that sink over Steam Streaming Speakers.
+- Per-section **Save** on Stream / Sound / 3D look / Quest Link / Reader — persists to `%LocalAppData%\SpatialLauncherDesktop\user_settings.json`.
+- Clearer 3D labels: **3D pop**, **Focus plane**, **Depth refresh**, **Motion ghosting**, **Edge smear clean**.
 
 ### Movies / depth
 - Movies preset prefers Depth Anything 3 ONNX (`da3_base` → `da3_small` → DA-V2 Base fallback).
 - Installer fetches DA3 models from Hugging Face when missing.
 
 ### Audio
-- Separate LAN audio UDP path (PC speakers vs Headset mute+pipe).
+- **Headset mirrors PC speakers:** WASAPI loopback of the Windows default render device → UDP PCM `:8767` (s16le stereo 48 kHz). PC speakers stay on; no virtual sink required for dual play.
+- Unicast audio to the connected Quest IP (from video TCP); drop duplicate sequence numbers on Quest.
+- Float loopback → explicit s16le conversion (fixes static from MediaFoundationResampler / dual unicast+broadcast).
+- Optional **Spatial Launcher Audio** driver package + install scripts remain; Secure Boot PCs often hit **Code 52** (SignPath ≠ Microsoft attestation) — installer reports this clearly.
+- Own virtual speaker path: install **Spatial Launcher Audio**, then Headset (when the driver loads).
+
+### Docs
+- Added [docs/TECH_STACK.md](docs/TECH_STACK.md) (platforms, libraries, ports, models, audio/video path).
 
 ### Defaults
-- Stream width **1920**, JPEG quality **85**, sharpen **25**.
+- Stream width **1920**, JPEG quality **85**, sharpen **25**, **3D pop 21%**.
 
-### Known issues (2026-09-14)
+### Known issues (2026-09-15)
 - If a PC has no AV1 hardware encoder, status shows encode error — use MPEG/JPEG.
 - Desktop Link launched while the panel is stopped/not focused will wait for a surface; put on the headset and look at the panel if the stream does not start.
+- Spatial Launcher Audio virtual driver may show Device Manager Code 52 under Secure Boot until an attestation-signed package ships.
 
 ## 2026-09-14 — Test notes (codec flow)
 
