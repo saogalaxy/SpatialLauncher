@@ -15,6 +15,7 @@ app/src/main/assets/translate/**/tokenizer.json
 app/src/main/assets/native/
 app/src/main/assets/models/**/*.tar.bz2
 app/src/main/assets/models/qwen/
+app/model-cache/
 # One-off capture dumps at repo root (curated shots live under docs/screenshots/)
 /headset-*.png
 /headset-*.jpg

@@ -7,15 +7,31 @@ import android.util.Log;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.InputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
 
 /**
  * Copies bundled models to app files once. Inference engines stay off until a mode
  * actually needs them (Translate = OPUS-MT, TTS = Piper, Listen = SenseVoice).
+ * Qwen + SenseVoice are too large for a single APK (AGP packageDebug integer overflow
+ * past ~2GB), so they download on first use when not present in assets.
  */
 final class OfflineModelPack {
     private static final String TAG = "OfflineModelPack";
     private static final Object LOCK = new Object();
     private static volatile boolean unpacked;
+
+    private static final String QWEN_NAME = "Qwen2.5-1.5B-Instruct-Q4_K_M.gguf";
+    private static final String QWEN_URL =
+            "https://huggingface.co/bartowski/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/"
+                    + QWEN_NAME;
+    private static final long QWEN_MIN_BYTES = 400_000_000L;
+
+    private static final String ASR_ARCHIVE =
+            "sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17.tar.bz2";
+    private static final String ASR_URL =
+            "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/" + ASR_ARCHIVE;
+    private static final long ASR_MIN_BYTES = 100_000_000L;
 
     static void unpackAll(Context context) {
         if (unpacked) {
@@ -126,7 +142,7 @@ final class OfflineModelPack {
 
     static File unpackQwenGguf(Context context) throws Exception {
         File dir = new File(context.getFilesDir(), "qwen");
-        File fast = new File(dir, "Qwen2.5-1.5B-Instruct-Q4_K_M.gguf");
+        File fast = new File(dir, QWEN_NAME);
         // Drop USB A/B leftovers so LMK isn't fighting multi-GB unused weights on disk+mmap.
         deleteIfPresent(new File(dir, "Qwen2.5-3B-Instruct-Q4_K_M.gguf"));
         deleteIfPresent(new File(dir, "Qwen3.5-4B-Q4_K_M.gguf"));
@@ -138,18 +154,28 @@ final class OfflineModelPack {
             deleteIfPresent(new File(extQwen, "Qwen3.5-4B-Q4_K_M.gguf"));
             deleteIfPresent(new File(extQwen, "gemma-2-2b-jpn-it-translate.Q4_K_M.gguf"));
         }
-        if (fast.isFile() && fast.canRead() && fast.length() > 400_000_000L) {
+        if (fast.isFile() && fast.canRead() && fast.length() > QWEN_MIN_BYTES) {
             Log.i(TAG, "Qwen 1.5B on disk " + fast.length());
             return fast;
         }
         dir.mkdirs();
-        copyAssetGguf(context, "Qwen2.5-1.5B-Instruct-Q4_K_M.gguf", fast, 400_000_000L);
-        if (fast.isFile() && fast.length() > 400_000_000L) {
+        try {
+            copyAssetGguf(context, QWEN_NAME, fast, QWEN_MIN_BYTES);
+        } catch (Throwable t) {
+            Log.i(TAG, "Qwen not in APK assets — will download (" + t.getMessage() + ")");
+        }
+        if (fast.isFile() && fast.length() > QWEN_MIN_BYTES) {
             Log.i(TAG, "Qwen 1.5B from APK " + fast.length());
             return fast;
         }
+        Log.i(TAG, "Downloading Qwen 1.5B (~1 GB) for Page Translate…");
+        downloadUrl(QWEN_URL, fast, QWEN_MIN_BYTES);
+        if (fast.isFile() && fast.length() > QWEN_MIN_BYTES) {
+            Log.i(TAG, "Qwen 1.5B downloaded " + fast.length());
+            return fast;
+        }
         throw new IllegalStateException(
-                "Qwen 2.5 1.5B missing from APK assets (models/qwen/).");
+                "Qwen 2.5 1.5B missing (not in APK; download failed). Need Wi‑Fi for first Page Translate.");
     }
 
     private static void deleteIfPresent(File file) {
@@ -207,10 +233,62 @@ final class OfflineModelPack {
         if (onnx.isFile() && tokens.isFile()) {
             return;
         }
-        BundledArchive.extractTarBz2(
-                context,
-                "models/asr/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17.tar.bz2",
-                root);
+        try {
+            BundledArchive.extractTarBz2(
+                    context,
+                    "models/asr/" + ASR_ARCHIVE,
+                    root);
+        } catch (Throwable t) {
+            Log.i(TAG, "SenseVoice not in APK — downloading (" + t.getMessage() + ")");
+            File archive = new File(context.getFilesDir(), "asr-download/" + ASR_ARCHIVE);
+            downloadUrl(ASR_URL, archive, ASR_MIN_BYTES);
+            BundledArchive.extractTarBz2File(archive, root);
+        }
+        if (!onnx.isFile() || !tokens.isFile()) {
+            throw new IllegalStateException(
+                    "SenseVoice ASR missing after unpack/download. Need Wi‑Fi for first Listen.");
+        }
+    }
+
+    private static void downloadUrl(String url, File dest, long minBytes) throws Exception {
+        if (dest.isFile() && dest.length() >= minBytes) {
+            return;
+        }
+        File parent = dest.getParentFile();
+        if (parent != null) {
+            parent.mkdirs();
+        }
+        File tmp = new File(parent, dest.getName() + ".part");
+        HttpURLConnection conn = (HttpURLConnection) new URL(url).openConnection();
+        conn.setInstanceFollowRedirects(true);
+        conn.setConnectTimeout(60_000);
+        conn.setReadTimeout(600_000);
+        conn.setRequestProperty("User-Agent", "SpatialLauncher-headset");
+        try (InputStream in = conn.getInputStream();
+             FileOutputStream out = new FileOutputStream(tmp)) {
+            byte[] buf = new byte[1024 * 1024];
+            int n;
+            long got = 0;
+            while ((n = in.read(buf)) >= 0) {
+                out.write(buf, 0, n);
+                got += n;
+                if (got % (256L * 1024 * 1024) < n) {
+                    Log.i(TAG, "download " + dest.getName() + ": " + (got / (1024 * 1024)) + " MB");
+                }
+            }
+        } finally {
+            conn.disconnect();
+        }
+        if (dest.exists()) {
+            dest.delete();
+        }
+        if (!tmp.renameTo(dest)) {
+            throw new IllegalStateException("could not finalize download: " + dest.getName());
+        }
+        if (dest.length() < minBytes) {
+            dest.delete();
+            throw new IllegalStateException("download too small: " + dest.getName());
+        }
     }
 
     private OfflineModelPack() {

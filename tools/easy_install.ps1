@@ -53,7 +53,7 @@ Write-Host "Looks for what is needed, builds if needed, installs to Quest." -For
 Write-Host ""
 Write-Host "STORAGE" -ForegroundColor Yellow
 Write-Host "  Sideloads to the Quest headset (not a Windows Program Files install)." -ForegroundColor DarkGray
-Write-Host "  Headset needs ~2.5+ GB free (debug APK includes offline models)." -ForegroundColor DarkGray
+Write-Host "  Headset needs ~1+ GB free (APK packs Piper + OPUS; Qwen/SenseVoice download on first use)." -ForegroundColor DarkGray
 Write-Host "  PC keeps build outputs under this repo folder only." -ForegroundColor DarkGray
 
 Write-Step "Checking JDK"

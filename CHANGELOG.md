@@ -31,6 +31,9 @@ Format: newest first. Dates are local (US).
 - Float loopback → explicit s16le conversion.
 - **Removed** Spatial Launcher Audio / virtual driver package, install scripts, and Sound UI sink picker (Secure Boot Code 52 made that path unreliable).
 
+### Quest build
+- **APK size fix:** stop packing Qwen (~986 MB) + SenseVoice (~1 GB) into the debug APK (AGP `packageDebug` **integer overflow** past ~2GB uncompressed). Piper + OPUS stay in the APK; Qwen/SenseVoice download on first headset use. Optional `-PpackHeavyModels=true`.
+
 ### Docs
 - Added [docs/TECH_STACK.md](docs/TECH_STACK.md) (platforms, libraries, ports, models, audio/video path).
 

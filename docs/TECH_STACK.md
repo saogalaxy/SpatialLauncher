@@ -178,10 +178,10 @@ Video stays on TCP **:8765**. No virtual audio driver, Opus/AAC, or RTP mux.
 
 | Model | Purpose |
 |-------|---------|
-| Piper en_US amy / ryan (sherpa-onnx) | TTS |
-| SenseVoice multilingual (sherpa-onnx) | ASR (Listen) |
-| Xenova opus-mt ja/zh/ko → en (ORT) | Machine translate |
-| Qwen2.5-1.5B Instruct Q4_K_M GGUF | Browser / page translate |
+| Piper en_US amy / ryan (sherpa-onnx) | TTS (APK) |
+| SenseVoice multilingual (sherpa-onnx) | ASR Listen — **download on first use** (optional `-PpackHeavyModels`) |
+| Xenova opus-mt ja/zh/ko → en (ORT) | Machine translate (APK) |
+| Qwen2.5-1.5B Instruct Q4_K_M GGUF | Page translate — **download on first use** (optional `-PpackHeavyModels`) |
 | MiDaS / DA-V2 TFLite (when present) | On-headset depth |
 
 ### Desktop (`%LocalAppData%\SpatialLauncherDesktop\models`)
@@ -196,7 +196,7 @@ Video stays on TCP **:8765**. No virtual audio driver, Opus/AAC, or RTP mux.
 | `asr/` | SenseVoice (optional) |
 | `paddleocr/` | PP-OCR CLI (optional) |
 
-Approximate Desktop install size: **~900 MB** (app ~450 MB + depth models ~470 MB). Quest debug APK with models: **~2.5+ GB**.
+Approximate Desktop install size: **~900 MB** (app ~450 MB + depth models ~470 MB). Quest debug APK: Piper + OPUS (~hundreds of MB); Qwen/SenseVoice ~1 GB each on first use.
 
 ---
 

@@ -27,7 +27,7 @@ Full set: [docs/screenshots/](docs/screenshots/).
 
 That runs `tools/easy_install.ps1`: checks JDK + Node/metavr + headset, builds the debug APK if needed, installs with replace + permissions, and launches the app.
 
-**Storage:** the headset install is large (~**2.5+ GB**) because the debug APK packs offline models. Build outputs stay in this repo folder on the PC; there is no separate Quest “Program Files” install on Windows.
+**Storage:** the headset install is smaller than before (Piper + OPUS in the APK). **Qwen** (Page Translate) and **SenseVoice** (Listen) download on first use (~1 GB each) when Wi‑Fi is available. Build outputs stay in this repo folder on the PC.
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\easy_install.ps1
@@ -132,5 +132,5 @@ npx -y metavr app launch com.spatiallauncher.app
 
 ## Notes
 
-- Store / installer builds pack Piper, SenseVoice, OPUS JA/ZH/KO, Qwen, and ML Kit OCR AARs into the APK — no Play Store downloads.  
+- Store / installer builds pack Piper and OPUS JA/ZH/KO into the APK. Qwen + SenseVoice download on first use (optional `-PpackHeavyModels=true` for experiments; may fail packageDebug past ~2GB).  
 - Large model archives under `assets/models/` may be gitignored locally; `downloadOfflineModels` fetches them at build time.  
