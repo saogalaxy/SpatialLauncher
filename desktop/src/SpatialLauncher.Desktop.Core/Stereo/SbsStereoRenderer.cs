@@ -208,8 +208,9 @@ public static class SbsStereoRenderer
         int eyeW = fullSbs ? srcW : Math.Max(1, srcW / 2);
         var output = new Bitmap(eyeW * 2, srcH, PixelFormat.Format32bppArgb);
         using var g = Graphics.FromImage(output);
-        g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.NearestNeighbor;
-        g.PixelOffsetMode = System.Drawing.Drawing2D.PixelOffsetMode.HighSpeed;
+        // Half-SBS downscale: bilinear avoids blocky eyes when stretched on Quest.
+        g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBilinear;
+        g.PixelOffsetMode = System.Drawing.Drawing2D.PixelOffsetMode.HighQuality;
         g.DrawImage(frame, new Rectangle(0, 0, eyeW, srcH), 0, 0, srcW, srcH, GraphicsUnit.Pixel);
         g.DrawImage(frame, new Rectangle(eyeW, 0, eyeW, srcH), 0, 0, srcW, srcH, GraphicsUnit.Pixel);
         return output;
@@ -259,36 +260,47 @@ public static class SbsStereoRenderer
         float edgeClean)
     {
         float v = (y + 0.5f) / eyeH;
-        int sy = Math.Clamp((int)(v * srcH), 0, srcH - 1);
-        int dy = Math.Clamp((int)(v * dh), 0, dh - 1);
-        byte* srcRow = (byte*)srcPtr + sy * srcStride;
+        // Continuous coords so low-res depth (e.g. 518) does not stair-step into blocky pop.
+        float depthY = Math.Clamp(v * Math.Max(1, dh - 1), 0f, Math.Max(0, dh - 1));
+        float srcY = Math.Clamp(v * Math.Max(1, srcH - 1), 0f, Math.Max(0, srcH - 1));
+        byte* srcBase = (byte*)srcPtr;
         byte* dstRow = (byte*)dstPtr + y * dstStride;
-        WarpRowBackward(srcRow, dstRow, 0, +1, eyeW, srcW, dw, dy, depth01, mean, convBias, divergence, edgeClean);
-        WarpRowBackward(srcRow, dstRow, eyeW, -1, eyeW, srcW, dw, dy, depth01, mean, convBias, divergence, edgeClean);
+        WarpRowBackward(
+            srcBase, srcStride, dstRow, 0, +1, eyeW, srcW, srcH, dw, dh,
+            depth01, mean, convBias, divergence, edgeClean, srcY, depthY);
+        WarpRowBackward(
+            srcBase, srcStride, dstRow, eyeW, -1, eyeW, srcW, srcH, dw, dh,
+            depth01, mean, convBias, divergence, edgeClean, srcY, depthY);
     }
 
     private static unsafe void WarpRowBackward(
-        byte* srcRow,
+        byte* srcBase,
+        int srcStride,
         byte* dstRow,
         int dstX0,
         int direction,
         int eyeW,
         int srcW,
+        int srcH,
         int dw,
-        int dy,
+        int dh,
         float[,] depth01,
         float mean,
         float convBias,
         float divergence,
-        float edgeClean)
+        float edgeClean,
+        float srcY,
+        float depthY)
     {
+        float depthMaxX = Math.Max(0, dw - 1);
+        float texel = dw > 1 ? 1f : 0f;
         for (int x = 0; x < eyeW; x++)
         {
             float u = (x + 0.5f) / eyeW;
-            int dx = Math.Clamp((int)(u * dw), 0, dw - 1);
-            float d = depth01[dy, dx];
-            float dL = depth01[dy, Math.Max(0, dx - 1)];
-            float dR = depth01[dy, Math.Min(dw - 1, dx + 1)];
+            float depthX = Math.Clamp(u * depthMaxX, 0f, depthMaxX);
+            float d = SampleDepthBilinear(depth01, depthX, depthY, dw, dh);
+            float dL = SampleDepthBilinear(depth01, Math.Max(0f, depthX - texel), depthY, dw, dh);
+            float dR = SampleDepthBilinear(depth01, Math.Min(depthMaxX, depthX + texel), depthY, dw, dh);
             float edge = Math.Max(Math.Abs(d - dL), Math.Abs(d - dR));
 
             // At silhouettes, prefer farther depth and shrink parallax so foreground
@@ -304,13 +316,66 @@ public static class SbsStereoRenderer
 
             float shift = divergence * (d - mean - convBias) * direction * shiftScale;
             float srcU = u + shift * 0.04f;
-            int sx = Math.Clamp((int)(srcU * srcW), 0, srcW - 1);
-            byte* srcPx = srcRow + sx * 4;
+            float srcX = Math.Clamp(srcU * Math.Max(1, srcW - 1), 0f, Math.Max(0, srcW - 1));
             byte* dstPx = dstRow + (dstX0 + x) * 4;
-            dstPx[0] = srcPx[0];
-            dstPx[1] = srcPx[1];
-            dstPx[2] = srcPx[2];
-            dstPx[3] = 255;
+            SampleBgraBilinear(srcBase, srcStride, srcW, srcH, srcX, srcY, dstPx);
         }
+    }
+
+    private static float SampleDepthBilinear(float[,] depth, float x, float y, int w, int h)
+    {
+        if (w <= 1 || h <= 1)
+            return depth[Math.Clamp((int)y, 0, h - 1), Math.Clamp((int)x, 0, w - 1)];
+
+        int x0 = (int)x;
+        int y0 = (int)y;
+        int x1 = Math.Min(x0 + 1, w - 1);
+        int y1 = Math.Min(y0 + 1, h - 1);
+        float fx = x - x0;
+        float fy = y - y0;
+        float a = depth[y0, x0] * (1f - fx) + depth[y0, x1] * fx;
+        float b = depth[y1, x0] * (1f - fx) + depth[y1, x1] * fx;
+        return a * (1f - fy) + b * fy;
+    }
+
+    private static unsafe void SampleBgraBilinear(
+        byte* srcBase,
+        int srcStride,
+        int srcW,
+        int srcH,
+        float x,
+        float y,
+        byte* dst)
+    {
+        if (srcW <= 1 || srcH <= 1)
+        {
+            int sx = Math.Clamp((int)x, 0, srcW - 1);
+            int sy = Math.Clamp((int)y, 0, srcH - 1);
+            byte* p = srcBase + sy * srcStride + sx * 4;
+            dst[0] = p[0]; dst[1] = p[1]; dst[2] = p[2]; dst[3] = 255;
+            return;
+        }
+
+        int x0 = (int)x;
+        int y0 = (int)y;
+        int x1 = Math.Min(x0 + 1, srcW - 1);
+        int y1 = Math.Min(y0 + 1, srcH - 1);
+        float fx = x - x0;
+        float fy = y - y0;
+        float ifx = 1f - fx;
+        float ify = 1f - fy;
+
+        byte* p00 = srcBase + y0 * srcStride + x0 * 4;
+        byte* p10 = srcBase + y0 * srcStride + x1 * 4;
+        byte* p01 = srcBase + y1 * srcStride + x0 * 4;
+        byte* p11 = srcBase + y1 * srcStride + x1 * 4;
+
+        for (int c = 0; c < 3; c++)
+        {
+            float top = p00[c] * ifx + p10[c] * fx;
+            float bot = p01[c] * ifx + p11[c] * fx;
+            dst[c] = (byte)(top * ify + bot * fy + 0.5f);
+        }
+        dst[3] = 255;
     }
 }

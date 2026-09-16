@@ -629,6 +629,7 @@ public class PanelMainActivity extends AppCompatActivity {
         ttsPauseButton.setOnClickListener(v -> onTtsPauseClicked());
         ttsPlayButton.setOnClickListener(v -> onTtsPlayClicked());
         ttsStopButton.setOnClickListener(v -> onTtsStopClicked());
+        wireTtsPlayerHoverPopup();
         ttsSpeakButton.setOnLongClickListener(v -> {
             if (!ttsEnabled) {
                 PanelAlerts.show(this, R.string.tts_turn_on_first);
@@ -1690,6 +1691,23 @@ public class PanelMainActivity extends AppCompatActivity {
                 setSessionStereo(stereoBeforeListen);
             }
         }
+        refreshControlRowChrome();
+    }
+
+    /**
+     * Share mode crowds the bottom bar with captions + TTS — hide browser (globe)
+     * and My Books only while Share is active; restore them as soon as Share ends.
+     */
+    private void refreshControlRowChrome() {
+        boolean hideReadingApps = assistMode == AssistMode.SHARE;
+        int readingVisibility = hideReadingApps ? View.GONE : View.VISIBLE;
+        if (browserButton != null) {
+            browserButton.setVisibility(readingVisibility);
+        }
+        View epub = findViewById(R.id.epub_button);
+        if (epub != null) {
+            epub.setVisibility(readingVisibility);
+        }
     }
 
     private void refreshAssistModeButtons() {
@@ -1811,7 +1829,7 @@ public class PanelMainActivity extends AppCompatActivity {
         manual.setAlpha(ttsEnabled ? 1f : 0.4f);
     }
 
-    private boolean isTtsPlayerVisible() {
+    private boolean isTtsPlayerAvailable() {
         return ttsEnabled && ttsManualMode;
     }
 
@@ -1819,11 +1837,63 @@ public class PanelMainActivity extends AppCompatActivity {
         return ttsHeldPaused || PiperTtsEngine.get(this).isPaused();
     }
 
-    private void refreshTtsSpeakButton() {
+    private static final long TTS_PLAYER_HIDE_MS = 900L;
+    private final Runnable hideTtsPlayerPopupRunnable = () -> {
         if (ttsPlayer != null) {
-            ttsPlayer.setVisibility(isTtsPlayerVisible() ? View.VISIBLE : View.GONE);
+            ttsPlayer.setVisibility(View.GONE);
         }
-        if (!isTtsPlayerVisible()) {
+    };
+
+    private void wireTtsPlayerHoverPopup() {
+        View.OnHoverListener hover = (v, event) -> {
+            switch (event.getAction()) {
+                case MotionEvent.ACTION_HOVER_ENTER:
+                case MotionEvent.ACTION_HOVER_MOVE:
+                    showTtsPlayerPopup();
+                    break;
+                case MotionEvent.ACTION_HOVER_EXIT:
+                    scheduleHideTtsPlayerPopup();
+                    break;
+                default:
+                    break;
+            }
+            return false;
+        };
+        if (ttsSpeakButton != null) {
+            ttsSpeakButton.setOnHoverListener(hover);
+        }
+        if (ttsPlayer != null) {
+            ttsPlayer.setOnHoverListener(hover);
+        }
+        View[] transport = {ttsPrevButton, ttsPlayButton, ttsPauseButton, ttsStopButton, ttsNextButton};
+        for (View btn : transport) {
+            if (btn != null) {
+                btn.setOnHoverListener(hover);
+            }
+        }
+    }
+
+    private void showTtsPlayerPopup() {
+        if (ttsPlayer == null || !isTtsPlayerAvailable()) {
+            return;
+        }
+        ttsPreviewHandler.removeCallbacks(hideTtsPlayerPopupRunnable);
+        ttsPlayer.setVisibility(View.VISIBLE);
+    }
+
+    private void scheduleHideTtsPlayerPopup() {
+        ttsPreviewHandler.removeCallbacks(hideTtsPlayerPopupRunnable);
+        ttsPreviewHandler.postDelayed(hideTtsPlayerPopupRunnable, TTS_PLAYER_HIDE_MS);
+    }
+
+    private void refreshTtsSpeakButton() {
+        // Transport stays off the bar until the ray hovers the speaker.
+        if (ttsPlayer != null && !isTtsPlayerAvailable()) {
+            ttsPreviewHandler.removeCallbacks(hideTtsPlayerPopupRunnable);
+            ttsPlayer.setVisibility(View.GONE);
+        }
+        refreshControlRowChrome();
+        if (!isTtsPlayerAvailable()) {
             hideTtsKaraoke();
         }
         if (ttsSpeakButton == null) {
@@ -1848,7 +1918,7 @@ public class PanelMainActivity extends AppCompatActivity {
             ttsSpeakButton.setImageResource(R.drawable.ic_tts_speaker);
             ttsSpeakButton.setBackgroundResource(R.drawable.bg_circle_button_tts_once);
             ttsSpeakButton.setAlpha(paused ? 0.7f : 1f);
-            ttsSpeakButton.setContentDescription(getString(R.string.tts_speak_once_description));
+            ttsSpeakButton.setContentDescription(getString(R.string.tts_speak_once_hover_description));
         }
         if (ttsPlayButton != null) {
             ttsPlayButton.setImageResource(R.drawable.ic_tts_play);
@@ -4635,14 +4705,17 @@ public class PanelMainActivity extends AppCompatActivity {
         resizeSquareView(findViewById(R.id.toggle_stereo_3d), buttonSize, 0);
         resizeSquareView(findViewById(R.id.browser_button), buttonSize, buttonPad);
         resizeSquareView(findViewById(R.id.epub_button), buttonSize, buttonPad);
-        resizeSquareView(findViewById(R.id.tts_prev_button), buttonSize, buttonPad);
         resizeSquareView(findViewById(R.id.tts_speak_button), buttonSize, buttonPad);
         resizeSquareView(findViewById(R.id.listen_button), buttonSize, buttonPad);
         resizeSquareView(findViewById(R.id.desktop_link_button), buttonSize, buttonPad);
-        resizeSquareView(findViewById(R.id.tts_play_button), buttonSize, buttonPad);
-        resizeSquareView(findViewById(R.id.tts_pause_button), buttonSize, buttonPad);
-        resizeSquareView(findViewById(R.id.tts_stop_button), buttonSize, buttonPad);
-        resizeSquareView(findViewById(R.id.tts_next_button), buttonSize, buttonPad);
+        // Transport cluster: slightly tighter than the main round buttons.
+        int playerSize = Math.max(dp(32), Math.round(buttonSize * 0.9f));
+        int playerPad = Math.max(dp(4), playerSize / 5);
+        resizeSquareView(findViewById(R.id.tts_prev_button), playerSize, playerPad);
+        resizeSquareView(findViewById(R.id.tts_play_button), playerSize, playerPad);
+        resizeSquareView(findViewById(R.id.tts_pause_button), playerSize, playerPad);
+        resizeSquareView(findViewById(R.id.tts_stop_button), playerSize, playerPad);
+        resizeSquareView(findViewById(R.id.tts_next_button), playerSize, playerPad);
         resizeSquareView(findViewById(R.id.ocr_region_button), buttonSize, buttonPad);
         resizeSquareView(findViewById(R.id.help_button), buttonSize, buttonPad);
         resizeSquareView(findViewById(R.id.settings_button), buttonSize, buttonPad);

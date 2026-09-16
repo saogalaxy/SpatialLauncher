@@ -71,13 +71,13 @@ public class DesktopLinkActivity extends AppCompatActivity implements SurfaceHol
     /** After the user opens settings, give them time to use controls. */
     private static final long CHROME_EDIT_HIDE_MS = 8000L;
     private static final long CHROME_HOVER_HIDE_MS = 1500L;
+    /** Min keeps settings dismissed this long so hover/tap does not pop them back instantly. */
+    private static final long CHROME_MIN_LOCK_MS = 10000L;
 
     private EditText urlInput;
     private TextView status;
     private SurfaceView surfaceView;
     private SurfaceHolder surfaceHolder;
-    private Button connectButton;
-    private Button findButton;
     private ToggleButton stereoToggle;
     private ToggleButton live3dToggle;
     private ToggleButton fullSbsToggle;
@@ -107,11 +107,25 @@ public class DesktopLinkActivity extends AppCompatActivity implements SurfaceHol
     private String selectedCodec = "mjpeg";
     private String selectedPreset = "gaming";
     private volatile boolean applyingRemote;
-    private volatile boolean running;
+    /** User/UI wants a live link (survives brief stop during reconnect). */
+    private volatile boolean streamDesired;
+    /** Pump threads may run only while this is true. */
     private volatile boolean wantStream;
+    private volatile boolean running;
+    /** Bumped on every stop so orphaned pumps exit even if wantStream flips early. */
+    private volatile int streamGen;
     private volatile boolean chromeHidden;
+    /** Wall clock until Min allows chrome to show again (blocks hover/tap reopen). */
+    private volatile long chromeLockedUntil;
+    private volatile boolean reconnectScheduled;
+    /** Suppress stall watchdog during codec/mode switches (ms wall clock). */
+    private volatile long reconnectGraceUntil;
+    private static final long SLOT_FREE_MS = 700L;
+    /** Must stay longer than a slow codec/surface handoff so grace does not expire into an immediate stall reconnect. */
+    private static final long RECONNECT_GRACE_MS = 45000L;
+    private final Object surfaceRecreateLock = new Object();
     private final Runnable hideChromeRunnable = () -> {
-        if (wantStream || running) {
+        if (streamDesired || running) {
             setChromeVisible(false);
         }
     };
@@ -143,6 +157,8 @@ public class DesktopLinkActivity extends AppCompatActivity implements SurfaceHol
     private View.OnHoverListener surfaceHoverReveal;
     private volatile String pendingRedirectUrl;
     private volatile byte[] pendingAv1C;
+    /** Wall clock of last JPEG/AU received — watchdog reconnects if this stalls. */
+    private volatile long lastMediaTick;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -152,8 +168,6 @@ public class DesktopLinkActivity extends AppCompatActivity implements SurfaceHol
         urlInput = findViewById(R.id.desktop_link_url);
         status = findViewById(R.id.desktop_link_status);
         surfaceView = findViewById(R.id.desktop_link_surface);
-        connectButton = findViewById(R.id.desktop_link_connect);
-        findButton = findViewById(R.id.desktop_link_find);
         chrome = findViewById(R.id.desktop_link_chrome);
         tapCatcher = findViewById(R.id.desktop_link_tap);
         stereoToggle = findViewById(R.id.desktop_link_stereo_3d);
@@ -184,8 +198,12 @@ public class DesktopLinkActivity extends AppCompatActivity implements SurfaceHol
         findViewById(R.id.desktop_link_exit).setOnClickListener(v -> finish());
         tapCatcher.setOnClickListener(v -> {
             if (chromeHidden) {
+                if (System.currentTimeMillis() < chromeLockedUntil) {
+                    setStatus(getString(R.string.desktop_link_min_locked));
+                    return;
+                }
                 showChromeTemporary();
-            } else if (wantStream || running) {
+            } else if (streamDesired || running) {
                 minimizeChrome();
             } else {
                 setChromeVisible(true);
@@ -195,6 +213,9 @@ public class DesktopLinkActivity extends AppCompatActivity implements SurfaceHol
             switch (event.getAction()) {
                 case MotionEvent.ACTION_HOVER_ENTER:
                 case MotionEvent.ACTION_HOVER_MOVE:
+                    if (System.currentTimeMillis() < chromeLockedUntil) {
+                        break;
+                    }
                     showChromeTemporary();
                     break;
                 case MotionEvent.ACTION_HOVER_EXIT:
@@ -229,19 +250,11 @@ public class DesktopLinkActivity extends AppCompatActivity implements SurfaceHol
             redrawLatest();
         });
 
-        connectButton.setOnClickListener(v -> {
-            if (wantStream) {
-                forceReconnect();
-            } else {
-                startStream();
-            }
-        });
-        findButton.setOnClickListener(v -> startDiscovery(true));
-
-        // Auto-find + connect as soon as this thin viewer opens.
+        // Auto-find + connect as soon as this thin viewer opens (monitor icon path).
         startDiscovery(true);
         // Keep retrying discovery until we have a live stream.
         main.postDelayed(discoveryRetryRunnable, 4000);
+        main.postDelayed(streamWatchdogRunnable, 3000);
     }
 
     private final Runnable discoveryRetryRunnable = new Runnable() {
@@ -250,10 +263,35 @@ public class DesktopLinkActivity extends AppCompatActivity implements SurfaceHol
             if (isFinishing() || isDestroyed()) {
                 return;
             }
-            if (!running) {
+            boolean workerAlive = worker != null && worker.isAlive();
+            if (streamDesired && !workerAlive && !reconnectScheduled) {
+                startDiscovery(true);
+            } else if (!streamDesired) {
                 startDiscovery(true);
             }
             main.postDelayed(this, 5000);
+        }
+    };
+
+    /** If the TCP pump thread dies, reclaim a PC viewer slot and reconnect.
+     * Never force-reconnect while the worker is alive — stall gaps during codec /
+     * surface handoff look like silence and were killing mode switches. */
+    private final Runnable streamWatchdogRunnable = new Runnable() {
+        @Override
+        public void run() {
+            if (isFinishing() || isDestroyed()) {
+                return;
+            }
+            long now = System.currentTimeMillis();
+            if (streamDesired && !reconnectScheduled && now >= reconnectGraceUntil) {
+                boolean workerAlive = worker != null && worker.isAlive();
+                if (!workerAlive) {
+                    Log.w(TAG, "watchdog reconnect — pump thread dead");
+                    setStatus(getString(R.string.desktop_link_reconnecting));
+                    forceReconnect();
+                }
+            }
+            main.postDelayed(this, 2500);
         }
     };
 
@@ -273,7 +311,10 @@ public class DesktopLinkActivity extends AppCompatActivity implements SurfaceHol
                     getSharedPreferences(PREFS, MODE_PRIVATE).edit().putString(KEY_URL, found).apply();
                     setStatus(getString(R.string.desktop_link_found, found));
                     if (autoConnect) {
-                        forceReconnect();
+                        boolean workerAlive = worker != null && worker.isAlive();
+                        if (!streamDesired || !workerAlive) {
+                            forceReconnect();
+                        }
                     }
                 } else {
                     setStatus(getString(R.string.desktop_link_not_found));
@@ -357,7 +398,7 @@ public class DesktopLinkActivity extends AppCompatActivity implements SurfaceHol
             surfaceView.post(() -> applyStereo(true));
         }
         // Panel can start stopped (adb / not focused); resume when it becomes visible.
-        if (wantStream && !running && surfaceReady) {
+        if (streamDesired && !running && surfaceReady) {
             main.post(this::startStream);
         }
     }
@@ -366,6 +407,7 @@ public class DesktopLinkActivity extends AppCompatActivity implements SurfaceHol
     protected void onDestroy() {
         activeThinClient = false;
         main.removeCallbacks(discoveryRetryRunnable);
+        main.removeCallbacks(streamWatchdogRunnable);
         main.removeCallbacks(hideChromeRunnable);
         stopStream();
         if (stereoApplied) {
@@ -392,7 +434,7 @@ public class DesktopLinkActivity extends AppCompatActivity implements SurfaceHol
             applyStereo(true);
         }
         // Auto-connect may have raced ahead of the first surface; kick stream now.
-        if (wantStream && !running) {
+        if (streamDesired && !running) {
             main.post(this::startStream);
         }
         redrawLatest();
@@ -425,6 +467,12 @@ public class DesktopLinkActivity extends AppCompatActivity implements SurfaceHol
      * are unreliable on Horizon when going canvas→MediaCodec).
      */
     private void ensureSurfaceProducer(SurfaceProducer next) {
+        synchronized (surfaceRecreateLock) {
+            ensureSurfaceProducerLocked(next);
+        }
+    }
+
+    private void ensureSurfaceProducerLocked(SurfaceProducer next) {
         if (next == SurfaceProducer.NONE) {
             surfaceProducer = next;
             return;
@@ -439,6 +487,28 @@ public class DesktopLinkActivity extends AppCompatActivity implements SurfaceHol
             surfaceProducer = next;
             surfaceReady = true;
             Log.i(TAG, "surface producer cold→MEDIA_CODEC");
+            return;
+        }
+        // Same producer already active: never tear down the SurfaceView on mode switch.
+        // Waiting out a brief invalid surface is enough; recreate was stacking pumps
+        // (MEDIA_CODEC→MEDIA_CODEC gen unchanged → black / interrupted av1c).
+        if (surfaceProducer == next) {
+            long waitUntil = System.currentTimeMillis() + 5000;
+            while (wantStream && !Thread.currentThread().isInterrupted()
+                    && !isSurfaceValid() && System.currentTimeMillis() < waitUntil) {
+                try {
+                    Thread.sleep(40);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    break;
+                }
+            }
+            if (isSurfaceValid()) {
+                surfaceReady = true;
+                return;
+            }
+            surfaceReady = false;
+            Log.w(TAG, "surface still invalid for " + next + " — pump will retry (no recreate)");
             return;
         }
         SurfaceProducer from = surfaceProducer;
@@ -566,19 +636,22 @@ public class DesktopLinkActivity extends AppCompatActivity implements SurfaceHol
 
     private void minimizeChrome() {
         main.removeCallbacks(hideChromeRunnable);
+        chromeLockedUntil = System.currentTimeMillis() + CHROME_MIN_LOCK_MS;
         setChromeVisible(false);
-        if (wantStream || running) {
-            setStatus(getString(R.string.desktop_link_min_hint));
-        }
+        setStatus(getString(R.string.desktop_link_min_hint));
     }
 
     private void setChromeVisible(boolean visible) {
         if (chrome == null) {
             return;
         }
+        if (visible && System.currentTimeMillis() < chromeLockedUntil) {
+            return;
+        }
         chrome.animate().cancel();
         if (visible) {
             chromeHidden = false;
+            chromeLockedUntil = 0;
             chrome.setVisibility(View.VISIBLE);
             chrome.animate()
                     .alpha(1f)
@@ -600,10 +673,13 @@ public class DesktopLinkActivity extends AppCompatActivity implements SurfaceHol
     }
 
     private void showChromeTemporary() {
+        if (System.currentTimeMillis() < chromeLockedUntil) {
+            return;
+        }
         setChromeVisible(true);
         main.removeCallbacks(hideChromeRunnable);
-        // Stay open long enough to tweak knobs; Min hides immediately.
-        if (wantStream || running) {
+        // Stay open long enough to tweak knobs; Min locks hide for CHROME_MIN_LOCK_MS.
+        if (streamDesired || running) {
             main.postDelayed(hideChromeRunnable, CHROME_EDIT_HIDE_MS);
         }
     }
@@ -624,12 +700,45 @@ public class DesktopLinkActivity extends AppCompatActivity implements SurfaceHol
     }
 
     private void forceReconnect() {
+        if (reconnectScheduled) {
+            return;
+        }
+        reconnectScheduled = true;
+        streamDesired = true;
+        reconnectGraceUntil = System.currentTimeMillis() + RECONNECT_GRACE_MS;
+        lastMediaTick = System.currentTimeMillis();
+        // Do NOT set wantStream=true here — orphaned pumps must stay stopped until startStream.
         stopStreamJoin();
-        startStream();
+        updateConnectButtonLabel();
+        setStatus(getString(R.string.desktop_link_reconnecting));
+        new Thread(() -> {
+            try {
+                Thread.sleep(SLOT_FREE_MS);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                reconnectScheduled = false;
+                return;
+            }
+            if (!streamDesired || isFinishing() || isDestroyed()) {
+                reconnectScheduled = false;
+                return;
+            }
+            main.post(() -> {
+                reconnectScheduled = false;
+                if (streamDesired && !isFinishing() && !isDestroyed()) {
+                    startStream();
+                }
+            });
+        }, "DesktopLinkReconnect").start();
+    }
+
+    private void noteMedia() {
+        lastMediaTick = System.currentTimeMillis();
     }
 
     /** Stop pumps and wait briefly so the PC viewer slot frees before reconnect. */
     private void stopStreamJoin() {
+        streamGen++;
         wantStream = false;
         running = false;
         synchronized (jpegLock) {
@@ -651,9 +760,9 @@ public class DesktopLinkActivity extends AppCompatActivity implements SurfaceHol
         interruptQuiet(w);
         interruptQuiet(d);
         interruptQuiet(h);
-        joinQuiet(w, 600);
-        joinQuiet(d, 400);
-        joinQuiet(h, 400);
+        joinQuiet(w, 1200);
+        joinQuiet(d, 600);
+        joinQuiet(h, 600);
         releaseDecoder();
         // Keep surfaceProducer as-is. Resetting to NONE made JPEG→AV1 look like a
         // cold start and skip the canvas→MediaCodec recycle, which drops the stream.
@@ -681,12 +790,7 @@ public class DesktopLinkActivity extends AppCompatActivity implements SurfaceHol
     }
 
     private void updateConnectButtonLabel() {
-        if (connectButton == null) {
-            return;
-        }
-        connectButton.setText(wantStream
-                ? R.string.desktop_link_reconnect
-                : R.string.desktop_link_connect);
+        // Find/Connect UI removed — monitor icon auto-connects; label unused.
     }
 
     private void probeSessionStatus(String streamUrl) {
@@ -728,8 +832,12 @@ public class DesktopLinkActivity extends AppCompatActivity implements SurfaceHol
         }
         getSharedPreferences(PREFS, MODE_PRIVATE).edit().putString(KEY_URL, url).apply();
         stopStreamJoin();
+        streamDesired = true;
         wantStream = true;
         running = true;
+        final int gen = streamGen;
+        lastMediaTick = System.currentTimeMillis();
+        reconnectGraceUntil = System.currentTimeMillis() + RECONNECT_GRACE_MS;
         linkCodec = detectCodec(url);
         updateConnectButtonLabel();
         status.setText(R.string.desktop_link_connecting);
@@ -739,13 +847,13 @@ public class DesktopLinkActivity extends AppCompatActivity implements SurfaceHol
         }
         if (linkCodec != LinkCodec.JPEG) {
             waitForIdr = true;
-            h264DecodeThread = new Thread(this::compressedDecodeLoop, "DesktopLinkAuDec");
+            h264DecodeThread = new Thread(() -> compressedDecodeLoop(gen), "DesktopLinkAuDec");
             h264DecodeThread.start();
-            worker = new Thread(() -> pumpCompressed(url), "DesktopLinkCompressed");
+            worker = new Thread(() -> pumpCompressed(url, gen), "DesktopLinkCompressed");
         } else {
-            decodeThread = new Thread(this::decodeLoop, "DesktopLinkDecode");
+            decodeThread = new Thread(() -> decodeLoop(gen), "DesktopLinkDecode");
             decodeThread.start();
-            worker = new Thread(() -> pumpMjpeg(url), "DesktopLinkMjpeg");
+            worker = new Thread(() -> pumpMjpeg(url, gen), "DesktopLinkMjpeg");
         }
         worker.start();
     }
@@ -761,6 +869,17 @@ public class DesktopLinkActivity extends AppCompatActivity implements SurfaceHol
         return LinkCodec.JPEG;
     }
 
+    private boolean discoveryMatchesSelectedCodec(String url) {
+        LinkCodec found = detectCodec(url);
+        if ("av1".equals(selectedCodec)) {
+            return found == LinkCodec.AV1;
+        }
+        if ("h264".equals(selectedCodec)) {
+            return found == LinkCodec.H264;
+        }
+        return found == LinkCodec.JPEG;
+    }
+
     private static String codecLabel(LinkCodec codec) {
         switch (codec) {
             case AV1:
@@ -773,11 +892,12 @@ public class DesktopLinkActivity extends AppCompatActivity implements SurfaceHol
     }
 
     private void stopStream() {
+        streamDesired = false;
+        reconnectScheduled = false;
         stopStreamJoin();
         main.removeCallbacks(hideChromeRunnable);
         main.post(() -> {
-            // Skip idle UI if startStream / forceReconnect already set wantStream again.
-            if (!wantStream) {
+            if (!streamDesired) {
                 updateConnectButtonLabel();
                 status.setText(R.string.desktop_link_idle);
                 setChromeVisible(true);
@@ -786,62 +906,81 @@ public class DesktopLinkActivity extends AppCompatActivity implements SurfaceHol
     }
 
 
-    private void pumpMjpeg(String urlString) {
-        while (wantStream && !Thread.currentThread().isInterrupted()) {
+    private void pumpMjpeg(String urlString, int gen) {
+        int failStreak = 0;
+        while (wantStream && streamGen == gen && !Thread.currentThread().isInterrupted()) {
             running = true;
-            // Prefer the latest advertised URL in case PC switched codecs.
+            // Prefer the latest advertised URL in case PC switched codecs —
+            // but never let a stale beacon undo the codec we just selected.
             String fresh = discoverPc(900);
-            if (fresh != null && !fresh.isEmpty()) {
+            if (fresh != null && !fresh.isEmpty() && discoveryMatchesSelectedCodec(fresh)) {
                 urlString = fresh;
                 String finalUrl = fresh;
                 main.post(() -> {
                     urlInput.setText(finalUrl);
                     getSharedPreferences(PREFS, MODE_PRIVATE).edit().putString(KEY_URL, finalUrl).apply();
                 });
+            }
+            if (!wantStream || streamGen != gen) {
+                break;
             }
             LinkCodec detected = detectCodec(urlString);
             if (detected != LinkCodec.JPEG) {
                 linkCodec = detected;
                 waitForIdr = true;
                 if (h264DecodeThread == null || !h264DecodeThread.isAlive()) {
-                    h264DecodeThread = new Thread(this::compressedDecodeLoop, "DesktopLinkAuDec");
+                    h264DecodeThread = new Thread(() -> compressedDecodeLoop(gen), "DesktopLinkAuDec");
                     h264DecodeThread.start();
                 }
-                pumpCompressed(urlString);
+                pumpCompressed(urlString, gen);
                 return;
             }
             linkCodec = LinkCodec.JPEG;
+            long before = lastMediaTick;
             readMjpegOnce(urlString);
+            if (streamGen != gen) {
+                break;
+            }
             if (pendingRedirectUrl != null) {
                 urlString = pendingRedirectUrl;
                 pendingRedirectUrl = null;
+                failStreak = 0;
                 continue;
             }
             if (!wantStream) {
                 break;
             }
+            if (lastMediaTick > before) {
+                failStreak = 0;
+            } else {
+                failStreak++;
+            }
             setStatus(getString(R.string.desktop_link_reconnecting));
-            // Leave chrome hidden while still wanting the stream.
+            long sleepMs = Math.min(2500L, 450L * Math.max(1, failStreak));
             try {
-                Thread.sleep(900);
+                Thread.sleep(sleepMs);
             } catch (InterruptedException e) {
                 break;
             }
         }
-        running = false;
+        if (streamGen == gen) {
+            running = false;
+        }
         main.post(() -> {
-            if (!wantStream) {
+            if (!streamDesired) {
                 updateConnectButtonLabel();
             }
         });
     }
 
-    private void pumpCompressed(String urlString) {
-        while (wantStream && !Thread.currentThread().isInterrupted()) {
+    private void pumpCompressed(String urlString, int gen) {
+        int failStreak = 0;
+        while (wantStream && streamGen == gen && !Thread.currentThread().isInterrupted()) {
             running = true;
-            // Prefer the latest advertised URL in case PC switched codecs.
+            // Prefer the latest advertised URL in case PC switched codecs —
+            // but never let a stale beacon undo the codec we just selected.
             String fresh = discoverPc(900);
-            if (fresh != null && !fresh.isEmpty()) {
+            if (fresh != null && !fresh.isEmpty() && discoveryMatchesSelectedCodec(fresh)) {
                 urlString = fresh;
                 String finalUrl = fresh;
                 main.post(() -> {
@@ -849,37 +988,54 @@ public class DesktopLinkActivity extends AppCompatActivity implements SurfaceHol
                     getSharedPreferences(PREFS, MODE_PRIVATE).edit().putString(KEY_URL, finalUrl).apply();
                 });
             }
+            if (!wantStream || streamGen != gen) {
+                break;
+            }
             LinkCodec detected = detectCodec(urlString);
             if (detected == LinkCodec.JPEG) {
                 linkCodec = LinkCodec.JPEG;
-                decodeThread = new Thread(this::decodeLoop, "DesktopLinkDecode");
-                decodeThread.start();
-                pumpMjpeg(urlString);
+                if (decodeThread == null || !decodeThread.isAlive()) {
+                    decodeThread = new Thread(() -> decodeLoop(gen), "DesktopLinkDecode");
+                    decodeThread.start();
+                }
+                pumpMjpeg(urlString, gen);
                 return;
             }
             linkCodec = detected;
+            long before = lastMediaTick;
             readCompressedOnce(urlString, detected);
+            if (streamGen != gen) {
+                break;
+            }
             releaseDecoder();
             if (pendingRedirectUrl != null) {
                 urlString = pendingRedirectUrl;
                 pendingRedirectUrl = null;
+                failStreak = 0;
                 continue;
             }
             if (!wantStream) {
                 break;
             }
-            setStatus(getString(R.string.desktop_link_pc_unreachable));
-            // Leave chrome hidden while still wanting the stream.
+            if (lastMediaTick > before) {
+                failStreak = 0;
+            } else {
+                failStreak++;
+            }
+            setStatus(getString(R.string.desktop_link_reconnecting));
+            long sleepMs = Math.min(3000L, 600L * Math.max(1, failStreak));
             try {
-                Thread.sleep(900);
+                Thread.sleep(sleepMs);
             } catch (InterruptedException e) {
                 break;
             }
         }
-        running = false;
-        releaseDecoder();
+        if (streamGen == gen) {
+            running = false;
+            releaseDecoder();
+        }
         main.post(() -> {
-            if (!wantStream) {
+            if (!streamDesired) {
                 updateConnectButtonLabel();
             }
         });
@@ -919,6 +1075,7 @@ public class DesktopLinkActivity extends AppCompatActivity implements SurfaceHol
                 return;
             }
             String label = codecLabel(codec);
+            noteMedia();
             setStatus(stereoToggle.isChecked()
                     ? getString(R.string.desktop_link_live_3d) + " · " + label
                     : getString(R.string.desktop_link_live) + " · " + label);
@@ -980,6 +1137,7 @@ public class DesktopLinkActivity extends AppCompatActivity implements SurfaceHol
                 }
                 byte[] au = new byte[len];
                 in.readFully(au);
+                noteMedia();
                 synchronized (auLock) {
                     if (pendingAu != null) {
                         dropped++;
@@ -1006,39 +1164,40 @@ public class DesktopLinkActivity extends AppCompatActivity implements SurfaceHol
         }
     }
 
-    private void compressedDecodeLoop() {
+    private void compressedDecodeLoop(int gen) {
         int lastGen = -1;
-        while (wantStream && !Thread.currentThread().isInterrupted()) {
+        while (wantStream && streamGen == gen && !Thread.currentThread().isInterrupted()) {
             byte[] au;
-            int gen;
+            int auGen;
             synchronized (auLock) {
-                while (wantStream && (pendingAu == null || pendingAuGen == lastGen)) {
+                while (wantStream && streamGen == gen
+                        && (pendingAu == null || pendingAuGen == lastGen)) {
                     try {
                         auLock.wait(50);
                     } catch (InterruptedException e) {
                         return;
                     }
                 }
-                if (!wantStream) {
+                if (!wantStream || streamGen != gen) {
                     return;
                 }
                 au = pendingAu;
-                gen = pendingAuGen;
+                auGen = pendingAuGen;
                 pendingAu = null;
             }
             if (au == null) {
                 continue;
             }
             synchronized (auLock) {
-                if (pendingAuGen != gen && pendingAu != null) {
+                if (pendingAuGen != auGen && pendingAu != null) {
                     waitForIdr = true;
                     continue;
                 }
-                if (gen > lastGen + 1) {
+                if (auGen > lastGen + 1) {
                     waitForIdr = true;
                 }
             }
-            lastGen = gen;
+            lastGen = auGen;
             LinkCodec codec = linkCodec;
             boolean keyish = codec == LinkCodec.AV1
                     ? isAv1KeyframeOrConfig(au)
@@ -1192,7 +1351,8 @@ public class DesktopLinkActivity extends AppCompatActivity implements SurfaceHol
         }
         if (code == 503) {
             try {
-                Thread.sleep(350);
+                // Give the PC time to drop a zombie viewer before we claim a slot.
+                Thread.sleep(1200);
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
             }
@@ -1366,6 +1526,7 @@ public class DesktopLinkActivity extends AppCompatActivity implements SurfaceHol
                 setStatus("HTTP " + code);
                 return;
             }
+            noteMedia();
             setStatus(stereoToggle.isChecked()
                     ? getString(R.string.desktop_link_live_3d)
                     : getString(R.string.desktop_link_live));
@@ -1404,6 +1565,7 @@ public class DesktopLinkActivity extends AppCompatActivity implements SurfaceHol
                             // Keep only the newest JPEG — never queue. That is what
                             // causes multi-second lag on Full SBS.
                             byte[] data = jpeg.toByteArray();
+                            noteMedia();
                             synchronized (jpegLock) {
                                 pendingJpeg = data;
                                 pendingJpegGen++;
@@ -1428,32 +1590,33 @@ public class DesktopLinkActivity extends AppCompatActivity implements SurfaceHol
         }
     }
 
-    private void decodeLoop() {
+    private void decodeLoop(int gen) {
         BitmapFactory.Options opts = new BitmapFactory.Options();
         opts.inPreferredConfig = Bitmap.Config.RGB_565;
         int lastGen = -1;
-        while (wantStream && !Thread.currentThread().isInterrupted()) {
+        while (wantStream && streamGen == gen && !Thread.currentThread().isInterrupted()) {
             byte[] data;
-            int gen;
+            int jpegGen;
             synchronized (jpegLock) {
-                while (wantStream && (pendingJpeg == null || pendingJpegGen == lastGen)) {
+                while (wantStream && streamGen == gen
+                        && (pendingJpeg == null || pendingJpegGen == lastGen)) {
                     try {
                         jpegLock.wait(200);
                     } catch (InterruptedException e) {
                         return;
                     }
                 }
-                if (!wantStream) {
+                if (!wantStream || streamGen != gen) {
                     return;
                 }
                 data = pendingJpeg;
-                gen = pendingJpegGen;
+                jpegGen = pendingJpegGen;
                 pendingJpeg = null;
             }
             if (data == null) {
                 continue;
             }
-            lastGen = gen;
+            lastGen = jpegGen;
             // If a newer frame arrived while we were waiting, skip this one.
             synchronized (jpegLock) {
                 if (pendingJpegGen != gen && pendingJpeg != null) {
@@ -1564,11 +1727,15 @@ public class DesktopLinkActivity extends AppCompatActivity implements SurfaceHol
         presetGamingBtn.setOnClickListener(v -> {
             selectedPreset = "gaming";
             stylePresetChips();
+            reconnectGraceUntil = System.currentTimeMillis() + RECONNECT_GRACE_MS;
+            lastMediaTick = System.currentTimeMillis();
             pushRemoteSettings(false);
         });
         presetMoviesBtn.setOnClickListener(v -> {
             selectedPreset = "movies";
             stylePresetChips();
+            reconnectGraceUntil = System.currentTimeMillis() + RECONNECT_GRACE_MS;
+            lastMediaTick = System.currentTimeMillis();
             pushRemoteSettings(false);
         });
     }
@@ -1576,6 +1743,8 @@ public class DesktopLinkActivity extends AppCompatActivity implements SurfaceHol
     private void selectCodec(String codec) {
         selectedCodec = codec;
         styleCodecChips();
+        reconnectGraceUntil = System.currentTimeMillis() + RECONNECT_GRACE_MS;
+        lastMediaTick = System.currentTimeMillis();
         pushRemoteSettings(true);
     }
 
@@ -1770,12 +1939,15 @@ public class DesktopLinkActivity extends AppCompatActivity implements SurfaceHol
                 if (code == 200) {
                     setStatus(getString(R.string.desktop_link_live_3d) + " · PC depth " + depth + "%");
                     if (reconnectForCodec) {
+                        reconnectGraceUntil = System.currentTimeMillis() + RECONNECT_GRACE_MS;
+                        lastMediaTick = System.currentTimeMillis();
                         boolean matched = waitForServerCodec(codec, 4000);
                         main.post(() -> {
                             rewriteUrlPathForCodec(codec);
                             if (!matched) {
                                 Log.w(TAG, "PC codec not confirmed yet; reconnecting anyway to " + codec);
                             }
+                            Log.i(TAG, "codec switch → " + codec + " matched=" + matched);
                             forceReconnect();
                         });
                     }

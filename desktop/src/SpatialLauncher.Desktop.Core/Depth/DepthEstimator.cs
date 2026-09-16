@@ -143,7 +143,14 @@ public sealed class DepthEstimator : IDisposable
     private float[,] EstimateOnnx(Bitmap frame)
     {
         int size = _modelSize;
-        using var resized = new Bitmap(frame, new Size(size, size));
+        // Bilinear resize — Bitmap(size) defaults to nearest and blockifies Movies depth.
+        using var resized = new Bitmap(size, size, PixelFormat.Format32bppArgb);
+        using (var g = Graphics.FromImage(resized))
+        {
+            g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBilinear;
+            g.PixelOffsetMode = System.Drawing.Drawing2D.PixelOffsetMode.HighQuality;
+            g.DrawImage(frame, new Rectangle(0, 0, size, size));
+        }
         var input = new DenseTensor<float>(new[] { 1, 3, size, size });
         float[] mean = [0.485f, 0.456f, 0.406f];
         float[] std = [0.229f, 0.224f, 0.225f];

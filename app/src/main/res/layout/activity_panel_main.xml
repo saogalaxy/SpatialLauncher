@@ -1205,6 +1205,75 @@
                     android:padding="10dp"
                     android:src="@drawable/ic_tts_speaker" />
 
+                <!-- TTS transport pill: shown on hover over the speaker (manual TTS). -->
+                <LinearLayout
+                    android:id="@+id/tts_player"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="4dp"
+                    android:background="@drawable/bg_dock_pill"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal"
+                    android:paddingStart="4dp"
+                    android:paddingEnd="4dp"
+                    android:paddingTop="2dp"
+                    android:paddingBottom="2dp"
+                    android:visibility="gone">
+
+                    <ImageButton
+                        android:id="@+id/tts_prev_button"
+                        android:layout_width="44dp"
+                        android:layout_height="44dp"
+                        android:background="@drawable/bg_circle_button"
+                        android:clickable="true"
+                        android:focusable="true"
+                        android:contentDescription="@string/tts_prev_description"
+                        android:padding="9dp"
+                        android:src="@drawable/ic_tts_prev" />
+
+                    <ImageButton
+                        android:id="@+id/tts_play_button"
+                        android:layout_width="44dp"
+                        android:layout_height="44dp"
+                        android:layout_marginStart="2dp"
+                        android:background="@drawable/bg_circle_button_tts_once"
+                        android:contentDescription="@string/tts_play_description"
+                        android:padding="9dp"
+                        android:src="@drawable/ic_tts_play" />
+
+                    <ImageButton
+                        android:id="@+id/tts_pause_button"
+                        android:layout_width="44dp"
+                        android:layout_height="44dp"
+                        android:layout_marginStart="2dp"
+                        android:background="@drawable/bg_circle_button"
+                        android:contentDescription="@string/tts_pause_description"
+                        android:padding="9dp"
+                        android:src="@drawable/ic_tts_pause" />
+
+                    <ImageButton
+                        android:id="@+id/tts_stop_button"
+                        android:layout_width="44dp"
+                        android:layout_height="44dp"
+                        android:layout_marginStart="2dp"
+                        android:background="@drawable/bg_circle_button"
+                        android:contentDescription="@string/tts_stop_description"
+                        android:padding="9dp"
+                        android:src="@drawable/ic_tts_stop" />
+
+                    <ImageButton
+                        android:id="@+id/tts_next_button"
+                        android:layout_width="44dp"
+                        android:layout_height="44dp"
+                        android:layout_marginStart="2dp"
+                        android:background="@drawable/bg_circle_button"
+                        android:clickable="true"
+                        android:focusable="true"
+                        android:contentDescription="@string/tts_next_description"
+                        android:padding="9dp"
+                        android:src="@drawable/ic_tts_next" />
+                </LinearLayout>
+
                 <!-- Listen: one-tap setup (TTS auto + STT cast audio + 3D off). -->
                 <ImageButton
                     android:id="@+id/listen_button"
@@ -1225,71 +1294,6 @@
                     android:contentDescription="@string/desktop_link_button_description"
                     android:padding="10dp"
                     android:src="@drawable/ic_desktop_link" />
-
-                <!-- TTS player: prev / play / pause / stop / next. Hidden unless
-                     TTS is on in manual mode. Speaker stays on the row as status. -->
-                <LinearLayout
-                    android:id="@+id/tts_player"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_marginStart="4dp"
-                    android:gravity="center_vertical"
-                    android:orientation="horizontal"
-                    android:visibility="gone">
-
-                    <ImageButton
-                        android:id="@+id/tts_prev_button"
-                        android:layout_width="48dp"
-                        android:layout_height="48dp"
-                        android:background="@drawable/bg_circle_button"
-                        android:clickable="true"
-                        android:focusable="true"
-                        android:contentDescription="@string/tts_prev_description"
-                        android:padding="10dp"
-                        android:src="@drawable/ic_tts_prev" />
-
-                    <ImageButton
-                        android:id="@+id/tts_play_button"
-                        android:layout_width="48dp"
-                        android:layout_height="48dp"
-                        android:layout_marginStart="4dp"
-                        android:background="@drawable/bg_circle_button_tts_once"
-                        android:contentDescription="@string/tts_play_description"
-                        android:padding="10dp"
-                        android:src="@drawable/ic_tts_play" />
-
-                    <ImageButton
-                        android:id="@+id/tts_pause_button"
-                        android:layout_width="48dp"
-                        android:layout_height="48dp"
-                        android:layout_marginStart="4dp"
-                        android:background="@drawable/bg_circle_button"
-                        android:contentDescription="@string/tts_pause_description"
-                        android:padding="10dp"
-                        android:src="@drawable/ic_tts_pause" />
-
-                    <ImageButton
-                        android:id="@+id/tts_stop_button"
-                        android:layout_width="48dp"
-                        android:layout_height="48dp"
-                        android:layout_marginStart="4dp"
-                        android:background="@drawable/bg_circle_button"
-                        android:contentDescription="@string/tts_stop_description"
-                        android:padding="10dp"
-                        android:src="@drawable/ic_tts_stop" />
-
-                    <ImageButton
-                        android:id="@+id/tts_next_button"
-                        android:layout_width="48dp"
-                        android:layout_height="48dp"
-                        android:layout_marginStart="4dp"
-                        android:background="@drawable/bg_circle_button"
-                        android:clickable="true"
-                        android:focusable="true"
-                        android:contentDescription="@string/tts_next_description"
-                        android:padding="10dp"
-                        android:src="@drawable/ic_tts_next" />
-                </LinearLayout>
 
                 <!-- OCR read-region editor — place/resize boxes over dialogue text. -->
                 <ImageButton

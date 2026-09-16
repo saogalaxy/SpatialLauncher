@@ -41,6 +41,10 @@ flowchart LR
 3. Paste URL only if discovery fails (firewall / AP isolation).  
 4. Desktop Link is **video only** (no PC→Quest audio yet).
 
+## Desktop Link — do not regress
+
+Codec / Gaming↔Movies switches and reconnect must stay live. Full invariants and regression checklist: [CHANGELOG.md](../CHANGELOG.md) § *Desktop Link — invariants (do not regress)*.
+
 ## Depth presets
 
 | Preset | Model | Default |

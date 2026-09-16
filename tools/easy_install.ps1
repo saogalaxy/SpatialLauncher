@@ -115,14 +115,31 @@ if ($installCode -ne 0) {
 }
 
 if (-not $NoLaunch) {
-    Write-Step "Launching Spatial Launcher"
-    $launchCmd = @("app", "launch", $PackageId)
-    if ($Device -ne "") {
-        $launchCmd += @("--device", $Device)
+    Write-Step "Launching Spatial Launcher on headset"
+    $Activity = "com.spatiallauncher.app.ui.PanelMainActivity"
+    # Fresh process so a replaced APK actually comes up.
+    $stopCmd = @("app", "stop", $PackageId)
+    if ($Device -ne "") { $stopCmd += @("--device", $Device) }
+    [void](Invoke-NpxMetavr -MetavrArgs $stopCmd)
+    Start-Sleep -Milliseconds 500
+
+    $launched = $false
+    $launchCmd = @("app", "launch", $PackageId, "--activity", $Activity)
+    if ($Device -ne "") { $launchCmd += @("--device", $Device) }
+    if ((Invoke-NpxMetavr -MetavrArgs $launchCmd) -eq 0) {
+        $launched = $true
+        Write-Host "  Launched: $PackageId/$Activity"
+    } else {
+        Write-Host "  Activity launch failed — trying package launch…" -ForegroundColor Yellow
+        $launchCmd2 = @("app", "launch", $PackageId)
+        if ($Device -ne "") { $launchCmd2 += @("--device", $Device) }
+        if ((Invoke-NpxMetavr -MetavrArgs $launchCmd2) -eq 0) {
+            $launched = $true
+            Write-Host "  Launched: $PackageId"
+        }
     }
-    $launchCode = Invoke-NpxMetavr -MetavrArgs $launchCmd
-    if ($launchCode -ne 0) {
-        Write-Host "  Install OK but launch failed - open Spatial Launcher from the Quest library." -ForegroundColor Yellow
+    if (-not $launched) {
+        Write-Host "  Install OK but launch failed — open Spatial Launcher from the Quest library." -ForegroundColor Yellow
     }
 }
 

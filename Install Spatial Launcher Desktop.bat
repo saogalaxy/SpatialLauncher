@@ -4,7 +4,7 @@ cd /d "%~dp0"
 title Spatial Launcher Desktop — Easy Install
 echo.
 echo Spatial Launcher Desktop Easy Installer
-echo Checks .NET 8 SDK, builds, publishes, and installs.
+echo Checks .NET 8 SDK, builds, publishes, installs, then auto-launches.
 echo.
 echo STORAGE (read this):
 echo   Installs to your Windows user profile drive (usually C:), not a drive picker.

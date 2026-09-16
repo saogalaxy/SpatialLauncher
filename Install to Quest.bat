@@ -4,7 +4,7 @@ cd /d "%~dp0"
 title Spatial Launcher — Install to Quest
 echo.
 echo Spatial Launcher Easy Installer
-echo Checks JDK, Node/metavr, Quest, then builds and installs.
+echo Checks JDK, Node/metavr, Quest, then builds, installs, and auto-launches.
 echo.
 echo STORAGE (read this):
 echo   The APK is built on this PC under the repo, then sideloaded to the headset.

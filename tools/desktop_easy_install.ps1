@@ -94,6 +94,20 @@ if ([string]::IsNullOrWhiteSpace($desktopExe) -or -not (Test-Path -LiteralPath $
 }
 Write-Host "  Exe: $desktopExe  ($((Get-Item -LiteralPath $desktopExe).LastWriteTime))"
 
+# Launch right after copy so the app opens while models still download.
+if (-not $NoLaunch) {
+    Write-Step "Launching Spatial Launcher Desktop"
+    if ([string]::IsNullOrWhiteSpace($desktopExe)) {
+        Fail "Cannot launch - exe path is empty"
+    }
+    try {
+        Start-Process -FilePath $desktopExe -WorkingDirectory $InstallDir | Out-Null
+        Write-Host "  Launched: $desktopExe"
+    } catch {
+        Write-Host "  Launch failed (will retry after models): $($_.Exception.Message)" -ForegroundColor Yellow
+    }
+}
+
 Write-Step "Start Menu shortcut"
 $startMenu = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs"
 New-Item -ItemType Directory -Force -Path $startMenu | Out-Null
@@ -213,12 +227,34 @@ Get-ModelFile `
 Write-Host "  Models root: $modelRoot"
 Write-Host "  Optional: piper/en_US-lessac-high.onnx + piper.exe, OPUS jaen/zhen/koen, SenseVoice under asr/, PaddleOCR CLI under paddleocr/"
 
-if (-not $NoLaunch) {
-    Write-Step "Launching"
-    if ([string]::IsNullOrWhiteSpace($desktopExe)) {
-        Fail "Cannot launch - exe path is empty"
+function Start-DesktopApp {
+    if ([string]::IsNullOrWhiteSpace($desktopExe) -or -not (Test-Path -LiteralPath $desktopExe)) {
+        Write-Host "  Launch skipped - exe missing" -ForegroundColor Yellow
+        return $false
     }
-    Start-Process -FilePath $desktopExe -WorkingDirectory $InstallDir
+    $alive = Get-Process -Name "SpatialLauncher.Desktop" -ErrorAction SilentlyContinue
+    if ($alive) {
+        Write-Host "  Already running (pid=$($alive.Id -join ','))"
+        return $true
+    }
+    try {
+        Start-Process -FilePath $desktopExe -WorkingDirectory $InstallDir | Out-Null
+        Start-Sleep -Milliseconds 600
+        if (Get-Process -Name "SpatialLauncher.Desktop" -ErrorAction SilentlyContinue) {
+            Write-Host "  Launched: $desktopExe"
+            return $true
+        }
+    } catch {
+        Write-Host "  Launch failed: $($_.Exception.Message)" -ForegroundColor Yellow
+    }
+    return $false
+}
+
+if (-not $NoLaunch) {
+    Write-Step "Launching Spatial Launcher Desktop"
+    if (-not (Start-DesktopApp)) {
+        Write-Host "  Open from Start Menu: Spatial Launcher Desktop" -ForegroundColor Yellow
+    }
 }
 
 Write-Host ""

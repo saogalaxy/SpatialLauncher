@@ -199,8 +199,9 @@
     <string name="assist_listen_need_mic">Allow microphone access so Listen can tap the other app’s audio</string>
     <string name="assist_3d_off_for_listen">3D off while Listen is on</string>
     <string name="desktop_link_title">Desktop Link</string>
-    <string name="desktop_link_hint">Needs Spatial Launcher Desktop on your Windows PC. Same Wi‑Fi → Start Session on PC → Find PC here.</string>
+    <string name="desktop_link_hint">Needs Spatial Launcher Desktop on your Windows PC. Same Wi‑Fi → Start Session on PC → tap the monitor icon here.</string>
     <string name="desktop_link_pc_required">PC app required · github.com/saogalaxy/SpatialLauncher</string>
+    <string name="desktop_link_auto_connect_note">Opens connected automatically from the monitor icon. Min hides this panel for 10s — then point your ray at the picture to show settings again.</string>
     <string name="desktop_link_url_hint">http://192.168.x.x:8765/sbs.mjpg · /sbs.h264 · /sbs.av1</string>
     <string name="desktop_link_connect">Connect</string>
     <string name="desktop_link_disconnect">Disconnect</string>
@@ -209,7 +210,8 @@
     <string name="desktop_link_close">Close</string>
     <string name="desktop_link_min">Min</string>
     <string name="desktop_link_exit">Exit</string>
-    <string name="desktop_link_min_hint">Min hides settings — stream keeps playing. Point at the panel to show again.</string>
+    <string name="desktop_link_min_hint">Settings hidden for 10s — move your ray off the panel, then point at it again to show controls. Stream keeps playing.</string>
+    <string name="desktop_link_min_locked">Settings stay hidden a few more seconds — then point at the panel to show them.</string>
     <string name="desktop_link_idle">Not connected</string>
     <string name="desktop_link_connecting">Connecting…</string>
     <string name="desktop_link_searching">Searching LAN for Spatial Launcher Desktop…</string>
@@ -283,6 +285,7 @@
     <string name="ocr_region_button_description">Edit OCR read regions</string>
     <string name="tts_speak_button_description">Read all selected regions</string>
     <string name="tts_speak_once_description">Play all selected regions</string>
+    <string name="tts_speak_once_hover_description">Tap to play · point at speaker for prev/pause/stop/next</string>
     <string name="tts_speak_continuous_description">Continuous dialogue reading</string>
     <string name="tts_prev_description">Previous dialogue line</string>
     <string name="tts_next_description">Next dialogue line</string>

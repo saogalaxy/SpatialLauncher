@@ -239,9 +239,9 @@ public sealed class QuestLinkServer : IDisposable
             {
                 var client = _listener.AcceptTcpClient();
                 client.NoDelay = true;
-                // Short timeouts left zombie reconnect clients spinning and starved
-                // real viewers when switching JPEG ↔ MPEG ↔ AV1.
-                client.SendTimeout = 500;
+                // Wi‑Fi JPEG/AU writes need headroom; 500ms left half-dead viewers
+                // holding slots so the headset could not reclaim a stream.
+                client.SendTimeout = 8000;
                 client.ReceiveTimeout = 8000;
                 _ = Task.Run(() => HandleClient(client));
             }
@@ -362,8 +362,8 @@ public sealed class QuestLinkServer : IDisposable
                 }
                 catch (IOException)
                 {
-                    lock (_frameLock)
-                        lastGen = Math.Min(lastGen, _payloadGen - 1);
+                    // Client gone — exit so the viewer slot frees for reconnect.
+                    break;
                 }
             }
         }
@@ -416,8 +416,8 @@ public sealed class QuestLinkServer : IDisposable
                 }
                 catch (IOException)
                 {
-                    lock (_frameLock)
-                        lastGen = Math.Min(lastGen, _payloadGen - 1);
+                    // Client gone — exit so the viewer slot frees for reconnect.
+                    break;
                 }
             }
         }
@@ -428,13 +428,13 @@ public sealed class QuestLinkServer : IDisposable
     }
 
     /// <summary>
-    /// At most two live stream pumps. Reconnect storms were leaving 30+ half-dead
-    /// clients and starving the real headset of the first AU after a codec switch.
+    /// At most three live stream pumps. Reconnect storms used to leave dozens of
+    /// half-dead clients; writers now exit on IOException so slots free quickly.
     /// </summary>
     private bool TryAcquireViewerSlot(TcpClient client, NetworkStream stream)
     {
         int n = Interlocked.Increment(ref _viewerCount);
-        if (n > 2)
+        if (n > 3)
         {
             Interlocked.Decrement(ref _viewerCount);
             try

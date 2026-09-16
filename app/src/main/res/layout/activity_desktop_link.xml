@@ -80,6 +80,14 @@
             android:textSize="11sp"
             android:textStyle="bold" />
 
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:text="@string/desktop_link_auto_connect_note"
+            android:textColor="@color/text_secondary"
+            android:textSize="11sp" />
+
         <EditText
             android:id="@+id/desktop_link_url"
             android:layout_width="match_parent"
@@ -89,30 +97,8 @@
             android:inputType="textUri"
             android:textColor="@color/text_primary"
             android:textColorHint="@color/text_secondary"
-            android:textSize="12sp" />
-
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="6dp"
-            android:gravity="center_vertical"
-            android:orientation="horizontal">
-
-            <Button
-                android:id="@+id/desktop_link_find"
-                android:layout_width="0dp"
-                android:layout_height="40dp"
-                android:layout_weight="1"
-                android:text="@string/desktop_link_find" />
-
-            <Button
-                android:id="@+id/desktop_link_connect"
-                android:layout_width="0dp"
-                android:layout_height="40dp"
-                android:layout_marginStart="6dp"
-                android:layout_weight="1"
-                android:text="@string/desktop_link_connect" />
-        </LinearLayout>
+            android:textSize="12sp"
+            android:visibility="gone" />
 
         <ScrollView
             android:layout_width="match_parent"
