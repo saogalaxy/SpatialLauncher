@@ -45,19 +45,12 @@ public sealed class AudioLinkStreamer : IDisposable
     private readonly Queue<byte[]> _frameQueue = new();
     private const int MaxQueuedFrames = 10; // ~100 ms
     private string? _activeSinkName;
-    private string? _preferredSinkId;
 
     public event Action<string>? StatusChanged;
     public bool IsRunning => _running;
     public int Port { get; private set; } = DefaultPort;
     public AudioOutputMode Mode { get; private set; } = AudioOutputMode.Pc;
     public string? ActiveSinkName => _activeSinkName;
-
-    public string? PreferredSinkId
-    {
-        get => _preferredSinkId;
-        set => _preferredSinkId = string.IsNullOrWhiteSpace(value) ? null : value;
-    }
 
     public void SetQuestEndpoint(IPAddress? address)
     {
@@ -96,21 +89,19 @@ public sealed class AudioLinkStreamer : IDisposable
         Mode = AudioOutputMode.Headset;
         Port = port;
 
-        var captureInfo = AudioEndpointSwitcher.GetDefaultRender();
-        if (captureInfo == null)
+        string captureName;
+        try
         {
-            _activeSinkName = null;
-            Mode = AudioOutputMode.Pc;
-            StatusChanged?.Invoke("Audio: no Windows playback device to mirror");
-            return;
+            using var enumerator = new MMDeviceEnumerator();
+            _captureDevice = enumerator.GetDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia);
+            captureName = _captureDevice.FriendlyName ?? "Speakers";
         }
-
-        _captureDevice = AudioEndpointSwitcher.OpenDevice(captureInfo.Id);
-        if (_captureDevice == null)
+        catch (Exception ex)
         {
+            _captureDevice = null;
             _activeSinkName = null;
             Mode = AudioOutputMode.Pc;
-            StatusChanged?.Invoke("Audio: failed to open " + captureInfo.FriendlyName);
+            StatusChanged?.Invoke("Audio: no Windows playback device to mirror (" + ex.Message + ")");
             return;
         }
 
@@ -142,7 +133,7 @@ public sealed class AudioLinkStreamer : IDisposable
 
         _running = true;
         _seq = 0;
-        _activeSinkName = captureInfo.FriendlyName;
+        _activeSinkName = captureName;
         _sendThread = new Thread(SendLoop) { IsBackground = true, Name = "SldAudioUdp" };
         _sendThread.Start();
 
@@ -150,7 +141,7 @@ public sealed class AudioLinkStreamer : IDisposable
         lock (_destLock)
             destLabel = _questIp != null ? $"{_questIp}:{port}" : $"broadcast:{port}";
         StatusChanged?.Invoke(
-            $"Audio → Quest ({destLabel}) · mirroring '{captureInfo.FriendlyName}' "
+            $"Audio → Quest ({destLabel}) · copying '{captureName}' "
             + $"({srcFormat.SampleRate}Hz {srcFormat.Channels}ch {srcFormat.Encoding} → 48k s16le)");
     }
 

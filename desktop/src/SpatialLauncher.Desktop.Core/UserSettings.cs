@@ -25,12 +25,6 @@ public sealed class UserSettings
     public DepthPreset DepthPreset { get; set; } = DepthPreset.Gaming;
     public StreamCodec StreamCodec { get; set; } = StreamCodec.Mjpeg;
     public Stream.AudioOutputMode AudioMode { get; set; } = Stream.AudioOutputMode.Pc;
-    /// <summary>
-    /// Windows MMDevice ID for Spatial Launcher Audio (virtual sink). Empty = auto-pick.
-    /// </summary>
-    public string PreferredAudioSinkId { get; set; } = "";
-    /// <summary>Friendly name shown for Spatial Launcher Audio (cached for UI).</summary>
-    public string PreferredAudioSinkName { get; set; } = "";
     public double Divergence { get; set; } = 0.21;
     public double Convergence { get; set; } = 0.5;
     /// <summary>Target depth inferences per second (Gaming default ~20, Movies ~30).</summary>

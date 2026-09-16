@@ -99,21 +99,8 @@
               <Button x:Name="AudioPc" Style="{StaticResource ChipButtonActive}" Content="PC speakers" Click="Audio_Click" Tag="pc"/>
               <Button x:Name="AudioHeadset" Style="{StaticResource ChipButton}" Content="Headset" Click="Audio_Click" Tag="headset"/>
             </WrapPanel>
-            <TextBlock Text="Headset audio" FontWeight="SemiBold" FontSize="12" Margin="0,4,0,2"/>
-            <TextBlock TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" FontSize="10" Margin="0,0,0,4"
-                       Text="Headset mirrors your current Windows speakers to the Quest — both play at once. Leave Windows Sound on Speakers (Aha). Virtual sinks below are optional / legacy."/>
-            <ComboBox x:Name="AudioSinkCombo" Margin="0,0,0,4"
-                      DisplayMemberPath="DisplayName"
-                      SelectionChanged="AudioSinkCombo_SelectionChanged"/>
             <TextBlock x:Name="AudioSinkHint" TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" FontSize="10" Margin="0,0,0,6"
-                       Text="Tap Headset while a session is running and something is playing on the PC."/>
-            <WrapPanel Margin="0,0,0,4">
-              <Button Content="Refresh sinks" Padding="8,2" Margin="0,0,8,0"
-                      Click="RefreshAudioSinks_Click"/>
-              <Button x:Name="InstallAudioDriverBtn" Content="Install Spatial Launcher Audio driver" Padding="8,2"
-                      Click="InstallAudioDriver_Click"
-                      ToolTip="Elevated install of the Spatial Launcher Audio virtual speaker"/>
-            </WrapPanel>
+                       Text="Headset copies whatever is playing on your Windows speakers to the Quest (both play). Start Session, connect Quest, tap Headset."/>
 
             <!-- 3D look section -->
             <DockPanel Margin="0,14,0,2">

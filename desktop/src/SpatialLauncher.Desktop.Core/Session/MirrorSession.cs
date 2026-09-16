@@ -81,9 +81,6 @@ public sealed class MirrorSession : IDisposable
         EnsureAudioHooked();
         try
         {
-            _audio.PreferredSinkId = string.IsNullOrWhiteSpace(_settings.PreferredAudioSinkId)
-                ? null
-                : _settings.PreferredAudioSinkId;
             if (_questLink.LastViewerAddress != null)
                 _audio.SetQuestEndpoint(_questLink.LastViewerAddress);
             _audio.ApplyMode(_settings.AudioMode);

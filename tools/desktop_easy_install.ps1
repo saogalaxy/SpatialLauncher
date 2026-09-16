@@ -161,23 +161,6 @@ if ("$existing" -notmatch "8765") {
     Write-Host "  URL ACL already present"
 }
 
-Write-Step "Spatial Launcher Audio driver (virtual speaker)"
-$audioInstall = Join-Path $PSScriptRoot "install_spatial_audio_driver.ps1"
-$audioDist = Join-Path $DesktopDir "audio-driver\dist\x64"
-$audioInstallDir = Join-Path $env:LOCALAPPDATA "SpatialLauncherDesktop\audio-driver"
-if (Test-Path $audioDist) {
-    New-Item -ItemType Directory -Force -Path $audioInstallDir | Out-Null
-    Copy-Item -Path (Join-Path $audioDist "*") -Destination $audioInstallDir -Force -ErrorAction SilentlyContinue
-    Copy-Item -Path $audioInstall -Destination (Join-Path $audioInstallDir "install_spatial_audio_driver.ps1") -Force -ErrorAction SilentlyContinue
-    Write-Host "  Installing / refreshing Spatial Launcher Audio (UAC prompt)..."
-    Start-Process -FilePath "powershell.exe" -Verb RunAs -ArgumentList @(
-        "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "`"$audioInstall`""
-    ) -Wait -ErrorAction SilentlyContinue
-    Write-Host "  If Sound still lacks 'Spatial Launcher Audio', run tools\install_spatial_audio_driver.ps1 as Admin."
-} else {
-    Write-Host "  Skipped - package missing at $audioDist" -ForegroundColor Yellow
-}
-
 Write-Step "Model folder + depth ONNX fetch"
 $modelRoot = Join-Path $env:LOCALAPPDATA "SpatialLauncherDesktop\models"
 New-Item -ItemType Directory -Force -Path $modelRoot | Out-Null

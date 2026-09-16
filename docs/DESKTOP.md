@@ -28,17 +28,20 @@ flowchart LR
   cap[GDI capture]
   depth[DA-V2 Gaming or Movies]
   sbs[Half or Full SBS]
-  http[HTTP MJPEG :8765]
+  http[HTTP video :8765]
   udp[UDP beacon :8766]
+  aud[UDP PCM audio :8767]
   quest[Quest thin Desktop Link]
   pick --> cap --> depth --> sbs --> http --> quest
   http --> udp
   udp --> quest
+  cap -.-> aud --> quest
 ```
 
 1. PC: **Start Session** (Stream to Quest + Advertise on LAN). Minimize to tray OK.  
 2. Quest: toolbar **monitor** → auto-find → Connect with **3D on**.  
-3. Paste URL only if discovery fails (firewall / AP isolation).
+3. Sound: **Headset** copies Windows speakers to the Quest (both play); **PC speakers** keeps audio on the PC only.  
+4. Paste URL only if discovery fails (firewall / AP isolation).
 
 ## Depth presets
 

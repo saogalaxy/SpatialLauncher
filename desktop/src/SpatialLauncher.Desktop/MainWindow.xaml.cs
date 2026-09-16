@@ -27,7 +27,6 @@ public partial class MainWindow : Window
     private AssistMode _mode = AssistMode.Read;
     private bool _useOpus = true;
     private bool _uiReady;
-    private bool _audioSinkComboReady;
     private Forms.NotifyIcon? _tray;
     private readonly DispatcherTimer _sourceRefreshTimer = new() { Interval = TimeSpan.FromSeconds(3) };
     private string? _selectedSourceId;
@@ -50,10 +49,9 @@ public partial class MainWindow : Window
         _session.StatusChanged += msg => Dispatcher.Invoke(() =>
         {
             StatusText.Text = msg;
-            if (msg.StartsWith("Audio", StringComparison.OrdinalIgnoreCase)
-                || msg.Contains("virtual", StringComparison.OrdinalIgnoreCase))
+            if (msg.StartsWith("Audio", StringComparison.OrdinalIgnoreCase))
             {
-                RefreshAudioSinkHint();
+                RefreshAudioHint();
                 UpdatePipelineLabel();
             }
         });
@@ -86,7 +84,6 @@ public partial class MainWindow : Window
         });
         _reader.FrameProvider = () => _session.Capture.CloneLatestFrame();
         ApplyUiFromSettings();
-        PopulateAudioSinkCombo();
         UpdatePipelineLabel();
         _uiReady = true;
         SyncSettingsFromUi();
@@ -349,87 +346,6 @@ public partial class MainWindow : Window
         SyncSettingsFromUi();
     }
 
-    private void RefreshAudioSinks_Click(object sender, RoutedEventArgs e)
-    {
-        PopulateAudioSinkCombo();
-        RefreshAudioSinkHint();
-        StatusText.Text = AudioSinkCombo.Items.Count > 0
-            ? "Found " + AudioSinkCombo.Items.Count + " optional virtual sink(s) — Headset mirrors PC speakers without them"
-            : "Headset mirrors PC speakers (no virtual sink required)";
-    }
-
-    private void InstallAudioDriver_Click(object sender, RoutedEventArgs e)
-    {
-        try
-        {
-            string localPkg = System.IO.Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                "SpatialLauncherDesktop", "audio-driver");
-            string cmd = System.IO.Path.Combine(localPkg, "INSTALL.cmd");
-            string script = System.IO.Path.Combine(localPkg, "install_spatial_audio_driver.ps1");
-            if (!File.Exists(script))
-            {
-                string root = FindRepoRoot();
-                script = System.IO.Path.Combine(root, "tools", "install_spatial_audio_driver.ps1");
-                cmd = System.IO.Path.Combine(root, "tools", "install_spatial_audio_driver.cmd");
-            }
-            if (!File.Exists(script) && !File.Exists(cmd))
-            {
-                StatusText.Text = "Install package not found. Re-run desktop_easy_install.ps1.";
-                return;
-            }
-            StatusText.Text = "Launching Spatial Launcher Audio installer (approve UAC)...";
-            var psi = new System.Diagnostics.ProcessStartInfo
-            {
-                FileName = File.Exists(cmd) ? cmd : "powershell.exe",
-                Arguments = File.Exists(cmd)
-                    ? ""
-                    : "-NoProfile -ExecutionPolicy Bypass -File \"" + script + "\"",
-                WorkingDirectory = System.IO.Path.GetDirectoryName(File.Exists(cmd) ? cmd : script) ?? localPkg,
-                UseShellExecute = true,
-                Verb = "runas"
-            };
-            var proc = System.Diagnostics.Process.Start(psi);
-            proc?.WaitForExit(180000);
-            PopulateAudioSinkCombo();
-            RefreshAudioSinkHint();
-            StatusText.Text = AudioEndpointSwitcher.HasSpatialLauncherAudio()
-                ? "Spatial Launcher Audio ready — pick it under Sound, tap Headset."
-                : "Installer finished — open Windows Sound; if missing, Refresh sinks. Log: %LocalAppData%\\SpatialLauncherDesktop\\logs\\audio_driver_install.log";
-        }
-        catch (Exception ex)
-        {
-            StatusText.Text = "Driver install cancelled or failed: " + ex.Message;
-        }
-    }
-
-    private static string FindRepoRoot()
-    {
-        // Dev: cwd / exe under repo. Installed: LocalAppData\SpatialLauncherDesktop\app
-        string? dir = AppContext.BaseDirectory;
-        for (int i = 0; i < 8 && !string.IsNullOrEmpty(dir); i++)
-        {
-            if (File.Exists(System.IO.Path.Combine(dir, "tools", "install_spatial_audio_driver.ps1")))
-                return dir;
-            if (File.Exists(System.IO.Path.Combine(dir, "desktop", "audio-driver", "dist", "x64", "VirtualAudioDriver.inf")))
-                return dir;
-            dir = System.IO.Path.GetDirectoryName(dir);
-        }
-        return Directory.GetCurrentDirectory();
-    }
-
-    private void AudioSinkCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
-    {
-        if (!_uiReady || !_audioSinkComboReady) return;
-        if (AudioSinkCombo.SelectedItem is AudioEndpointSwitcher.EndpointInfo sink)
-        {
-            _settings.PreferredAudioSinkId = sink.Id;
-            _settings.PreferredAudioSinkName = sink.FriendlyName;
-            SyncSettingsFromUi();
-            RefreshAudioSinkHint();
-        }
-    }
-
     private void SaveSection_Click(object sender, RoutedEventArgs e)
     {
         if (sender is not Button btn || btn.Tag is not string section) return;
@@ -447,41 +363,13 @@ public partial class MainWindow : Window
                 _ => "Settings"
             };
             StatusText.Text = "Saved " + label + " settings";
-            RefreshAudioSinkHint();
+            RefreshAudioHint();
             UpdatePipelineLabel();
         }
         catch (Exception ex)
         {
             StatusText.Text = "Save failed: " + ex.Message;
         }
-    }
-
-    private void PopulateAudioSinkCombo()
-    {
-        _audioSinkComboReady = false;
-        var sinks = AudioEndpointSwitcher.ListVirtualSinks();
-        AudioSinkCombo.ItemsSource = sinks;
-        AudioEndpointSwitcher.EndpointInfo? selected = null;
-        if (!string.IsNullOrWhiteSpace(_settings.PreferredAudioSinkId))
-        {
-            foreach (var s in sinks)
-            {
-                if (string.Equals(s.Id, _settings.PreferredAudioSinkId, StringComparison.OrdinalIgnoreCase))
-                {
-                    selected = s;
-                    break;
-                }
-            }
-        }
-        selected ??= sinks.Count > 0 ? sinks[0] : null;
-        AudioSinkCombo.SelectedItem = selected;
-        if (selected != null)
-        {
-            _settings.PreferredAudioSinkId = selected.Id;
-            _settings.PreferredAudioSinkName = selected.FriendlyName;
-        }
-        _audioSinkComboReady = true;
-        RefreshAudioSinkHint();
     }
 
     private void Mode_Click(object sender, RoutedEventArgs e)
@@ -569,11 +457,6 @@ public partial class MainWindow : Window
         _settings.TtsSpeedPercent = (int)TtsSpeedSlider.Value;
         _settings.AdvertiseOnLan = LanAdvertiseCheck.IsChecked == true;
         _settings.RunInBackground = TrayCheck.IsChecked == true;
-        if (AudioSinkCombo.SelectedItem is AudioEndpointSwitcher.EndpointInfo sink)
-        {
-            _settings.PreferredAudioSinkId = sink.Id;
-            _settings.PreferredAudioSinkName = sink.FriendlyName;
-        }
         _session.ApplySettings(_settings);
         if (!string.IsNullOrEmpty(_session.QuestLinkUrl))
             QuestLinkUrlBox.Text = _session.QuestLinkUrl;
@@ -643,27 +526,20 @@ public partial class MainWindow : Window
     {
         SetChip(AudioPc, _settings.AudioMode == AudioOutputMode.Pc);
         SetChip(AudioHeadset, _settings.AudioMode == AudioOutputMode.Headset);
-        RefreshAudioSinkHint();
+        RefreshAudioHint();
     }
 
-    private void RefreshAudioSinkHint()
+    private void RefreshAudioHint()
     {
-        var selected = AudioSinkCombo.SelectedItem as AudioEndpointSwitcher.EndpointInfo
-                       ?? AudioEndpointSwitcher.TryFindVirtualSink(_settings.PreferredAudioSinkId);
         string active = _session.Audio.ActiveSinkName ?? "";
         if (_settings.AudioMode == AudioOutputMode.Headset && !string.IsNullOrEmpty(active))
         {
-            AudioSinkHint.Text = "Headset on · mirroring '" + active
-                + "' to Quest. PC speakers stay on — play any audio on the PC to hear it in the headset.";
+            AudioSinkHint.Text = "Headset on · copying '" + active
+                + "' to Quest. PC speakers stay on.";
         }
         else if (_settings.AudioMode == AudioOutputMode.Headset)
         {
-            AudioSinkHint.Text = "Headset will mirror Windows default speakers to Quest (both play). Start Session, connect Quest, tap Headset.";
-        }
-        else if (selected != null)
-        {
-            AudioSinkHint.Text = "PC speakers mode. Optional virtual sink listed: " + selected.FriendlyName
-                + " (not required for Headset anymore).";
+            AudioSinkHint.Text = "Headset will copy Windows speakers to Quest (both play). Start Session, connect Quest, tap Headset.";
         }
         else
         {
@@ -708,8 +584,8 @@ public partial class MainWindow : Window
                               + $" q{_settings.JpegQuality} sharp{_settings.SharpenPercent}"
                               + (_settings.AudioMode == AudioOutputMode.Headset
                                   ? (!string.IsNullOrEmpty(_session.Audio.ActiveSinkName)
-                                      ? " · audio→Quest (mirror " + _session.Audio.ActiveSinkName + ")"
-                                      : " · audio→Quest (mirror speakers)")
+                                      ? " · audio→Quest (copy " + _session.Audio.ActiveSinkName + ")"
+                                      : " · audio→Quest (copy speakers)")
                                   : " · audio→PC");
     }
 

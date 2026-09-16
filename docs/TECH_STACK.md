@@ -24,9 +24,8 @@ Spatial Launcher is **not** an immersive OpenXR title. Stereo on Quest uses Hori
 | `app/` | Android / Quest Gradle module |
 | `desktop/src/SpatialLauncher.Desktop/` | WPF shell (MainWindow, tray, SBS preview) |
 | `desktop/src/SpatialLauncher.Desktop.Core/` | Capture, depth, stereo, Quest Link, discovery, audio, OCR/TTS/Listen, settings |
-| `desktop/audio-driver/` | Optional virtual speaker package (SignPath-signed) |
 | `desktop/installer/` | Inno Setup script (optional) |
-| `tools/` | Easy install / uninstall / audio-driver scripts |
+| `tools/` | Easy install / uninstall scripts |
 | `docs/` | HELP, DESKTOP, PRIVACY, screenshots, this doc |
 | `gradle/` | Gradle wrapper |
 | `app/.../sandbox/` | Sandbox experiments (excluded from release APK) |
@@ -148,16 +147,16 @@ Window/monitor pick → GDI capture → Depth Anything ONNX (DirectML)
 - Quest decodes with **MediaCodec** (AV1 prefers low-latency QTI decoder when available)  
 - Codec can hot-swap JPEG ↔ H.264 ↔ AV1 via settings / URL  
 
-### Audio (PC → Quest) — current
+### Audio (PC → Quest)
 
-| Stage | What we use | What we do **not** use (yet) |
-|-------|-------------|------------------------------|
-| Capture | **WASAPI loopback** of Windows **default** render (speakers stay on) | Working Microsoft-attestation virtual sink as required path |
-| Encode | **None** — PCM **s16le**, stereo, **48 kHz**, ~10 ms frames (1920 bytes) | Opus / AAC |
-| Packet | `[seq u32 BE][pcm…]` | RTP, RTCP, A/V mux timestamps |
-| Dest | Unicast to Quest IP from video TCP client (broadcast fallback) | Shared media container with video |
+| Stage | What we use |
+|-------|-------------|
+| Capture | **WASAPI loopback** of Windows **default** render (PC speakers stay on) |
+| Encode | **None** — PCM **s16le**, stereo, **48 kHz**, ~10 ms frames (1920 bytes) |
+| Packet | `[seq u32 BE][pcm…]` on UDP **:8767** |
+| Dest | Unicast to Quest IP from the video TCP client (broadcast fallback) |
 
-Optional **Spatial Launcher Audio** virtual driver package exists under `desktop/audio-driver/` (MikeTheTech / SignPath). On Secure Boot PCs it often lands **Code 52** (no Microsoft kernel attestation). Headset mode does **not** require it.
+Video stays on TCP **:8765**. No virtual audio driver, Opus/AAC, or RTP mux.
 
 > “Opus” elsewhere in the product means **OPUS-MT** (Marian translation ONNX), not the Opus audio codec.
 
@@ -167,9 +166,9 @@ Optional **Spatial Launcher Audio** virtual driver package exists under `desktop
 
 | Component | Stack |
 |-----------|--------|
-| Virtual Audio Driver | Prebuilt `.sys` / `.inf` / `.cat` (release 25.7.14), SetupAPI install helper (`SlaDriverInstall.cs`), MIT + MS-PL lineage |
 | Android NDK / C++ | None in tree; OpenCL declared for llama via native library uses |
 | OpenXR / cpp legacy | Not present in current tree |
+| Virtual audio driver | **Removed** — Headset copies PC speakers via WASAPI loopback |
 
 ---
 
@@ -206,8 +205,7 @@ Approximate Desktop install size: **~900 MB** (app ~450 MB + depth models ~470 M
 | Script / tool | Role |
 |---------------|------|
 | `tools/easy_install.ps1` | Build + install Quest APK via metavr |
-| `tools/desktop_easy_install.ps1` | `dotnet publish`, LocalAppData install, Start Menu, URL ACL, depth fetch, optional audio driver |
-| `tools/install_spatial_audio_driver.ps1` | Elevated virtual speaker install |
+| `tools/desktop_easy_install.ps1` | `dotnet publish`, LocalAppData install, Start Menu, URL ACL, depth fetch |
 | `tools/desktop_uninstall.ps1` | Remove Desktop app entry |
 | `npx metavr` | Quest device install / launch |
 | Inno Setup (`SpatialLauncherDesktop.iss`) | Optional classic installer after publish |
@@ -218,8 +216,7 @@ Approximate Desktop install size: **~900 MB** (app ~450 MB + depth models ~470 M
 
 - No ad or analytics SDKs (see `docs/PRIVACY.md`)  
 - Frames/audio stay on PC + local Wi‑Fi for Desktop Link  
-- Audio driver notices: `desktop/audio-driver/THIRD_PARTY_NOTICES.md`  
-- Major upstreams: TensorFlow Lite, ML Kit, sherpa-onnx / k2-fsa, ONNX Runtime, llama.cpp (OpenCL), Hugging Face models, NAudio, Vortice, MikeTheTech Virtual Audio Driver  
+- Major upstreams: TensorFlow Lite, ML Kit, sherpa-onnx / k2-fsa, ONNX Runtime, llama.cpp (OpenCL), Hugging Face models, NAudio, Vortice  
 
 ---
 
@@ -234,8 +231,8 @@ Approximate Desktop install size: **~900 MB** (app ~450 MB + depth models ~470 M
 ┌────────────┴──────────────────────────────┴──────────────────────────┴───────────┐
 │  Desktop (.NET 8 WPF)                                                            │
 │  GDI capture → DirectML Depth Anything → SBS → MF encode / MJPEG                 │
-│  NAudio WASAPI loopback → raw PCM                                                │
-│  Optional: PaddleOCR · Piper · SenseVoice · OPUS-MT · virtual speaker package    │
+│  NAudio WASAPI loopback → raw PCM copy to Quest                                  │
+│  Optional: PaddleOCR · Piper · SenseVoice · OPUS-MT                              │
 └──────────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -250,5 +247,4 @@ Approximate Desktop install size: **~900 MB** (app ~450 MB + depth models ~470 M
 | [docs/HELP.md](HELP.md) | In-headset help mirror |
 | [docs/PRIVACY.md](PRIVACY.md) | Privacy policy |
 | [desktop/README.md](../desktop/README.md) | Desktop build notes |
-| [desktop/audio-driver/README.md](../desktop/audio-driver/README.md) | Virtual audio driver caveats |
 | [CHANGELOG.md](../CHANGELOG.md) | Release notes |
