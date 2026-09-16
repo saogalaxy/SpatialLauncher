@@ -6,9 +6,6 @@ import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
 import android.graphics.Rect;
-import android.media.AudioAttributes;
-import android.media.AudioFormat;
-import android.media.AudioTrack;
 import android.media.MediaCodec;
 import android.media.MediaFormat;
 import android.os.Bundle;
@@ -60,9 +57,6 @@ public class DesktopLinkActivity extends AppCompatActivity implements SurfaceHol
     private static final String KEY_URL = "stream_url";
     private static final String KEY_STEREO = "stereo_3d";
     private static final int DISCOVERY_PORT = 8766;
-    private static final int AUDIO_PORT = 8767;
-    private static final int AUDIO_SAMPLE_RATE = 48000;
-    private static final int AUDIO_CHANNELS = 2;
 
     private enum LinkCodec { JPEG, H264, AV1 }
 
@@ -108,12 +102,9 @@ public class DesktopLinkActivity extends AppCompatActivity implements SurfaceHol
     private Button codecJpegBtn;
     private Button codecMpegBtn;
     private Button codecAv1Btn;
-    private Button audioPcBtn;
-    private Button audioHeadsetBtn;
     private Button presetGamingBtn;
     private Button presetMoviesBtn;
     private String selectedCodec = "mjpeg";
-    private String selectedAudio = "pc";
     private String selectedPreset = "gaming";
     private volatile boolean applyingRemote;
     private volatile boolean running;
@@ -144,13 +135,6 @@ public class DesktopLinkActivity extends AppCompatActivity implements SurfaceHol
     private int pendingAuGen;
     private volatile boolean waitForIdr = true;
     private Thread h264DecodeThread;
-    private Thread audioThread;
-    private volatile boolean wantAudio;
-    private DatagramSocket audioSocket;
-    private AudioTrack audioTrack;
-    private final Object audioLock = new Object();
-    private byte[] pendingPcm;
-    private int pendingPcmGen;
     /** JPEG uses lockCanvas; MPEG/AV1 use MediaCodec — switching without a surface recycle blacks the view. */
     private enum SurfaceProducer { NONE, CANVAS, MEDIA_CODEC }
     private volatile SurfaceProducer surfaceProducer = SurfaceProducer.NONE;
@@ -194,8 +178,6 @@ public class DesktopLinkActivity extends AppCompatActivity implements SurfaceHol
         codecJpegBtn = findViewById(R.id.desktop_link_codec_jpeg);
         codecMpegBtn = findViewById(R.id.desktop_link_codec_mpeg);
         codecAv1Btn = findViewById(R.id.desktop_link_codec_av1);
-        audioPcBtn = findViewById(R.id.desktop_link_audio_pc);
-        audioHeadsetBtn = findViewById(R.id.desktop_link_audio_headset);
         presetGamingBtn = findViewById(R.id.desktop_link_preset_gaming);
         presetMoviesBtn = findViewById(R.id.desktop_link_preset_movies);
         findViewById(R.id.desktop_link_min).setOnClickListener(v -> minimizeChrome());
@@ -229,7 +211,6 @@ public class DesktopLinkActivity extends AppCompatActivity implements SurfaceHol
 
         wireRemoteSliders();
         styleCodecChips();
-        styleAudioChips();
         stylePresetChips();
         updateRemoteLabels();
 
@@ -651,7 +632,6 @@ public class DesktopLinkActivity extends AppCompatActivity implements SurfaceHol
     private void stopStreamJoin() {
         wantStream = false;
         running = false;
-        stopAudio();
         synchronized (jpegLock) {
             pendingJpeg = null;
             pendingJpegGen++;
@@ -757,7 +737,6 @@ public class DesktopLinkActivity extends AppCompatActivity implements SurfaceHol
         if (surfaceReady && stereoToggle.isChecked()) {
             applyStereo(true);
         }
-        startAudio();
         if (linkCodec != LinkCodec.JPEG) {
             waitForIdr = true;
             h264DecodeThread = new Thread(this::compressedDecodeLoop, "DesktopLinkAuDec");
@@ -806,185 +785,6 @@ public class DesktopLinkActivity extends AppCompatActivity implements SurfaceHol
         });
     }
 
-    private void startAudio() {
-        stopAudio();
-        wantAudio = true;
-        audioThread = new Thread(this::audioLoop, "DesktopLinkAudio");
-        audioThread.start();
-    }
-
-    private void stopAudio() {
-        wantAudio = false;
-        synchronized (audioLock) {
-            pendingPcm = null;
-            pendingPcmGen++;
-            audioLock.notifyAll();
-        }
-        if (audioSocket != null) {
-            try {
-                audioSocket.close();
-            } catch (Exception ignored) {
-            }
-            audioSocket = null;
-        }
-        if (audioThread != null) {
-            try {
-                audioThread.interrupt();
-            } catch (Exception ignored) {
-            }
-            try {
-                audioThread.join(300);
-            } catch (Exception ignored) {
-            }
-            audioThread = null;
-        }
-        if (audioTrack != null) {
-            try {
-                audioTrack.stop();
-            } catch (Exception ignored) {
-            }
-            try {
-                audioTrack.release();
-            } catch (Exception ignored) {
-            }
-            audioTrack = null;
-        }
-    }
-
-    private void audioLoop() {
-        DatagramSocket socket = null;
-        AudioTrack track = null;
-        try {
-            socket = new DatagramSocket(AUDIO_PORT);
-            socket.setSoTimeout(200);
-            audioSocket = socket;
-            int minBuf = AudioTrack.getMinBufferSize(
-                    AUDIO_SAMPLE_RATE,
-                    AudioFormat.CHANNEL_OUT_STEREO,
-                    AudioFormat.ENCODING_PCM_16BIT);
-            int bufSize = Math.max(minBuf, AUDIO_SAMPLE_RATE / 50 * AUDIO_CHANNELS * 2 * 4);
-            track = new AudioTrack.Builder()
-                    .setAudioAttributes(new AudioAttributes.Builder()
-                            .setUsage(AudioAttributes.USAGE_MEDIA)
-                            .setContentType(AudioAttributes.CONTENT_TYPE_MOVIE)
-                            .build())
-                    .setAudioFormat(new AudioFormat.Builder()
-                            .setSampleRate(AUDIO_SAMPLE_RATE)
-                            .setChannelMask(AudioFormat.CHANNEL_OUT_STEREO)
-                            .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
-                            .build())
-                    .setBufferSizeInBytes(bufSize)
-                    .setTransferMode(AudioTrack.MODE_STREAM)
-                    .build();
-            track.play();
-            audioTrack = track;
-
-            byte[] recv = new byte[4 + AUDIO_SAMPLE_RATE / 50 * AUDIO_CHANNELS * 2 * 2];
-            DatagramPacket packet = new DatagramPacket(recv, recv.length);
-            long lastSeq = -1;
-            Thread player = new Thread(() -> {
-                int playGen = -1;
-                while (wantAudio && !Thread.currentThread().isInterrupted()) {
-                    byte[] pcm;
-                    int gen;
-                    synchronized (audioLock) {
-                        while (wantAudio && (pendingPcm == null || pendingPcmGen == playGen)) {
-                            try {
-                                audioLock.wait(20);
-                            } catch (InterruptedException e) {
-                                return;
-                            }
-                        }
-                        if (!wantAudio) {
-                            return;
-                        }
-                        pcm = pendingPcm;
-                        gen = pendingPcmGen;
-                        pendingPcm = null;
-                    }
-                    if (pcm == null || gen == playGen) {
-                        continue;
-                    }
-                    playGen = gen;
-                    // Odd length = corrupt / truncated UDP — skip (avoids channel swap static).
-                    if ((pcm.length & 1) != 0) {
-                        continue;
-                    }
-                    AudioTrack t = audioTrack;
-                    if (t != null) {
-                        try {
-                            t.write(pcm, 0, pcm.length);
-                        } catch (Exception ignored) {
-                        }
-                    }
-                }
-            }, "DesktopLinkAudioPlay");
-            player.setDaemon(true);
-            player.start();
-
-            while (wantAudio && !Thread.currentThread().isInterrupted()) {
-                try {
-                    socket.receive(packet);
-                } catch (SocketTimeoutException e) {
-                    continue;
-                }
-                int len = packet.getLength();
-                if (len <= 4) {
-                    continue;
-                }
-                byte[] data = packet.getData();
-                int off = packet.getOffset();
-                long seq = ((data[off] & 0xFFL) << 24)
-                        | ((data[off + 1] & 0xFFL) << 16)
-                        | ((data[off + 2] & 0xFFL) << 8)
-                        | (data[off + 3] & 0xFFL);
-                // Drop duplicates / reorders (unicast+broadcast leftovers, Wi-Fi retries).
-                if (lastSeq >= 0 && seq <= lastSeq) {
-                    continue;
-                }
-                lastSeq = seq;
-                int pcmLen = len - 4;
-                if ((pcmLen & 1) != 0) {
-                    continue;
-                }
-                byte[] pcm = new byte[pcmLen];
-                System.arraycopy(data, off + 4, pcm, 0, pcmLen);
-                synchronized (audioLock) {
-                    pendingPcm = pcm;
-                    pendingPcmGen++;
-                    audioLock.notifyAll();
-                }
-            }
-            player.interrupt();
-        } catch (Exception e) {
-            if (wantAudio) {
-                Log.w(TAG, "audio loop failed", e);
-            }
-        } finally {
-            if (track != null) {
-                try {
-                    track.stop();
-                } catch (Exception ignored) {
-                }
-                try {
-                    track.release();
-                } catch (Exception ignored) {
-                }
-            }
-            if (socket != null) {
-                try {
-                    socket.close();
-                } catch (Exception ignored) {
-                }
-            }
-            if (audioSocket == socket) {
-                audioSocket = null;
-            }
-            if (audioTrack == track) {
-                audioTrack = null;
-            }
-        }
-    }
 
     private void pumpMjpeg(String urlString) {
         while (wantStream && !Thread.currentThread().isInterrupted()) {
@@ -1761,16 +1561,6 @@ public class DesktopLinkActivity extends AppCompatActivity implements SurfaceHol
         codecJpegBtn.setOnClickListener(v -> selectCodec("mjpeg"));
         codecMpegBtn.setOnClickListener(v -> selectCodec("h264"));
         codecAv1Btn.setOnClickListener(v -> selectCodec("av1"));
-        audioPcBtn.setOnClickListener(v -> {
-            selectedAudio = "pc";
-            styleAudioChips();
-            pushRemoteSettings(false);
-        });
-        audioHeadsetBtn.setOnClickListener(v -> {
-            selectedAudio = "headset";
-            styleAudioChips();
-            pushRemoteSettings(false);
-        });
         presetGamingBtn.setOnClickListener(v -> {
             selectedPreset = "gaming";
             stylePresetChips();
@@ -1799,11 +1589,6 @@ public class DesktopLinkActivity extends AppCompatActivity implements SurfaceHol
         styleChip(codecJpegBtn, "mjpeg".equals(selectedCodec));
         styleChip(codecMpegBtn, "h264".equals(selectedCodec));
         styleChip(codecAv1Btn, "av1".equals(selectedCodec));
-    }
-
-    private void styleAudioChips() {
-        styleChip(audioPcBtn, "pc".equals(selectedAudio));
-        styleChip(audioHeadsetBtn, "headset".equals(selectedAudio));
     }
 
     private void stylePresetChips() {
@@ -1911,17 +1696,12 @@ public class DesktopLinkActivity extends AppCompatActivity implements SurfaceHol
                 else if ("mpeg".equals(c) || "h264".equals(c)) selectedCodec = "h264";
                 else if ("av1".equals(c)) selectedCodec = "av1";
             }
-            if (o.has("audio")) {
-                String a = o.optString("audio", selectedAudio).toLowerCase();
-                if ("pc".equals(a) || "headset".equals(a)) selectedAudio = a;
-            }
             if (o.has("depthPreset")) {
                 String p = o.optString("depthPreset", selectedPreset).toLowerCase();
                 if ("gaming".equals(p) || "movies".equals(p)) selectedPreset = p;
             }
             styleCodecChips();
-            styleAudioChips();
-            stylePresetChips();
+                stylePresetChips();
             updateRemoteLabels();
         } catch (Exception ignored) {
         } finally {
@@ -1959,7 +1739,6 @@ public class DesktopLinkActivity extends AppCompatActivity implements SurfaceHol
         final int depthSmooth = smoothSeek.getProgress();
         final int edgeClean = edgeSeek != null ? edgeSeek.getProgress() : 60;
         final String codec = selectedCodec;
-        final String audio = selectedAudio;
         final String depthPreset = selectedPreset;
         updateRemoteLabels();
         new Thread(() -> {
@@ -1976,7 +1755,6 @@ public class DesktopLinkActivity extends AppCompatActivity implements SurfaceHol
                 body.put("depthSmooth", depthSmooth);
                 body.put("edgeClean", edgeClean);
                 body.put("codec", codec);
-                body.put("audio", audio);
                 body.put("depthPreset", depthPreset);
                 byte[] bytes = body.toString().getBytes(StandardCharsets.UTF_8);
                 HttpURLConnection conn = (HttpURLConnection) new URL(url).openConnection();

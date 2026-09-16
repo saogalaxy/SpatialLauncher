@@ -24,7 +24,6 @@ public sealed class UserSettings
     public bool FullSbs { get; set; }
     public DepthPreset DepthPreset { get; set; } = DepthPreset.Gaming;
     public StreamCodec StreamCodec { get; set; } = StreamCodec.Mjpeg;
-    public Stream.AudioOutputMode AudioMode { get; set; } = Stream.AudioOutputMode.Pc;
     public double Divergence { get; set; } = 0.21;
     public double Convergence { get; set; } = 0.5;
     /// <summary>Target depth inferences per second (Gaming default ~20, Movies ~30).</summary>

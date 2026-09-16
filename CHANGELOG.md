@@ -26,10 +26,8 @@ Format: newest first. Dates are local (US).
 - Installer fetches DA3 models from Hugging Face when missing.
 
 ### Audio
-- **Headset copies PC speakers:** WASAPI loopback of the Windows default render device → UDP PCM `:8767` (s16le stereo 48 kHz). PC speakers stay on; Quest plays the same mix.
-- Unicast to the connected Quest IP; Quest drops duplicate sequence numbers.
-- Float loopback → explicit s16le conversion.
-- **Removed** Spatial Launcher Audio / virtual driver package, install scripts, and Sound UI sink picker (Secure Boot Code 52 made that path unreliable).
+- **Removed Desktop Link PC→Quest audio** (Sound UI, UDP `:8767`, WASAPI mirror, Quest AudioTrack). Video-only until a reliable path ships.
+- PC **Listen** (WASAPI → SenseVoice on the desktop) is unchanged.
 
 ### Quest build
 - **APK size fix:** stop packing Qwen (~986 MB) + SenseVoice (~1 GB) into the debug APK (AGP `packageDebug` **integer overflow** past ~2GB uncompressed). Piper + OPUS stay in the APK; Qwen/SenseVoice download on first headset use. Optional `-PpackHeavyModels=true`.

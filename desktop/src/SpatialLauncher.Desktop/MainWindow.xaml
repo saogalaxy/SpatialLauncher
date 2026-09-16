@@ -89,19 +89,6 @@
             <TextBlock x:Name="SharpenLabel" Text="Sharpen 25 — edge crispness before encode" Margin="0,6,0,2" FontSize="12"/>
             <Slider x:Name="SharpenSlider" Minimum="0" Maximum="80" Value="25" TickFrequency="1" IsSnapToTickEnabled="True" ValueChanged="SettingsChanged"/>
 
-            <!-- Audio / Sound section -->
-            <DockPanel Margin="0,14,0,2">
-              <Button DockPanel.Dock="Right" Content="Save" Padding="10,2" Margin="8,0,0,0"
-                      Tag="audio" Click="SaveSection_Click" ToolTip="Save audio settings"/>
-              <TextBlock Text="Sound" FontWeight="SemiBold" VerticalAlignment="Center"/>
-            </DockPanel>
-            <WrapPanel Margin="0,0,0,4">
-              <Button x:Name="AudioPc" Style="{StaticResource ChipButtonActive}" Content="PC speakers" Click="Audio_Click" Tag="pc"/>
-              <Button x:Name="AudioHeadset" Style="{StaticResource ChipButton}" Content="Headset" Click="Audio_Click" Tag="headset"/>
-            </WrapPanel>
-            <TextBlock x:Name="AudioSinkHint" TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" FontSize="10" Margin="0,0,0,6"
-                       Text="Headset copies whatever is playing on your Windows speakers to the Quest (both play). Start Session, connect Quest, tap Headset."/>
-
             <!-- 3D look section -->
             <DockPanel Margin="0,14,0,2">
               <Button DockPanel.Dock="Right" Content="Save" Padding="10,2" Margin="8,0,0,0"

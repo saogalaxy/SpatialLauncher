@@ -49,11 +49,7 @@ public partial class MainWindow : Window
         _session.StatusChanged += msg => Dispatcher.Invoke(() =>
         {
             StatusText.Text = msg;
-            if (msg.StartsWith("Audio", StringComparison.OrdinalIgnoreCase))
-            {
-                RefreshAudioHint();
-                UpdatePipelineLabel();
-            }
+            UpdatePipelineLabel();
         });
         _session.QuestLink.SettingsGetJson = () => SessionSettingsJson.ToJson(_settings);
         _session.QuestLink.SettingsApplyJson = json =>
@@ -336,16 +332,6 @@ public partial class MainWindow : Window
             QuestLinkUrlBox.Text = _session.QuestLinkUrl;
     }
 
-    private void Audio_Click(object sender, RoutedEventArgs e)
-    {
-        if (sender is not Button btn || btn.Tag is not string tag) return;
-        _settings.AudioMode = tag == "headset"
-            ? AudioOutputMode.Headset
-            : AudioOutputMode.Pc;
-        StyleAudioButtons();
-        SyncSettingsFromUi();
-    }
-
     private void SaveSection_Click(object sender, RoutedEventArgs e)
     {
         if (sender is not Button btn || btn.Tag is not string section) return;
@@ -356,14 +342,12 @@ public partial class MainWindow : Window
             string label = section switch
             {
                 "stream" => "Stream",
-                "audio" => "Sound",
                 "look3d" => "3D look",
                 "quest" => "Quest Link",
                 "reader" => "Reader",
                 _ => "Settings"
             };
             StatusText.Text = "Saved " + label + " settings";
-            RefreshAudioHint();
             UpdatePipelineLabel();
         }
         catch (Exception ex)
@@ -506,7 +490,6 @@ public partial class MainWindow : Window
         StyleEngineButtons();
         StylePresetButtons();
         StyleCodecButtons();
-        StyleAudioButtons();
     }
 
     private void StylePresetButtons()
@@ -520,31 +503,6 @@ public partial class MainWindow : Window
         SetChip(CodecMjpeg, _settings.StreamCodec == StreamCodec.Mjpeg);
         SetChip(CodecH264, _settings.StreamCodec == StreamCodec.H264);
         SetChip(CodecAv1, _settings.StreamCodec == StreamCodec.Av1);
-    }
-
-    private void StyleAudioButtons()
-    {
-        SetChip(AudioPc, _settings.AudioMode == AudioOutputMode.Pc);
-        SetChip(AudioHeadset, _settings.AudioMode == AudioOutputMode.Headset);
-        RefreshAudioHint();
-    }
-
-    private void RefreshAudioHint()
-    {
-        string active = _session.Audio.ActiveSinkName ?? "";
-        if (_settings.AudioMode == AudioOutputMode.Headset && !string.IsNullOrEmpty(active))
-        {
-            AudioSinkHint.Text = "Headset on · copying '" + active
-                + "' to Quest. PC speakers stay on.";
-        }
-        else if (_settings.AudioMode == AudioOutputMode.Headset)
-        {
-            AudioSinkHint.Text = "Headset will copy Windows speakers to Quest (both play). Start Session, connect Quest, tap Headset.";
-        }
-        else
-        {
-            AudioSinkHint.Text = "PC speakers only. Tap Headset to also send the same mix to Quest.";
-        }
     }
 
     private void StyleModeButtons()
@@ -581,12 +539,7 @@ public partial class MainWindow : Window
                                   StreamCodec.Av1 => "AV1",
                                   _ => "JPEG"
                               })
-                              + $" q{_settings.JpegQuality} sharp{_settings.SharpenPercent}"
-                              + (_settings.AudioMode == AudioOutputMode.Headset
-                                  ? (!string.IsNullOrEmpty(_session.Audio.ActiveSinkName)
-                                      ? " · audio→Quest (copy " + _session.Audio.ActiveSinkName + ")"
-                                      : " · audio→Quest (copy speakers)")
-                                  : " · audio→PC");
+                              + $" q{_settings.JpegQuality} sharp{_settings.SharpenPercent}";
     }
 
     private void ShutdownAll()

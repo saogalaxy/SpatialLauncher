@@ -248,9 +248,6 @@
     <string name="desktop_link_codec_jpeg">JPEG</string>
     <string name="desktop_link_codec_mpeg">MPEG</string>
     <string name="desktop_link_codec_av1">AV1</string>
-    <string name="desktop_link_audio">Audio</string>
-    <string name="desktop_link_audio_pc">PC speakers</string>
-    <string name="desktop_link_audio_headset">Headset</string>
     <string name="desktop_link_depth_preset">Depth model</string>
     <string name="desktop_link_preset_gaming">Gaming</string>
     <string name="desktop_link_preset_movies">Movies</string>

@@ -10,7 +10,7 @@ Product version: **0.1.0**. Repo: https://github.com/saogalaxy/SpatialLauncher
 | Surface | Role |
 |---------|------|
 | **Quest app** (`com.spatiallauncher.app`) | Horizon OS **2D floating panel**: cast + 3D depth, OCR→TTS, Listen, browser, My Books, and **Desktop Link** (thin SBS viewer) |
-| **Windows Desktop** | PC owns capture → depth → SBS → LAN stream; optional reader/Listen on PC; Headset audio mirror to Quest |
+| **Windows Desktop** | PC owns capture → depth → SBS → LAN **video** stream; optional reader/Listen on PC |
 | **Install tooling** | `Install to Quest.bat`, `Install Spatial Launcher Desktop.bat`, scripts under `tools/` |
 
 Spatial Launcher is **not** an immersive OpenXR title. Stereo on Quest uses Horizon OS surface APIs (reflection) and/or Desktop Link SBS.
@@ -106,7 +106,7 @@ Spatial Launcher is **not** an immersive OpenXR title. Stereo on Quest uses Hori
 | Package | Version | Used for |
 |---------|---------|----------|
 | Microsoft.ML.OnnxRuntime.DirectML | 1.19.2 | Depth Anything ONNX (GPU via DirectML) |
-| NAudio | 2.2.1 | WASAPI loopback, Headset UDP PCM |
+| NAudio | 2.2.1 | Listen WASAPI loopback + Piper WAV playback |
 | Vortice.MediaFoundation | 3.6.2 | H.264 / AV1 encode (Media Foundation) |
 | System.Drawing.Common | 8.0.8 | GDI capture / bitmaps |
 | System.Speech | 8.0.0 | SAPI TTS fallback |
@@ -117,7 +117,6 @@ Spatial Launcher is **not** an immersive OpenXR title. Stereo on Quest uses Hori
 Window/monitor pick → GDI capture → Depth Anything ONNX (DirectML)
   → SBS stereo warp → Quest Link TCP :8765
                       → LAN discovery UDP :8766
-                      → Headset audio UDP :8767 (optional)
 ```
 
 | Concern | Implementation |
@@ -129,6 +128,7 @@ Window/monitor pick → GDI capture → Depth Anything ONNX (DirectML)
 | Reader TTS | Piper preferred, SAPI fallback |
 | Listen | WASAPI → SenseVoice (when models present) → OPUS → Piper |
 | Tray | Session continues while minimized |
+| Desktop Link audio | **Not shipped** (removed; video-only for now) |
 
 ---
 
@@ -138,7 +138,6 @@ Window/monitor pick → GDI capture → Depth Anything ONNX (DirectML)
 |------|-----------|------|
 | **8765** | TCP (custom HTTP-ish) | Video `/sbs.mjpg`, `/sbs.h264`, `/sbs.av1`; `/status`, `/settings`; Book import (`/health`, `/import`) |
 | **8766** | UDP | Desktop discovery beacon + `SLD?` ping; Book import discovery |
-| **8767** | UDP | Headset audio (raw PCM) |
 
 ### Video (PC → Quest)
 
@@ -149,14 +148,7 @@ Window/monitor pick → GDI capture → Depth Anything ONNX (DirectML)
 
 ### Audio (PC → Quest)
 
-| Stage | What we use |
-|-------|-------------|
-| Capture | **WASAPI loopback** of Windows **default** render (PC speakers stay on) |
-| Encode | **None** — PCM **s16le**, stereo, **48 kHz**, ~10 ms frames (1920 bytes) |
-| Packet | `[seq u32 BE][pcm…]` on UDP **:8767** |
-| Dest | Unicast to Quest IP from the video TCP client (broadcast fallback) |
-
-Video stays on TCP **:8765**. No virtual audio driver, Opus/AAC, or RTP mux.
+**Removed.** Desktop Link is video-only for now. PC **Listen** mode (WASAPI → SenseVoice) is separate and stays on the PC.
 
 > “Opus” elsewhere in the product means **OPUS-MT** (Marian translation ONNX), not the Opus audio codec.
 
@@ -168,7 +160,7 @@ Video stays on TCP **:8765**. No virtual audio driver, Opus/AAC, or RTP mux.
 |-----------|--------|
 | Android NDK / C++ | None in tree; OpenCL declared for llama via native library uses |
 | OpenXR / cpp legacy | Not present in current tree |
-| Virtual audio driver | **Removed** — Headset copies PC speakers via WASAPI loopback |
+| Virtual audio / Link PCM | **Removed** — Desktop Link is video-only |
 
 ---
 
@@ -225,14 +217,13 @@ Approximate Desktop install size: **~900 MB** (app ~450 MB + depth models ~470 M
 ```text
 ┌──────────────────────────────── Quest (Java 17) ────────────────────────────────┐
 │  Panel: Cast/3D · OCR/Piper · OPUS-MT · SenseVoice · Browser/Qwen · My Books    │
-│  Desktop Link: MediaCodec (JPEG|H264|AV1) + AudioTrack PCM                       │
+│  Desktop Link: MediaCodec (JPEG|H264|AV1) video only                             │
 └────────────▲──────────────────────────────▲──────────────────────────▲───────────┘
-             │ TCP :8765 video/settings     │ UDP :8766 discovery      │ UDP :8767 PCM
-┌────────────┴──────────────────────────────┴──────────────────────────┴───────────┐
+             │ TCP :8765 video/settings     │ UDP :8766 discovery
+┌────────────┴──────────────────────────────┴──────────────────────────────────────┐
 │  Desktop (.NET 8 WPF)                                                            │
 │  GDI capture → DirectML Depth Anything → SBS → MF encode / MJPEG                 │
-│  NAudio WASAPI loopback → raw PCM copy to Quest                                  │
-│  Optional: PaddleOCR · Piper · SenseVoice · OPUS-MT                              │
+│  Optional: PaddleOCR · Piper · SenseVoice · OPUS-MT (PC reader/Listen)           │
 └──────────────────────────────────────────────────────────────────────────────────┘
 ```
 

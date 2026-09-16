@@ -13,7 +13,6 @@ public sealed class MirrorSession : IDisposable
     private readonly FrameCaptureService _capture = new();
     private readonly QuestLinkServer _questLink = new();
     private readonly DiscoveryAdvertiser _discovery = new();
-    private readonly AudioLinkStreamer _audio = new();
     private DepthEstimator? _depth;
     private UserSettings _settings = new();
     private readonly object _lock = new();
@@ -23,7 +22,6 @@ public sealed class MirrorSession : IDisposable
     private volatile bool _processing;
     private long _lastDepthTick;
     private float[,]? _cachedDepth;
-    private bool _audioHooked;
     private bool _questLinkStatusHooked;
 
     public event Action<Bitmap>? SbsFrameReady;
@@ -37,7 +35,6 @@ public sealed class MirrorSession : IDisposable
     public FrameCaptureService Capture => _capture;
     public QuestLinkServer QuestLink => _questLink;
     public DiscoveryAdvertiser Discovery => _discovery;
-    public AudioLinkStreamer Audio => _audio;
     public string? QuestLinkUrl => _questLink.AdvertiseUrl;
 
     public void ApplySettings(UserSettings settings)
@@ -58,37 +55,6 @@ public sealed class MirrorSession : IDisposable
 
         if (_settings.AdvertiseOnLan)
             EnsureLinkListening();
-
-        if (_processing)
-            SyncAudioUnlocked();
-        else if (_audio.IsRunning)
-            _audio.ApplyMode(AudioOutputMode.Pc);
-    }
-
-    private void EnsureAudioHooked()
-    {
-        if (_audioHooked) return;
-        _audio.StatusChanged += msg => StatusChanged?.Invoke(msg);
-        _questLink.ViewerAddressChanged += ip =>
-        {
-            try { _audio.SetQuestEndpoint(ip); } catch { /* ignore */ }
-        };
-        _audioHooked = true;
-    }
-
-    private void SyncAudioUnlocked()
-    {
-        EnsureAudioHooked();
-        try
-        {
-            if (_questLink.LastViewerAddress != null)
-                _audio.SetQuestEndpoint(_questLink.LastViewerAddress);
-            _audio.ApplyMode(_settings.AudioMode);
-        }
-        catch (Exception ex)
-        {
-            StatusChanged?.Invoke("Audio: " + ex.Message);
-        }
     }
 
     /// <summary>
@@ -150,12 +116,10 @@ public sealed class MirrorSession : IDisposable
         if (streamToQuest)
         {
             EnsureLinkListening();
-            SyncAudioUnlocked();
         }
         else
         {
             _questLink.Stop();
-            try { _audio.ApplyMode(AudioOutputMode.Pc); } catch { /* ignore */ }
         }
 
         if (_settings.AdvertiseOnLan && !string.IsNullOrEmpty(_questLink.AdvertiseUrl))
@@ -205,7 +169,6 @@ public sealed class MirrorSession : IDisposable
         _processing = false;
         _questLink.SessionActive = false;
         _capture.Stop();
-        try { _audio.ApplyMode(AudioOutputMode.Pc); } catch { /* ignore */ }
         try { _processThread?.Join(400); } catch { /* ignore */ }
         try { _depthThread?.Join(400); } catch { /* ignore */ }
         _processThread = null;
@@ -352,7 +315,6 @@ public sealed class MirrorSession : IDisposable
         Stop(keepLinkListening: false);
         _discovery.Dispose();
         _questLink.Dispose();
-        _audio.Dispose();
         _capture.Dispose();
     }
 }
