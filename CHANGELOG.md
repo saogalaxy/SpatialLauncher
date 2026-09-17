@@ -17,14 +17,18 @@ When changing Quest `DesktopLinkActivity` or PC `QuestLinkServer` / `MirrorSessi
 | **No stacked MEDIA_CODEC surface recreates** | Multiple pumps saw a briefly-invalid surface and all ran `MEDIA_CODEC→MEDIA_CODEC` recreate → black / incomplete surface | If producer is already the target: **wait up to 5s**, never tear down; only recreate when crossing JPEG (`lockCanvas`) ↔ MediaCodec |
 | **PC frees viewer slots on drop** | Write loops caught `IOException` and continued → zombie viewers; headset got **503 busy** and could not reconnect | On stream write failure: **break** the loop so `NoteViewerLeft` runs. Send timeout must be Wi‑Fi-tolerant (~8s), not 500ms |
 | **JPEG ↔ compressed surface producer** | Resetting `surfaceProducer` to `NONE` on reconnect skipped canvas→codec handoff; hide/show alone dropped BLAST | Keep producer across reconnect; **replace `SurfaceView`** only when crossing JPEG (`lockCanvas`) ↔ MediaCodec |
+| **No lockCanvas on MediaCodec surfaces** | After JPEG, `surfaceCreated`/`surfaceChanged` redrawn the last bitmap onto a fresh MediaCodec surface → BLAST stayed CPU (`cur=2`) so configure failed `already connected (cur=2 req=3)` | Arm **`allowLockCanvas=false`** + clear `latestFrame` before MPEG/AV1; never `lockCanvas` while producer is `MEDIA_CODEC` |
+| **Reuse decoder / detach BLAST** | Releasing + reconfiguring MediaCodec every HTTP reconnect left sticky BLAST consumers | Reuse live decoder across reconnects; `setOutputSurface(null)` before release; recover with SurfaceView replace only on configure failure |
+| **Audio survives video reconnect** | Stopping Opus UDP on every codec/mode reconnect raced the surface and left audio behind after backlog | Keep receiver across video reconnect; **`flush()` jitter** on reconnect; full `stop()` only on Disconnect |
+| **H.264 encode must not force every-AU sync** | `AllSamplesIndependent` + every-frame key hint produced ~300 B mushy AUs while AV1 stayed healthy | Prefer hardware H.264 MFT; periodic ~1 Hz keys; higher MPEG bitrate; signal encode FPS = present (**72**) |
 | **PC codec epoch closes old path cleanly** | Clients hung on the wrong `/sbs.*` after a codec change | Bump codec epoch; return **409** with the correct `stream` path; Quest follows redirect / reconnects once |
 
-**Quick regression check (headset + PC session running):** JPEG → MPEG → AV1 → JPEG; Gaming → Movies → Gaming; kill Wi‑Fi briefly and confirm auto-reconnect without tapping Connect.
+**Quick regression check (headset + PC session running):** JPEG → MPEG → AV1 → JPEG; Gaming → Movies → Gaming; kill Wi‑Fi briefly and confirm auto-reconnect without tapping Connect. Confirm Headset audio stays in sync across codec switches.
 
 ### Desktop Link / streaming
-- **Headset audio (Opus):** WASAPI loopback → Concentus Opus @ 48 kHz / 128 kbps → UDP `:8767` unicast to the connected Quest. Quest jitter buffer (~80 ms) + PLC. Default Sound mode is **Headset** (PC speakers still play). Not OPUS-MT translate.
-- **Reconnect:** PC writers exit on write failure (free slots); send timeout 8s; max 3 viewers. Quest: slot-free wait, stall watchdog with grace, backoff on drop/503, rediscover until live.
-- **Codec/mode switch:** grace window + `streamGen` + codec-matched discovery + no stacked MediaCodec recreates (see invariants above). Watchdog must not kill a live pump (2026-09-15 regression).
+- **Headset audio (Opus):** WASAPI loopback → Concentus Opus @ 48 kHz / 128 kbps → UDP `:8767` unicast to the connected Quest. Quest jitter buffer (~20–80 ms) + PLC. Default Sound mode is **Headset** (PC speakers still play). Not OPUS-MT translate. Video reconnect **flushes** jitter (does not tear down the socket).
+- **Reconnect / codec surface:** grace + `streamGen` + codec-matched discovery; no lockCanvas on MediaCodec surfaces; reuse decoder with BLAST detach; no stacked MediaCodec recreates (see invariants above).
+- **H.264 quality:** drop `AllSamplesIndependent`; prefer hardware MFT; ~1 Hz keyframes; bitrate curve ~4–18 Mbps (+ MPEG bump); encode signals **72 Hz** to match present.
 - **Toolbar declutter:** TTS prev/play/pause/stop/next sit in a dock pill that **pops up on hover** over the speaker (manual TTS). Browser (globe) and My Books hide only while **Share** is on.
 - **AV1 encode fix (PC):** hardware AV1 MFTs are async — unlock + event pump (`NeedInput`/`HaveOutput`) and honor `OutputStreamProvidesSamples`. Previously Ensure succeeded but Encode always returned empty.
 - AV1 `av1C` exposed on `GET /status` for Quest MediaCodec `csd-0`.
@@ -57,10 +61,12 @@ When changing Quest `DesktopLinkActivity` or PC `QuestLinkServer` / `MirrorSessi
 ### Defaults
 - Stream width **1920**, JPEG quality **85**, sharpen **25**, **3D pop 21%**.
 
-### Known issues (2026-09-15)
+### Known issues (2026-09-16)
 - If a PC has no AV1 hardware encoder, status shows encode error — use MPEG/JPEG.
 - Desktop Link launched while the panel is stopped/not focused will wait for a surface; put on the headset and look at the panel if the stream does not start.
-- ~~Codec/Gaming↔Movies switch dropped the headset stream~~ — **fixed** (see invariants above).
+- JPEG often still looks sharper than MPEG at the same quality slider; prefer **AV1** on Quest 3 when Wi‑Fi allows.
+- Sharpen applies to **JPEG only** (skipped for MPEG/AV1 to save CPU).
+- Full SBS still subtracts 8 from the quality slider for all codecs (load relief).
 
 ## 2026-09-14 — Test notes (codec flow)
 

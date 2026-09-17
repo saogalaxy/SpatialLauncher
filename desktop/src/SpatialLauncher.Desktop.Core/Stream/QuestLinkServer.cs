@@ -160,10 +160,15 @@ public sealed class QuestLinkServer : IDisposable
                 byte[]? bytes;
                 if (_codec == StreamCodec.H264)
                 {
-                    int kbps = JpegQualityToBitrateKbps(JpegQuality);
+                    // MPEG needs more bits than AV1 at the same perceived sharpness.
+                    int kbps = Math.Max(6000, JpegQualityToBitrateKbps(JpegQuality) + 2000);
                     _h264.Ensure(src.Width, src.Height, kbps);
-                    bytes = _h264.Encode(src, forceKeyFrame: true);
-                    _lastKeyTick = Environment.TickCount64;
+                    long now = Environment.TickCount64;
+                    // Key ~1 Hz — every-frame "key" + AllSamplesIndependent was crushing quality.
+                    bool wantKey = _lastKeyTick == 0 || now - _lastKeyTick >= 1000;
+                    bytes = _h264.Encode(src, forceKeyFrame: wantKey);
+                    if (wantKey)
+                        _lastKeyTick = now;
                 }
                 else if (_codec == StreamCodec.Av1)
                 {
@@ -227,7 +232,8 @@ public sealed class QuestLinkServer : IDisposable
     private static int JpegQualityToBitrateKbps(int jpegQuality)
     {
         int q = Math.Clamp(jpegQuality, 50, 98);
-        return 2000 + (q - 50) * 250; // ~2–14 Mbps
+        // ~4–18 Mbps — room for Full SBS / 72 Hz without looking softer than JPEG.
+        return 4000 + (q - 50) * 300;
     }
 
     private static string CodecDisplayName(StreamCodec codec) => codec switch

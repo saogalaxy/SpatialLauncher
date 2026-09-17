@@ -435,7 +435,9 @@ public partial class MainWindow : Window
         StreamWidthLabel.Text = "Stream width " + _settings.StreamWidth + " — capture size sent to Quest";
         if (_settings.StreamCodec is StreamCodec.H264 or StreamCodec.Av1)
         {
-            int kbps = 2000 + (Math.Clamp(_settings.JpegQuality, 50, 98) - 50) * 250;
+            int kbps = 4000 + (Math.Clamp(_settings.JpegQuality, 50, 98) - 50) * 300;
+            if (_settings.StreamCodec == StreamCodec.H264)
+                kbps = Math.Max(6000, kbps + 2000);
             string codecName = _settings.StreamCodec == StreamCodec.Av1 ? "AV1" : "H.264";
             JpegQualityLabel.Text = "Video quality " + _settings.JpegQuality + " (~" + kbps + " kbps " + codecName + ")";
         }

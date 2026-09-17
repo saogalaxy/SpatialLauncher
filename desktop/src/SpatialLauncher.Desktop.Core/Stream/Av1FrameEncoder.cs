@@ -409,7 +409,8 @@ public sealed class Av1FrameEncoder : IDisposable
 
     private void CreateEncoder(int width, int height, int bitrate)
     {
-        uint fps = (uint)Math.Clamp(FramePacing.TargetFps, 24, 60);
+        // Match present cadence (72) — same as H.264 / FramePacing.
+        uint fps = (uint)Math.Clamp(FramePacing.TargetFps, 24, 120);
         var activates = EnumAv1Encoders();
         IMFTransform? transform = null;
         Exception? last = null;

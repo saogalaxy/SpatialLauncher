@@ -144,6 +144,8 @@ public class DesktopLinkActivity extends AppCompatActivity implements SurfaceHol
     private Bitmap latestFrame;
     private volatile LinkCodec linkCodec = LinkCodec.JPEG;
     private MediaCodec videoDecoder;
+    /** Mime currently configured on {@link #videoDecoder}, or null when idle. */
+    private volatile String videoDecoderMime;
     private final Object decoderLock = new Object();
     private final Object auLock = new Object();
     private byte[] pendingAu;
@@ -153,6 +155,12 @@ public class DesktopLinkActivity extends AppCompatActivity implements SurfaceHol
     /** JPEG uses lockCanvas; MPEG/AV1 use MediaCodec — switching without a surface recycle blacks the view. */
     private enum SurfaceProducer { NONE, CANVAS, MEDIA_CODEC }
     private volatile SurfaceProducer surfaceProducer = SurfaceProducer.NONE;
+    /**
+     * When false, never lockCanvas. surfaceCreated/Changed used to redraw the last JPEG onto a
+     * freshly recreated MediaCodec surface, leaving BLAST on CPU (cur=2) so configure fails with
+     * "already connected (cur=2 req=3)".
+     */
+    private volatile boolean allowLockCanvas = true;
     private final Object surfaceGate = new Object();
     private int surfaceGeneration;
     private View.OnHoverListener surfaceHoverReveal;
@@ -478,6 +486,12 @@ public class DesktopLinkActivity extends AppCompatActivity implements SurfaceHol
             surfaceProducer = next;
             return;
         }
+        if (next == SurfaceProducer.MEDIA_CODEC) {
+            // Must arm before any surfaceCreated/Changed callback from recreate.
+            setCanvasDrawAllowed(false);
+        } else if (next == SurfaceProducer.CANVAS) {
+            setCanvasDrawAllowed(true);
+        }
         boolean surfaceOk = isSurfaceValid();
         if (surfaceProducer == next && surfaceOk) {
             surfaceReady = true;
@@ -624,9 +638,11 @@ public class DesktopLinkActivity extends AppCompatActivity implements SurfaceHol
             setStatus(getString(R.string.desktop_link_stereo_unavailable));
             return;
         }
-        // Lock buffer to laid-out size after composition so lockCanvas matches the
-        // panel (same handoff as PanelMainActivity). Bump then restore to force a
-        // clean buffer when switching stereo on/off.
+        // Fixed-size buffers are for lockCanvas (JPEG). MediaCodec needs the native
+        // stream resolution — pinning to panel size softens MPEG/AV1 in 3D.
+        if (surfaceProducer == SurfaceProducer.MEDIA_CODEC || !allowLockCanvas) {
+            return;
+        }
         int w = surfaceView.getWidth();
         int h = surfaceView.getHeight();
         if (w > 0 && h > 0 && surfaceHolder != null) {
@@ -739,6 +755,14 @@ public class DesktopLinkActivity extends AppCompatActivity implements SurfaceHol
 
     /** Stop pumps and wait briefly so the PC viewer slot frees before reconnect. */
     private void stopStreamJoin() {
+        stopStreamJoin(false);
+    }
+
+    /**
+     * @param stopAudio when false (reconnect / codec switch), keep Opus UDP alive so
+     *                  mode switches do not tear down headset audio or race the surface.
+     */
+    private void stopStreamJoin(boolean stopAudio) {
         streamGen++;
         wantStream = false;
         running = false;
@@ -764,9 +788,18 @@ public class DesktopLinkActivity extends AppCompatActivity implements SurfaceHol
         joinQuiet(w, 1200);
         joinQuiet(d, 600);
         joinQuiet(h, 600);
-        try {
-            audioReceiver.stop();
-        } catch (Exception ignored) {
+        if (stopAudio) {
+            try {
+                audioReceiver.stop();
+            } catch (Exception ignored) {
+            }
+        } else if (audioReceiver.isRunning()) {
+            // Video restarted; keep the socket but drop backlog so headset audio
+            // does not stay a beat behind the new stream.
+            try {
+                audioReceiver.flush();
+            } catch (Exception ignored) {
+            }
         }
         releaseDecoder();
         // Keep surfaceProducer as-is. Resetting to NONE made JPEG→AV1 look like a
@@ -844,6 +877,9 @@ public class DesktopLinkActivity extends AppCompatActivity implements SurfaceHol
         lastMediaTick = System.currentTimeMillis();
         reconnectGraceUntil = System.currentTimeMillis() + RECONNECT_GRACE_MS;
         linkCodec = detectCodec(url);
+        // Arm before stereo setFixedSize → surfaceChanged, which used to lockCanvas
+        // the MediaCodec surface with a leftover JPEG and poison BLAST.
+        setCanvasDrawAllowed(linkCodec == LinkCodec.JPEG);
         updateConnectButtonLabel();
         status.setText(R.string.desktop_link_connecting);
         probeSessionStatus(url);
@@ -861,14 +897,15 @@ public class DesktopLinkActivity extends AppCompatActivity implements SurfaceHol
             worker = new Thread(() -> pumpMjpeg(url, gen), "DesktopLinkMjpeg");
         }
         worker.start();
-        // Opus UDP listen starts with video so PC unicast has a ready socket.
-        try {
-            audioReceiver.start();
-        } catch (Exception e) {
-            Log.w(TAG, "audio start failed", e);
+        // Opus UDP: start once; keep across video reconnect / codec / Gaming↔Movies.
+        if (!audioReceiver.isRunning()) {
+            try {
+                audioReceiver.start();
+            } catch (Exception e) {
+                Log.w(TAG, "audio start failed", e);
+            }
+            postAudioHeadsetPreference();
         }
-        // Ask PC for Headset mode so mirror starts without a PC chip tap.
-        postAudioHeadsetPreference();
     }
 
     private void postAudioHeadsetPreference() {
@@ -932,7 +969,7 @@ public class DesktopLinkActivity extends AppCompatActivity implements SurfaceHol
     private void stopStream() {
         streamDesired = false;
         reconnectScheduled = false;
-        stopStreamJoin();
+        stopStreamJoin(true);
         main.removeCallbacks(hideChromeRunnable);
         main.post(() -> {
             if (!streamDesired) {
@@ -965,6 +1002,7 @@ public class DesktopLinkActivity extends AppCompatActivity implements SurfaceHol
             LinkCodec detected = detectCodec(urlString);
             if (detected != LinkCodec.JPEG) {
                 linkCodec = detected;
+                setCanvasDrawAllowed(false);
                 waitForIdr = true;
                 if (h264DecodeThread == null || !h264DecodeThread.isAlive()) {
                     h264DecodeThread = new Thread(() -> compressedDecodeLoop(gen), "DesktopLinkAuDec");
@@ -974,6 +1012,7 @@ public class DesktopLinkActivity extends AppCompatActivity implements SurfaceHol
                 return;
             }
             linkCodec = LinkCodec.JPEG;
+            setCanvasDrawAllowed(true);
             long before = lastMediaTick;
             readMjpegOnce(urlString);
             if (streamGen != gen) {
@@ -1032,6 +1071,7 @@ public class DesktopLinkActivity extends AppCompatActivity implements SurfaceHol
             LinkCodec detected = detectCodec(urlString);
             if (detected == LinkCodec.JPEG) {
                 linkCodec = LinkCodec.JPEG;
+                setCanvasDrawAllowed(true);
                 if (decodeThread == null || !decodeThread.isAlive()) {
                     decodeThread = new Thread(() -> decodeLoop(gen), "DesktopLinkDecode");
                     decodeThread.start();
@@ -1040,13 +1080,15 @@ public class DesktopLinkActivity extends AppCompatActivity implements SurfaceHol
                 return;
             }
             linkCodec = detected;
+            setCanvasDrawAllowed(false);
             long before = lastMediaTick;
             readCompressedOnce(urlString, detected);
             if (streamGen != gen) {
                 break;
             }
-            releaseDecoder();
             if (pendingRedirectUrl != null) {
+                // Path/codec change — drop decoder so the next mime can configure cleanly.
+                releaseDecoder();
                 urlString = pendingRedirectUrl;
                 pendingRedirectUrl = null;
                 failStreak = 0;
@@ -1158,7 +1200,8 @@ public class DesktopLinkActivity extends AppCompatActivity implements SurfaceHol
                 setStatus(label + " surface not ready");
                 return;
             }
-            releaseDecoder();
+            // Reuse a live decoder — releasing every HTTP reconnect left the Quest
+            // BLAST surface "already connected" and mode/codec switches went black.
             if (!ensureDecoder(codec)) {
                 setStatus(label + " decoder unavailable");
                 return;
@@ -1409,54 +1452,114 @@ public class DesktopLinkActivity extends AppCompatActivity implements SurfaceHol
     }
 
     private boolean ensureDecoder(LinkCodec codec) {
+        String wantMime = codec == LinkCodec.AV1
+                ? MediaFormat.MIMETYPE_VIDEO_AV1
+                : MediaFormat.MIMETYPE_VIDEO_AVC;
         synchronized (decoderLock) {
-            if (videoDecoder != null) {
+            if (videoDecoder != null && wantMime.equals(videoDecoderMime)) {
                 return true;
             }
-            try {
-                Surface surface = surfaceHolder != null ? surfaceHolder.getSurface() : null;
-                if (surface == null || !surface.isValid()) {
-                    Log.w(TAG, "decoder init skipped: surface invalid");
-                    return false;
-                }
-                String mime = codec == LinkCodec.AV1
-                        ? MediaFormat.MIMETYPE_VIDEO_AV1
-                        : MediaFormat.MIMETYPE_VIDEO_AVC;
-                // SBS stream is typically ~1920x540–1080; allow adaptive size.
-                MediaFormat format = MediaFormat.createVideoFormat(mime, 1920, 1080);
-                format.setInteger(MediaFormat.KEY_MAX_INPUT_SIZE, 2 * 1024 * 1024);
-                try {
-                    format.setInteger(MediaFormat.KEY_MAX_WIDTH, 3840);
-                    format.setInteger(MediaFormat.KEY_MAX_HEIGHT, 2160);
-                } catch (Exception ignored) {
-                }
-                try {
-                    format.setInteger("low-latency", 1);
-                } catch (Exception ignored) {
-                }
-                try {
-                    format.setInteger(MediaFormat.KEY_PRIORITY, 0);
-                } catch (Exception ignored) {
-                }
-                try {
-                    format.setFloat(MediaFormat.KEY_OPERATING_RATE, 120f);
-                } catch (Exception ignored) {
-                }
-                if (codec == LinkCodec.AV1 && pendingAv1C != null && pendingAv1C.length > 0) {
-                    format.setByteBuffer("csd-0", ByteBuffer.wrap(pendingAv1C));
-                }
-                MediaCodec decoder = createVideoDecoder(mime, codec == LinkCodec.AV1);
-                decoder.configure(format, surface, null, 0);
-                decoder.start();
-                videoDecoder = decoder;
-                Log.i(TAG, "decoder started mime=" + mime
-                        + " csd0=" + (pendingAv1C != null ? pendingAv1C.length : 0));
-                return true;
-            } catch (Exception e) {
-                Log.e(TAG, "decoder init failed", e);
-                videoDecoder = null;
+            if (videoDecoder != null) {
+                releaseDecoderLocked();
+            }
+            Surface surface = surfaceHolder != null ? surfaceHolder.getSurface() : null;
+            if (surface == null || !surface.isValid()) {
+                Log.w(TAG, "decoder init skipped: surface invalid");
                 return false;
             }
+            if (configureDecoderLocked(codec, wantMime, surface)) {
+                return true;
+            }
+            Log.w(TAG, "decoder configure failed — recovering surface");
+        }
+        if (!recoverMediaCodecSurface()) {
+            return false;
+        }
+        synchronized (decoderLock) {
+            Surface surface = surfaceHolder != null ? surfaceHolder.getSurface() : null;
+            if (surface == null || !surface.isValid()) {
+                return false;
+            }
+            return configureDecoderLocked(codec, wantMime, surface);
+        }
+    }
+
+    private boolean configureDecoderLocked(LinkCodec codec, String mime, Surface surface) {
+        MediaCodec decoder = null;
+        try {
+            // SBS stream is typically ~1920x540–1080; allow adaptive size.
+            MediaFormat format = MediaFormat.createVideoFormat(mime, 1920, 1080);
+            format.setInteger(MediaFormat.KEY_MAX_INPUT_SIZE, 2 * 1024 * 1024);
+            try {
+                format.setInteger(MediaFormat.KEY_MAX_WIDTH, 3840);
+                format.setInteger(MediaFormat.KEY_MAX_HEIGHT, 2160);
+            } catch (Exception ignored) {
+            }
+            try {
+                format.setInteger("low-latency", 1);
+            } catch (Exception ignored) {
+            }
+            try {
+                format.setInteger(MediaFormat.KEY_PRIORITY, 0);
+            } catch (Exception ignored) {
+            }
+            try {
+                format.setFloat(MediaFormat.KEY_OPERATING_RATE, 120f);
+            } catch (Exception ignored) {
+            }
+            if (codec == LinkCodec.AV1 && pendingAv1C != null && pendingAv1C.length > 0) {
+                format.setByteBuffer("csd-0", ByteBuffer.wrap(pendingAv1C));
+            }
+            decoder = createVideoDecoder(mime, codec == LinkCodec.AV1);
+            decoder.configure(format, surface, null, 0);
+            decoder.start();
+            videoDecoder = decoder;
+            videoDecoderMime = mime;
+            Log.i(TAG, "decoder started mime=" + mime
+                    + " csd0=" + (pendingAv1C != null ? pendingAv1C.length : 0));
+            return true;
+        } catch (Exception e) {
+            Log.e(TAG, "decoder configure failed", e);
+            if (decoder != null) {
+                try {
+                    decoder.release();
+                } catch (Exception ignored) {
+                }
+            }
+            videoDecoder = null;
+            videoDecoderMime = null;
+            return false;
+        }
+    }
+
+    private void setCanvasDrawAllowed(boolean allowed) {
+        allowLockCanvas = allowed;
+        if (!allowed) {
+            clearLatestFrame();
+        }
+    }
+
+    private void clearLatestFrame() {
+        synchronized (drawLock) {
+            if (latestFrame != null) {
+                latestFrame.recycle();
+                latestFrame = null;
+            }
+        }
+    }
+
+    /**
+     * Force a real SurfaceView replace so BLAST drops a sticky MediaCodec consumer.
+     * Used only when configure fails with "already connected".
+     */
+    private boolean recoverMediaCodecSurface() {
+        synchronized (surfaceRecreateLock) {
+            releaseDecoder();
+            // Pretend we were on CANVAS so MEDIA_CODEC triggers recreate (same-producer
+            // path intentionally never tears down the view).
+            surfaceProducer = SurfaceProducer.CANVAS;
+            ensureSurfaceProducerLocked(SurfaceProducer.MEDIA_CODEC);
+            return isSurfaceValid();
         }
     }
 
@@ -1531,16 +1634,33 @@ public class DesktopLinkActivity extends AppCompatActivity implements SurfaceHol
 
     private void releaseDecoder() {
         synchronized (decoderLock) {
-            if (videoDecoder != null) {
-                try {
-                    videoDecoder.stop();
-                } catch (Exception ignored) {
-                }
-                try {
-                    videoDecoder.release();
-                } catch (Exception ignored) {
-                }
-                videoDecoder = null;
+            releaseDecoderLocked();
+        }
+    }
+
+    private void releaseDecoderLocked() {
+        if (videoDecoder != null) {
+            MediaCodec codec = videoDecoder;
+            videoDecoder = null;
+            videoDecoderMime = null;
+            try {
+                // Detach BLAST consumer before stop/release — prevents
+                // "connect: already connected" on the next configure.
+                codec.setOutputSurface(null);
+            } catch (Exception ignored) {
+            }
+            try {
+                codec.stop();
+            } catch (Exception ignored) {
+            }
+            try {
+                codec.release();
+            } catch (Exception ignored) {
+            }
+            try {
+                Thread.sleep(40);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
             }
         }
     }
@@ -1681,6 +1801,9 @@ public class DesktopLinkActivity extends AppCompatActivity implements SurfaceHol
     }
 
     private void redrawLatest() {
+        if (!allowLockCanvas || surfaceProducer == SurfaceProducer.MEDIA_CODEC) {
+            return;
+        }
         if (!surfaceReady || surfaceHolder == null) {
             return;
         }

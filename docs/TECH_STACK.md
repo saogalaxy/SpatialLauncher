@@ -78,7 +78,7 @@ Spatial Launcher is **not** an immersive OpenXR title. Stereo on Quest uses Hori
 | Listen | Cast audio → SenseVoice → OPUS (optional) → Piper |
 | Browser | Widevine WebView; on-device Qwen or Google Translate |
 | My Books | EPUB shelf; LAN import HTTP |
-| Desktop Link | MediaCodec JPEG / H.264 / AV1 + UDP PCM playback |
+| Desktop Link | MediaCodec JPEG / H.264 / AV1 + Opus UDP `:8767` |
 
 ### Meta / Horizon
 
@@ -147,10 +147,12 @@ Window/monitor pick → GDI capture → Depth Anything ONNX (DirectML)
 - Custom length-prefixed or MJPEG multipart over TCP  
 - Quest decodes with **MediaCodec** (AV1 prefers low-latency QTI decoder when available)  
 - Codec can hot-swap JPEG ↔ H.264 ↔ AV1 via settings / URL  
+- Present / capture target **72 Hz**; H.264/AV1 MFTs signal the same frame rate  
+- Quest never `lockCanvas` on a MediaCodec SurfaceView (JPEG canvas vs compressed are separate producers)  
 
 ### Audio (PC → Quest)
 
-**Opus headset mirror** (Concentus on PC + Quest): WASAPI loopback of the Windows default render device → 20 ms Opus frames @ ~128 kbps → unicast UDP `:8767` to the connected viewer. Quest keeps an ~80 ms jitter buffer and uses Opus PLC on gaps. PC speakers remain audible by design.
+**Opus headset mirror** (Concentus on PC + Quest): WASAPI loopback of the Windows default render device → 20 ms Opus frames @ ~128 kbps → unicast UDP `:8767` to the connected viewer. Quest keeps a small jitter buffer (~20–80 ms) and uses Opus PLC on gaps. Video reconnect **flushes** the jitter queue without closing the socket. PC speakers remain audible by design.
 
 > Product chip **OPUS** elsewhere means **OPUS-MT** (Marian translation ONNX), not this Opus audio codec.
 
@@ -219,13 +221,13 @@ Approximate Desktop install size: **~900 MB** (app ~450 MB + depth models ~470 M
 ```text
 ┌──────────────────────────────── Quest (Java 17) ────────────────────────────────┐
 │  Panel: Cast/3D · OCR/Piper · OPUS-MT · SenseVoice · Browser/Qwen · My Books    │
-│  Desktop Link: MediaCodec (JPEG|H264|AV1) video only                             │
+│  Desktop Link: MediaCodec (JPEG|H264|AV1) + Opus UDP :8767                       │
 └────────────▲──────────────────────────────▲──────────────────────────▲───────────┘
-             │ TCP :8765 video/settings     │ UDP :8766 discovery
-┌────────────┴──────────────────────────────┴──────────────────────────────────────┐
+             │ TCP :8765 video/settings     │ UDP :8766 discovery      │ UDP :8767 audio
+┌────────────┴──────────────────────────────┴──────────────────────────┴───────────┐
 │  Desktop (.NET 8 WPF)                                                            │
 │  GDI capture → DirectML Depth Anything → SBS → MF encode / MJPEG                 │
-│  Optional: PaddleOCR · Piper · SenseVoice · OPUS-MT (PC reader/Listen)           │
+│  WASAPI → Concentus Opus → :8767 · Optional: PaddleOCR · Piper · SenseVoice      │
 └──────────────────────────────────────────────────────────────────────────────────┘
 ```
 

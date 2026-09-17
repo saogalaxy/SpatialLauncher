@@ -44,6 +44,10 @@ final class DesktopLinkAudioReceiver {
     private long packetsRecv;
     private long packetsPlayed;
 
+    boolean isRunning() {
+        return running;
+    }
+
     void start() {
         stop();
         running = true;
@@ -82,6 +86,18 @@ final class DesktopLinkAudioReceiver {
         recvThread.start();
         playThread.start();
         Log.i(TAG, "Audio receive started on UDP " + PORT);
+    }
+
+    /** Drop queued Opus and resync playout — use on video reconnect without tearing UDP down. */
+    void flush() {
+        synchronized (lock) {
+            jitter.clear();
+            nextSeq = -1;
+            firstPtsUs = -1;
+            startedAtMs = System.currentTimeMillis();
+            lock.notifyAll();
+        }
+        Log.i(TAG, "audio jitter flushed");
     }
 
     void stop() {

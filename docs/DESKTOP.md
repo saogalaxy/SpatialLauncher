@@ -47,6 +47,10 @@ flowchart LR
 
 Codec / Gaming↔Movies switches and reconnect must stay live. Full invariants and regression checklist: [CHANGELOG.md](../CHANGELOG.md) § *Desktop Link — invariants (do not regress)*.
 
+**Codec tips:** JPEG is sharpest; **AV1** is the preferred compressed path on Quest 3; MPEG (H.264) is compatibility. Sharpen is JPEG-only. Full SBS still drops quality by 8 on the shared slider (all codecs).
+
+**Audio:** Headset Opus stays up across video reconnect/codec switches (jitter flush only). Allow UDP **8767**.
+
 ## Depth presets
 
 | Preset | Model | Default |

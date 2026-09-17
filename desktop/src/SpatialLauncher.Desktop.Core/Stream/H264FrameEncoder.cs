@@ -80,7 +80,8 @@ public sealed class H264FrameEncoder : IDisposable
                 _forceHeader = true;
             }
 
-            if (forceKeyFrame)
+            bool wantKey = forceKeyFrame || _forceHeader;
+            if (wantKey)
                 _forceHeader = true;
 
             byte[] nv12 = BgraToNv12(bitmap, _width, _height);
@@ -98,6 +99,18 @@ public sealed class H264FrameEncoder : IDisposable
             input.AddBuffer(inBuf);
             input.SampleTime = time;
             input.SampleDuration = duration;
+            if (wantKey)
+            {
+                try
+                {
+                    // Hint IDR — works on NVENC/QSV/AMF MFTs that honor CleanPoint.
+                    input.Set(SampleAttributeKeys.CleanPoint, 1);
+                }
+                catch
+                {
+                    // optional
+                }
+            }
 
             try
             {
@@ -186,8 +199,8 @@ public sealed class H264FrameEncoder : IDisposable
 
     private void CreateEncoder(int width, int height, int bitrate)
     {
-        // Cap signaled rate — many MFTs accept 72 but behave better at ≤60.
-        uint fps = (uint)Math.Clamp(FramePacing.TargetFps, 24, 60);
+        // Match present cadence (72) — capping at 60 made encode timing drift vs capture.
+        uint fps = (uint)Math.Clamp(FramePacing.TargetFps, 24, 120);
         var activates = EnumH264Encoders();
         IMFTransform? transform = null;
         Exception? last = null;
@@ -224,8 +237,8 @@ public sealed class H264FrameEncoder : IDisposable
                     MediaFactory.MFSetAttributeRatio(outType, MediaTypeAttributeKeys.FrameRate, fps, 1u);
                     outType.Set(MediaTypeAttributeKeys.AvgBitrate, (uint)bitrate);
                     outType.Set(MediaTypeAttributeKeys.InterlaceMode, (uint)VideoInterlaceMode.Progressive);
-                    // All samples independent → encoder can emit IDR-friendly low-latency stream.
-                    outType.Set(MediaTypeAttributeKeys.AllSamplesIndependent, 1u);
+                    // Do NOT set AllSamplesIndependent — that forces every AU to a sync
+                    // sample on many MFTs and collapses quality to mushy ~300-byte frames.
                     candidate.SetOutputType(0, outType, 0);
 
                     using var inType = MediaFactory.MFCreateMediaType();
@@ -273,11 +286,11 @@ public sealed class H264FrameEncoder : IDisposable
             GuidSubtype = VideoFormatGuids.H264
         };
 
-        // Prefer sync local MFTs, then fall back to anything available.
+        // Prefer hardware (NVENC/AMF/QSV), then sync software, then anything.
         uint[] flagSets =
         {
-            (uint)(EnumFlag.EnumFlagSortandfilter | EnumFlag.EnumFlagSyncmft | EnumFlag.EnumFlagLocalmft),
             (uint)(EnumFlag.EnumFlagSortandfilter | EnumFlag.EnumFlagLocalmft | EnumFlag.EnumFlagHardware),
+            (uint)(EnumFlag.EnumFlagSortandfilter | EnumFlag.EnumFlagSyncmft | EnumFlag.EnumFlagLocalmft),
             (uint)(EnumFlag.EnumFlagSortandfilter | EnumFlag.EnumFlagAll)
         };
 
