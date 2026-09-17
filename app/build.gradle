@@ -88,6 +88,9 @@ dependencies {
     // Listen talk turns: same bundled OPUS-MT as OCR (see ListenMtTranslator / TranslateMtService).
     // Do NOT add com.google.mlkit:translate — it pulls Play Services model downloads.
 
+    // Desktop Link PC→Quest audio: Opus decode (not OPUS-MT translate).
+    implementation 'io.github.jaredmdobson:concentus:1.0.2'
+
     // Piper first so pickFirst libonnxruntime.so is sherpa's (OrtGetApiBase).
     implementation 'com.github.k2-fsa.sherpa-onnx:sherpa-onnx:v1.13.5'
     implementation 'com.microsoft.onnxruntime:onnxruntime-android:1.17.3'

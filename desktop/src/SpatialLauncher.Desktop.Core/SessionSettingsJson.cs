@@ -44,6 +44,12 @@ public static class SessionSettingsJson
                 target.EdgeCleanPercent = Math.Clamp(patch.EdgeClean.Value, 0, 100);
             if (!string.IsNullOrWhiteSpace(patch.Codec))
                 target.StreamCodec = ParseCodec(patch.Codec);
+            if (!string.IsNullOrWhiteSpace(patch.Audio))
+            {
+                target.AudioMode = patch.Audio.Contains("headset", StringComparison.OrdinalIgnoreCase)
+                    ? Stream.AudioOutputMode.Headset
+                    : Stream.AudioOutputMode.Pc;
+            }
             if (!string.IsNullOrWhiteSpace(patch.DepthPreset))
             {
                 target.DepthPreset = patch.DepthPreset.Contains("movie", StringComparison.OrdinalIgnoreCase)
@@ -98,6 +104,7 @@ public static class SessionSettingsJson
         public int? DepthSmooth { get; set; }
         public int? EdgeClean { get; set; }
         public string? Codec { get; set; }
+        public string? Audio { get; set; }
         public string? DepthPreset { get; set; }
 
         public Dict() { }
@@ -115,6 +122,7 @@ public static class SessionSettingsJson
             DepthSmooth = s.DepthTemporalSmoothPercent;
             EdgeClean = s.EdgeCleanPercent;
             Codec = CodecLabel(s.StreamCodec);
+            Audio = s.AudioMode == Stream.AudioOutputMode.Headset ? "headset" : "pc";
             DepthPreset = s.DepthPreset == global::SpatialLauncher.Desktop.Core.DepthPreset.Movies
                 ? "movies"
                 : "gaming";

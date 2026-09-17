@@ -137,6 +137,7 @@ public class DesktopLinkActivity extends AppCompatActivity implements SurfaceHol
     private volatile boolean stereoApplied;
     private Thread worker;
     private Thread discoverThread;
+    private final DesktopLinkAudioReceiver audioReceiver = new DesktopLinkAudioReceiver();
     private final Handler main = new Handler(Looper.getMainLooper());
     private final Object drawLock = new Object();
     private final Paint paint = new Paint(Paint.FILTER_BITMAP_FLAG);
@@ -763,6 +764,10 @@ public class DesktopLinkActivity extends AppCompatActivity implements SurfaceHol
         joinQuiet(w, 1200);
         joinQuiet(d, 600);
         joinQuiet(h, 600);
+        try {
+            audioReceiver.stop();
+        } catch (Exception ignored) {
+        }
         releaseDecoder();
         // Keep surfaceProducer as-is. Resetting to NONE made JPEG→AV1 look like a
         // cold start and skip the canvas→MediaCodec recycle, which drops the stream.
@@ -856,6 +861,39 @@ public class DesktopLinkActivity extends AppCompatActivity implements SurfaceHol
             worker = new Thread(() -> pumpMjpeg(url, gen), "DesktopLinkMjpeg");
         }
         worker.start();
+        // Opus UDP listen starts with video so PC unicast has a ready socket.
+        try {
+            audioReceiver.start();
+        } catch (Exception e) {
+            Log.w(TAG, "audio start failed", e);
+        }
+        // Ask PC for Headset mode so mirror starts without a PC chip tap.
+        postAudioHeadsetPreference();
+    }
+
+    private void postAudioHeadsetPreference() {
+        new Thread(() -> {
+            try {
+                String url = settingsUrl();
+                if (url == null) {
+                    return;
+                }
+                JSONObject body = new JSONObject();
+                body.put("audio", "headset");
+                HttpURLConnection c = (HttpURLConnection) new URL(url).openConnection();
+                c.setConnectTimeout(2000);
+                c.setReadTimeout(2000);
+                c.setRequestMethod("POST");
+                c.setDoOutput(true);
+                c.setRequestProperty("Content-Type", "application/json");
+                byte[] bytes = body.toString().getBytes(StandardCharsets.UTF_8);
+                c.getOutputStream().write(bytes);
+                c.getResponseCode();
+                c.disconnect();
+            } catch (Exception e) {
+                Log.w(TAG, "audio preference POST failed", e);
+            }
+        }, "DesktopLinkAudioPref").start();
     }
 
     private static LinkCodec detectCodec(String url) {

@@ -77,6 +77,19 @@
             <TextBlock TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" FontSize="10" Margin="0,0,0,6"
                        Text="Switch anytime. Quest Desktop Link follows the advertised URL (reconnect if already live). AV1 needs Quest 3 / 3S."/>
 
+            <!-- Audio / Sound section -->
+            <DockPanel Margin="0,14,0,2">
+              <Button DockPanel.Dock="Right" Content="Save" Padding="10,2" Margin="8,0,0,0"
+                      Tag="audio" Click="SaveSection_Click" ToolTip="Save audio settings"/>
+              <TextBlock Text="Sound" FontWeight="SemiBold" VerticalAlignment="Center"/>
+            </DockPanel>
+            <WrapPanel Margin="0,0,0,4">
+              <Button x:Name="AudioPc" Style="{StaticResource ChipButton}" Content="PC speakers" Click="Audio_Click" Tag="pc"/>
+              <Button x:Name="AudioHeadset" Style="{StaticResource ChipButtonActive}" Content="Headset" Click="Audio_Click" Tag="headset"/>
+            </WrapPanel>
+            <TextBlock x:Name="AudioSinkHint" TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" FontSize="10" Margin="0,0,0,6"
+                       Text="Headset mirrors PC speakers to Quest as Opus over UDP (both play). Start Session, connect Quest."/>
+
             <CheckBox x:Name="Live3dCheck" Content="Live 3D — depth warp on PC" IsChecked="True" Margin="0,2,0,2" Checked="SettingsChanged" Unchecked="SettingsChanged"/>
             <CheckBox x:Name="FullSbsCheck" Content="Full SBS — for Virtual Desktop / Immersed" Margin="0,2,0,2" Checked="SettingsChanged" Unchecked="SettingsChanged"/>
             <TextBlock TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" FontSize="10" Margin="0,0,0,6"

@@ -1,3 +1,5 @@
+using SpatialLauncher.Desktop.Core.Stream;
+
 namespace SpatialLauncher.Desktop.Core;
 
 public enum DepthPreset
@@ -24,6 +26,8 @@ public sealed class UserSettings
     public bool FullSbs { get; set; }
     public DepthPreset DepthPreset { get; set; } = DepthPreset.Gaming;
     public StreamCodec StreamCodec { get; set; } = StreamCodec.Mjpeg;
+    /// <summary>Desktop Link: PC speakers only, or also mirror to Quest (Opus UDP).</summary>
+    public AudioOutputMode AudioMode { get; set; } = AudioOutputMode.Headset;
     public double Divergence { get; set; } = 0.21;
     public double Convergence { get; set; } = 0.5;
     /// <summary>Target depth inferences per second (Gaming default ~20, Movies ~30).</summary>

@@ -22,6 +22,7 @@ When changing Quest `DesktopLinkActivity` or PC `QuestLinkServer` / `MirrorSessi
 **Quick regression check (headset + PC session running):** JPEG → MPEG → AV1 → JPEG; Gaming → Movies → Gaming; kill Wi‑Fi briefly and confirm auto-reconnect without tapping Connect.
 
 ### Desktop Link / streaming
+- **Headset audio (Opus):** WASAPI loopback → Concentus Opus @ 48 kHz / 128 kbps → UDP `:8767` unicast to the connected Quest. Quest jitter buffer (~80 ms) + PLC. Default Sound mode is **Headset** (PC speakers still play). Not OPUS-MT translate.
 - **Reconnect:** PC writers exit on write failure (free slots); send timeout 8s; max 3 viewers. Quest: slot-free wait, stall watchdog with grace, backoff on drop/503, rediscover until live.
 - **Codec/mode switch:** grace window + `streamGen` + codec-matched discovery + no stacked MediaCodec recreates (see invariants above). Watchdog must not kill a live pump (2026-09-15 regression).
 - **Toolbar declutter:** TTS prev/play/pause/stop/next sit in a dock pill that **pops up on hover** over the speaker (manual TTS). Browser (globe) and My Books hide only while **Share** is on.
@@ -44,7 +45,7 @@ When changing Quest `DesktopLinkActivity` or PC `QuestLinkServer` / `MirrorSessi
 - Installer fetches DA3 models from Hugging Face when missing.
 
 ### Audio
-- **Removed Desktop Link PC→Quest audio** (Sound UI, UDP `:8767`, WASAPI mirror, Quest AudioTrack). Video-only until a reliable path ships.
+- **Removed Desktop Link PC→Quest raw-PCM audio** (old Sound UI / UDP PCM). Replaced later by Opus Headset path (see Unreleased).
 - PC **Listen** (WASAPI → SenseVoice on the desktop) is unchanged.
 
 ### Quest build

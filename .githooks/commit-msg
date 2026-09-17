@@ -1,0 +1,11 @@
+#!/bin/sh
+# Strip accidental Co-authored-by trailers before the commit is finalized.
+msg_file="$1"
+[ -n "$msg_file" ] || exit 0
+[ -f "$msg_file" ] || exit 0
+
+tmp="${msg_file}.strip"
+# -i = case insensitive; keep all other lines
+grep -iv '^[[:space:]]*Co-authored-by:' "$msg_file" > "$tmp" || true
+mv "$tmp" "$msg_file"
+exit 0

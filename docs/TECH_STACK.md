@@ -106,7 +106,8 @@ Spatial Launcher is **not** an immersive OpenXR title. Stereo on Quest uses Hori
 | Package | Version | Used for |
 |---------|---------|----------|
 | Microsoft.ML.OnnxRuntime.DirectML | 1.19.2 | Depth Anything ONNX (GPU via DirectML) |
-| NAudio | 2.2.1 | Listen WASAPI loopback + Piper WAV playback |
+| NAudio | 2.2.1 | Listen WASAPI + Desktop Link Opus mirror + Piper WAV |
+| Concentus | 2.2.2 | Opus audio encode for Desktop Link `:8767` |
 | Vortice.MediaFoundation | 3.6.2 | H.264 / AV1 encode (Media Foundation) |
 | System.Drawing.Common | 8.0.8 | GDI capture / bitmaps |
 | System.Speech | 8.0.0 | SAPI TTS fallback |
@@ -126,9 +127,9 @@ Window/monitor pick → GDI capture → Depth Anything ONNX (DirectML)
 | Stream codecs | MJPEG (multipart), H.264 (Annex-B length-prefixed), AV1 (OBU length-prefixed) |
 | Reader OCR | PaddleOCR CLI if present, else Windows OCR |
 | Reader TTS | Piper preferred, SAPI fallback |
-| Listen | WASAPI → SenseVoice (when models present) → OPUS → Piper |
+| Listen | WASAPI → SenseVoice (when models present) → OPUS-MT → Piper |
 | Tray | Session continues while minimized |
-| Desktop Link audio | **Not shipped** (removed; video-only for now) |
+| Desktop Link audio | WASAPI → Concentus Opus → UDP `:8767` → Quest jitter + AudioTrack |
 
 ---
 
@@ -138,6 +139,7 @@ Window/monitor pick → GDI capture → Depth Anything ONNX (DirectML)
 |------|-----------|------|
 | **8765** | TCP (custom HTTP-ish) | Video `/sbs.mjpg`, `/sbs.h264`, `/sbs.av1`; `/status`, `/settings`; Book import (`/health`, `/import`) |
 | **8766** | UDP | Desktop discovery beacon + `SLD?` ping; Book import discovery |
+| **8767** | UDP | Desktop Link headset audio (Opus packets) |
 
 ### Video (PC → Quest)
 
@@ -148,9 +150,9 @@ Window/monitor pick → GDI capture → Depth Anything ONNX (DirectML)
 
 ### Audio (PC → Quest)
 
-**Removed.** Desktop Link is video-only for now. PC **Listen** mode (WASAPI → SenseVoice) is separate and stays on the PC.
+**Opus headset mirror** (Concentus on PC + Quest): WASAPI loopback of the Windows default render device → 20 ms Opus frames @ ~128 kbps → unicast UDP `:8767` to the connected viewer. Quest keeps an ~80 ms jitter buffer and uses Opus PLC on gaps. PC speakers remain audible by design.
 
-> “Opus” elsewhere in the product means **OPUS-MT** (Marian translation ONNX), not the Opus audio codec.
+> Product chip **OPUS** elsewhere means **OPUS-MT** (Marian translation ONNX), not this Opus audio codec.
 
 ---
 
@@ -160,7 +162,7 @@ Window/monitor pick → GDI capture → Depth Anything ONNX (DirectML)
 |-----------|--------|
 | Android NDK / C++ | None in tree; OpenCL declared for llama via native library uses |
 | OpenXR / cpp legacy | Not present in current tree |
-| Virtual audio / Link PCM | **Removed** — Desktop Link is video-only |
+| Virtual audio driver | **Removed** — Headset uses WASAPI loopback + Opus instead |
 
 ---
 

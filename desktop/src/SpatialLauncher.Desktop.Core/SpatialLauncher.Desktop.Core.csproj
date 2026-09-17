@@ -8,6 +8,7 @@
     <UseWindowsForms>true</UseWindowsForms>
   </PropertyGroup>
   <ItemGroup>
+    <PackageReference Include="Concentus" Version="2.2.2" />
     <PackageReference Include="Microsoft.ML.OnnxRuntime.DirectML" Version="1.19.2" />
     <PackageReference Include="NAudio" Version="2.2.1" />
     <PackageReference Include="System.Drawing.Common" Version="8.0.8" />

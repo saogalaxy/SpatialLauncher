@@ -30,16 +30,18 @@ flowchart LR
   sbs[Half or Full SBS]
   http[HTTP video :8765]
   udp[UDP beacon :8766]
+  aud[UDP Opus audio :8767]
   quest[Quest thin Desktop Link]
   pick --> cap --> depth --> sbs --> http --> quest
   http --> udp
   udp --> quest
+  http --> aud --> quest
 ```
 
-1. PC: **Start Session** (Stream to Quest + Advertise on LAN). Minimize to tray OK.  
-2. Quest: toolbar **monitor** → auto-find → Connect with **3D on**.  
+1. PC: **Start Session** (Stream to Quest + Advertise on LAN). Sound defaults to **Headset** (Opus mirror). Minimize to tray OK.  
+2. Quest: toolbar **monitor** → auto-find → Connect with **3D on**. Audio starts with the video session.  
 3. Paste URL only if discovery fails (firewall / AP isolation).  
-4. Desktop Link is **video only** (no PC→Quest audio yet).
+4. Allow **UDP 8767** (and TCP 8765 / UDP 8766) through Windows Firewall on the LAN profile. PC speakers stay on while Headset mirrors — mute speakers if you want Quest-only.
 
 ## Desktop Link — do not regress
 

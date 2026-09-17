@@ -43,6 +43,10 @@ public sealed class QuestLinkServer : IDisposable
     public bool SessionActive { get; set; }
     public int ViewerCount => _viewerCount;
     private int _viewerCount;
+    private IPAddress? _lastViewerAddress;
+    /// <summary>LAN address of the most recent Quest video client (for audio unicast).</summary>
+    public IPAddress? LastViewerAddress => _lastViewerAddress;
+    public event Action<IPAddress?>? ViewerAddressChanged;
     public StreamCodec Codec
     {
         get => _codec;
@@ -75,6 +79,8 @@ public sealed class QuestLinkServer : IDisposable
     public Func<string>? SettingsGetJson { get; set; }
     /// <summary>POST /settings body → apply; return updated JSON or null on failure.</summary>
     public Func<string, string?>? SettingsApplyJson { get; set; }
+    /// <summary>Optional audio diagnostics blob for GET /status.</summary>
+    public Func<string>? AudioDebugJson { get; set; }
 
     public event Action<string>? StatusChanged;
 
@@ -281,8 +287,16 @@ public sealed class QuestLinkServer : IDisposable
                         if (cfg is { Length: > 0 })
                             av1c = ",\"av1c\":\"" + Convert.ToBase64String(cfg) + "\"";
                     }
+                    string audioDiag = "";
+                    try
+                    {
+                        // MirrorSession wires Audio; optional hook avoids Core→Session cycle.
+                        if (AudioDebugJson != null)
+                            audioDiag = ",\"audio\":" + AudioDebugJson();
+                    }
+                    catch { /* ignore */ }
                     byte[] statusBody = Encoding.UTF8.GetBytes(
-                        $"{{\"ok\":true,\"stream\":\"{streamPath}\",\"settings\":\"/settings\",\"port\":{_port},\"codec\":\"{codec}\",\"sessionActive\":{session},\"viewers\":{_viewerCount},\"lastPayloadBytes\":{_lastPayloadBytes}{err}{av1c}}}");
+                        $"{{\"ok\":true,\"stream\":\"{streamPath}\",\"settings\":\"/settings\",\"port\":{_port},\"codec\":\"{codec}\",\"sessionActive\":{session},\"viewers\":{_viewerCount},\"lastPayloadBytes\":{_lastPayloadBytes},\"audioPort\":{AudioLinkStreamer.DefaultPort},\"audioCodec\":\"opus\",\"viewer\":\"{(_lastViewerAddress?.ToString() ?? "")}\"{audioDiag}{err}{av1c}}}");
                     WriteHttp(stream, "200 OK", "application/json", statusBody);
                     return;
                 }
@@ -445,6 +459,7 @@ public sealed class QuestLinkServer : IDisposable
             catch { /* client gone */ }
             return false;
         }
+        NoteViewerAddress(client);
         StatusChanged?.Invoke(
             SessionActive
                 ? $"Quest connected ({n}) · streaming"
@@ -452,9 +467,40 @@ public sealed class QuestLinkServer : IDisposable
         return true;
     }
 
+    private void NoteViewerAddress(TcpClient client)
+    {
+        try
+        {
+            if (client.Client.RemoteEndPoint is IPEndPoint ep)
+            {
+                var addr = ep.Address;
+                try
+                {
+                    if (addr.IsIPv4MappedToIPv6)
+                        addr = addr.MapToIPv4();
+                }
+                catch
+                {
+                    // keep original
+                }
+                _lastViewerAddress = addr;
+                ViewerAddressChanged?.Invoke(_lastViewerAddress);
+            }
+        }
+        catch
+        {
+            // ignore
+        }
+    }
+
     private void NoteViewerLeft()
     {
         int n = Math.Max(0, Interlocked.Decrement(ref _viewerCount));
+        if (n == 0)
+        {
+            _lastViewerAddress = null;
+            ViewerAddressChanged?.Invoke(null);
+        }
         StatusChanged?.Invoke(
             n > 0
                 ? $"Quest viewers: {n}"
