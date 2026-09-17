@@ -57,7 +57,7 @@ When changing Quest `DesktopLinkActivity` or PC `QuestLinkServer` / `MirrorSessi
 
 ### Docs
 - Added [docs/TECH_STACK.md](docs/TECH_STACK.md) (platforms, libraries, ports, models, audio/video path).
-- Desktop Link help ([docs/HELP.md](docs/HELP.md) + in-app string): codecs, Headset audio, Gaming/Movies, firewall ports.
+- Desktop Link help split: Quest [HELP.md](docs/HELP.md) / in-app covers headset panel controls; [DESKTOP.md](docs/DESKTOP.md) covers PC Stream / Sound / 3D look / Quest Link settings.
 
 ### Defaults
 - Stream width **1920**, JPEG quality **85**, sharpen **25**, **3D pop 21%**.

@@ -39,26 +39,57 @@ flowchart LR
 ```
 
 1. PC: **Start Session** (Stream to Quest + Advertise on LAN). Sound defaults to **Headset** (Opus mirror). Minimize to tray OK.  
-2. Quest: toolbar **monitor** → auto-find → Connect with **3D on**. Audio starts with the video session.  
+2. Quest: toolbar **monitor** → auto-find → **Headset 3D on**. Audio starts with the video session.  
 3. Paste URL only if discovery fails (firewall / AP isolation).  
-4. Allow **UDP 8767** (and TCP 8765 / UDP 8766) through Windows Firewall on the LAN profile. PC speakers stay on while Headset mirrors — mute speakers if you want Quest-only.
+4. Allow **TCP 8765**, **UDP 8766** (discovery), **UDP 8767** (audio) on the Windows Firewall LAN profile. PC speakers stay on while Headset mirrors — mute speakers for Quest-only.
+
+Quest button/slider help: [HELP.md](HELP.md) § Desktop Link.
+
+## PC settings (Spatial Launcher Desktop)
+
+Use **Save** on each section to persist to `%LocalAppData%\SpatialLauncherDesktop\user_settings.json`. Quest can push the same knobs while streaming.
+
+### Stream
+
+| Control | Default | Notes |
+|---------|---------|--------|
+| **Gaming / Movies** | Gaming | Gaming = DA-V2 ViT-S ~20 Hz. Movies = DA3 (+ fallbacks), higher depth Hz |
+| **JPEG / MPEG / AV1** | JPEG | JPEG sharpest. **AV1** preferred compressed on Quest 3/3S. MPEG = H.264 compatibility |
+| **Live 3D** | On | PC depth warp into SBS |
+| **Full SBS** | Off | Off = Half SBS for Spatial Launcher. On = Full SBS for Virtual Desktop / Immersed (drops quality slider by 8) |
+| **Stream width** | 1920 | 1280–2560 capture width |
+| **Video / JPEG quality** | 85 | Also maps to H.264/AV1 bitrate (~4–18 Mbps; MPEG gets an extra bump) |
+| **Sharpen** | 25 | JPEG only (skipped for MPEG/AV1) |
+
+### Sound
+
+| Control | Default | Notes |
+|---------|---------|--------|
+| **PC speakers** | — | Local only |
+| **Headset** | On | WASAPI loopback → Opus UDP `:8767` to Quest (both play). Stays up across video reconnect; jitter flushes on codec switch |
+
+### 3D look
+
+| Control | Default | Notes |
+|---------|---------|--------|
+| **3D pop** | 21% | Divergence / how far things stick out |
+| **Focus plane** | 50% | Convergence — lower if eyestrain / screen feels close |
+| **Depth refresh** | 20 Hz (Gaming) | How often depth updates (Movies preset raises this) |
+| **Motion ghosting** | 25% | Temporal depth blend — lower = cleaner moving people |
+| **Edge smear clean** | 60% | Higher reduces halos around people |
+
+### Quest Link
+
+| Control | Default | Notes |
+|---------|---------|--------|
+| **Stream to Quest** | On | Enables TCP `:8765` when session runs |
+| **Advertise on LAN** | On | UDP `:8766` beacon for Quest auto-find |
+| **Minimize to tray** | On | Session keeps running |
+| **Quest Link URL** | read-only | Advertised stream path (`/sbs.mjpg`, `/sbs.h264`, or `/sbs.av1`) |
 
 ## Desktop Link — do not regress
 
-Codec / Gaming↔Movies switches and reconnect must stay live. Full invariants and regression checklist: [CHANGELOG.md](../CHANGELOG.md) § *Desktop Link — invariants (do not regress)*.
-
-**Codec tips:** JPEG is sharpest; **AV1** is the preferred compressed path on Quest 3; MPEG (H.264) is compatibility. Sharpen is JPEG-only. Full SBS still drops quality by 8 on the shared slider (all codecs).
-
-**Audio:** Headset Opus stays up across video reconnect/codec switches (jitter flush only). Allow UDP **8767**.
-
-## Depth presets
-
-| Preset | Model | Default |
-|--------|--------|---------|
-| **Gaming** | Depth Anything V2 ViT-S | ~20 Hz depth + temporal smooth · fast warp |
-| **Movies** | Depth Anything 3 Base (+ Small / DA-V2 Base fallback) | higher quality · forward-fill SBS + hole inpaint |
-
-Adjustable: divergence, convergence, depth Hz, temporal smooth, Half/Full SBS.
+Codec / Gaming↔Movies switches and reconnect must stay live. Full invariants: [CHANGELOG.md](../CHANGELOG.md) § *Desktop Link — invariants (do not regress)*.
 
 ## Reader on PC
 

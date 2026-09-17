@@ -75,7 +75,7 @@
               <Button x:Name="CodecAv1" Style="{StaticResource ChipButton}" Content="AV1" Click="Codec_Click" Tag="av1"/>
             </WrapPanel>
             <TextBlock TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" FontSize="10" Margin="0,0,0,6"
-                       Text="Switch anytime. Quest Desktop Link follows the advertised URL (reconnect if already live). AV1 needs Quest 3 / 3S."/>
+                       Text="JPEG = sharpest. AV1 = best compressed on Quest 3/3S. MPEG = H.264 compatibility. Quest follows the advertised URL; reconnect if already live."/>
 
             <!-- Audio / Sound section -->
             <DockPanel Margin="0,14,0,2">

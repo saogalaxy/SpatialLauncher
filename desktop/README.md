@@ -26,9 +26,11 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\desktop_easy_install
 ## Use with Quest
 
 1. **PC:** Start Session (Stream to Quest + Advertise on LAN). Sound defaults to **Headset** (Opus → UDP 8767). Tray minimize OK.  
-2. **Quest:** monitor toolbar → **Find PC** / auto-connect with **3D on**  
-3. Same Wi‑Fi. Manual URL is fallback only. Prefer **AV1** on Quest 3; JPEG for max sharpness.  
-4. Firewall: TCP **8765**, UDP **8766** (discovery), UDP **8767** (audio).
+2. **Quest:** monitor toolbar → auto-connect → **Headset 3D on**  
+3. Same Wi‑Fi. Manual URL is fallback only.  
+4. Firewall: TCP **8765**, UDP **8766**, UDP **8767**.
+
+PC knobs (codec, quality, Gaming/Movies, 3D look, Sound): see [docs/DESKTOP.md](../docs/DESKTOP.md). Quest panel controls: [docs/HELP.md](../docs/HELP.md) § Desktop Link.
 
 ## Depth
 
