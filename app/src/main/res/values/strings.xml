@@ -42,7 +42,7 @@
     <string name="help_start_books_title">7. Open or import a book</string>
     <string name="help_start_books_body">Tap book = My Books shelf (tap again or Close to dismiss). Tap a title to open it. Tap book again while reading to close. Long-press book = PC import on/off.</string>
     <string name="help_start_desktop_link_title">8. Desktop Link (PC → Quest)</string>
-    <string name="help_start_desktop_link_body">Needs the free Spatial Launcher Desktop app on your Windows PC (not built into the headset). Download from github.com/saogalaxy/SpatialLauncher — run Install Spatial Launcher Desktop.bat, Start Session, then on Quest tap the monitor button. Same Wi‑Fi. PC owns depth + OCR/TTS; Quest shows SBS in 3D.</string>
+    <string name="help_start_desktop_link_body">Needs the free Spatial Launcher Desktop app on your Windows PC (not built into the headset). Download from github.com/saogalaxy/SpatialLauncher — run Install Spatial Launcher Desktop.bat, Start Session (Headset sound on), then on Quest tap the monitor button. Same Wi‑Fi. PC owns depth + OCR/TTS; Quest shows SBS in 3D. Pick JPEG (sharpest), AV1 (Quest 3), or MPEG; Gaming/Movies switch depth live.</string>
 
     <string name="help_dl_intro_title">Optional network</string>
     <string name="help_dl_intro_body">Core cast / OCR / Listen / TTS / on-device page Translate work offline from the APK. Only the items below need Wi‑Fi when you use them.</string>
