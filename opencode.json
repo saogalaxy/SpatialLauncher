@@ -1,0 +1,10 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "metavr": {
+      "type": "local",
+      "command": ["npx", "-y", "metavr@latest", "mcp", "server"],
+      "enabled": true
+    }
+  }
+}
