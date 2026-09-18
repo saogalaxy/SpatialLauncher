@@ -66,6 +66,15 @@ def draw_title(canvas, text, cx, cy, px, fill=(255, 255, 255, 255)):
     d.text((cx, cy), text, font=f, fill=fill, anchor="mm")
 
 
+def draw_title_wrapped(canvas, cx, cy, px, fill=(255, 255, 255, 255)):
+    """Two-line lockup ('Spatial' / 'Launcher') hugging the art mark."""
+    d = ImageDraw.Draw(canvas)
+    f = title_font(px)
+    lh = int(px * 1.04)
+    d.text((cx, cy - lh // 2), "Spatial", font=f, fill=fill, anchor="mm")
+    d.text((cx, cy + lh // 2), "Launcher", font=f, fill=fill, anchor="mm")
+
+
 # All focal art + titles are composed inside a 12% inset on every side
 # (Meta safe-area / bleed practice). Nothing important touches an edge.
 
@@ -74,17 +83,17 @@ def cover(w, h, art_h_ratio=0.50, title_px=None, art_cy_ratio=0.38,
           title_cy_ratio=0.78, side_by_side=False):
     canvas = vgradient(w, h, NAVY_TOP, NAVY_BOTTOM)
     if side_by_side:
-        ax, tx = int(w * 0.26), int(w * 0.64)
+        ax, tx = int(w * 0.26), int(w * 0.62)
         glow(canvas, ax, h // 2, int(w * 0.13), int(h * 0.28))
         paste_center(canvas, art, ax, h // 2, int(h * art_h_ratio))
-        draw_title(canvas, TITLE, tx, h // 2, title_px or int(h * 0.13))
+        draw_title_wrapped(canvas, tx, h // 2, title_px or int(h * 0.10))
     else:
         ax = w // 2
         ay = int(h * art_cy_ratio)
         glow(canvas, ax, ay, int(w * 0.24), int(h * 0.20))
         paste_center(canvas, art, ax, ay, int(h * art_h_ratio))
-        draw_title(canvas, TITLE, ax, int(h * title_cy_ratio),
-                   title_px or int(h * 0.095))
+        draw_title_wrapped(canvas, ax, int(h * title_cy_ratio),
+                           title_px or int(h * 0.075))
     return canvas.convert("RGB")
 
 
@@ -111,7 +120,7 @@ print("spatialized-fg-180.png", fg.size)
 save(cover(3000, 900, art_h_ratio=0.66, side_by_side=True), "hero-3000x900.png")
 save(cover(2560, 1440, art_h_ratio=0.50), "cover-landscape.png")
 save(cover(1440, 1440, art_h_ratio=0.46, art_cy_ratio=0.36, title_cy_ratio=0.78,
-           title_px=100), "cover-square.png")
+           title_px=92), "cover-square.png")
 save(cover(1008, 1440, art_h_ratio=0.34, art_cy_ratio=0.30, title_cy_ratio=0.60,
            title_px=72), "cover-portrait.png")
 save(cover(1080, 360, art_h_ratio=0.68, side_by_side=True), "mini-landscape.png")
