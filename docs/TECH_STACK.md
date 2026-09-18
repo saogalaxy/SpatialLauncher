@@ -241,5 +241,6 @@ Approximate Desktop install size: **~900 MB** (app ~450 MB + depth models ~470 M
 | [docs/DESKTOP.md](DESKTOP.md) | Desktop session / Quest Link usage |
 | [docs/HELP.md](HELP.md) | In-headset help mirror |
 | [docs/PRIVACY.md](PRIVACY.md) | Privacy policy |
+| [docs/RELEASE_SIGNING.md](RELEASE_SIGNING.md) | Release signing for Meta Store |
 | [desktop/README.md](../desktop/README.md) | Desktop build notes |
 | [CHANGELOG.md](../CHANGELOG.md) | Release notes |

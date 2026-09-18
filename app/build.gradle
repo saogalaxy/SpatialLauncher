@@ -51,6 +51,40 @@ android {
         pickFirst 'lib/x86_64/libonnxruntime.so'
     }
 
+    // Release signing: copy keystore.properties.example → keystore.properties (gitignored)
+    // or run tools/create_release_keystore.ps1. Without it, release falls back to debug
+    // signing so local assembleRelease still works — do NOT upload that to Meta Store.
+    def keystorePropertiesFile = rootProject.file('keystore.properties')
+    def keystoreProperties = new Properties()
+    if (keystorePropertiesFile.exists()) {
+        keystorePropertiesFile.withInputStream { stream ->
+            // Strip UTF-8 BOM if PowerShell wrote one.
+            def bytes = stream.bytes
+            int start = 0
+            if (bytes.length >= 3
+                    && (bytes[0] & 0xFF) == 0xEF
+                    && (bytes[1] & 0xFF) == 0xBB
+                    && (bytes[2] & 0xFF) == 0xBF) {
+                start = 3
+            }
+            keystoreProperties.load(new ByteArrayInputStream(bytes, start, bytes.length - start))
+        }
+    }
+
+    signingConfigs {
+        release {
+            if (keystorePropertiesFile.exists()) {
+                def storePath = keystoreProperties['storeFile']
+                if (storePath != null && !storePath.toString().trim().isEmpty()) {
+                    storeFile rootProject.file(storePath)
+                    storePassword keystoreProperties['storePassword']
+                    keyAlias keystoreProperties['keyAlias']
+                    keyPassword keystoreProperties['keyPassword']
+                }
+            }
+        }
+    }
+
     buildTypes {
         debug {
             debuggable true
@@ -59,6 +93,14 @@ android {
             debuggable false
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+            if (keystorePropertiesFile.exists()
+                    && keystoreProperties['storeFile']
+                    && rootProject.file(keystoreProperties['storeFile']).exists()) {
+                signingConfig signingConfigs.release
+            } else {
+                logger.warn('keystore.properties / storeFile missing — release APK will use DEBUG signing (not for Meta Store)')
+                signingConfig signingConfigs.debug
+            }
         }
     }
 }

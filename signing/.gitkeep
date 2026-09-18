@@ -1,0 +1,2 @@
+# Release keystore lives here (gitignored *.jks).
+# Run: powershell -File ..\tools\create_release_keystore.ps1

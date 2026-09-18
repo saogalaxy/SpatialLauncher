@@ -57,6 +57,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\desktop_easy_install
 | [docs/DESKTOP.md](docs/DESKTOP.md) | Spatial Launcher Desktop — PC session + Quest Link |
 | [docs/TECH_STACK.md](docs/TECH_STACK.md) | Platforms, libraries, ports, models, audio/video path |
 | [docs/PRIVACY.md](docs/PRIVACY.md) | Privacy policy (public URL for Meta Store) |
+| [docs/RELEASE_SIGNING.md](docs/RELEASE_SIGNING.md) | Release keystore + `assembleRelease` for Meta Store |
 | [docs/screenshots/](docs/screenshots/) | Store / GitHub images |
 | [desktop/README.md](desktop/README.md) | Desktop app build / install |
 

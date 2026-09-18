@@ -10,6 +10,14 @@ local.properties
 *.dex
 captures/
 .externalNativeBuild/
+
+# Release signing — never commit keys or passwords
+keystore.properties
+signing/*.jks
+signing/*.keystore
+*.jks
+*.keystore
+
 app/src/main/assets/translate/**/*.onnx
 app/src/main/assets/translate/**/tokenizer.json
 app/src/main/assets/native/
