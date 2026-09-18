@@ -116,14 +116,16 @@ paste_center(fg, art, 90, 90, int(180 * 0.72))
 fg.save(OUT / "spatialized-fg-180.png")
 print("spatialized-fg-180.png", fg.size)
 
-# Covers (consistent navy/art/title system, all content inside 12% insets).
-save(cover(3000, 900, art_h_ratio=0.66, side_by_side=True), "hero-3000x900.png")
-save(cover(2560, 1440, art_h_ratio=0.50), "cover-landscape.png")
-save(cover(1440, 1440, art_h_ratio=0.46, art_cy_ratio=0.36, title_cy_ratio=0.78,
-           title_px=92), "cover-square.png")
-save(cover(1008, 1440, art_h_ratio=0.34, art_cy_ratio=0.30, title_cy_ratio=0.60,
-           title_px=72), "cover-portrait.png")
-save(cover(1080, 360, art_h_ratio=0.68, side_by_side=True), "mini-landscape.png")
+# Covers: art + two-line title clustered as one group in the central band,
+# matching the dashboard safe-area overlays (title below the art gets cut).
+save(cover(3000, 900, art_h_ratio=0.60, side_by_side=True), "hero-3000x900.png")
+save(cover(2560, 1440, art_h_ratio=0.30, art_cy_ratio=0.35, title_cy_ratio=0.56,
+           title_px=76), "cover-landscape.png")
+save(cover(1440, 1440, art_h_ratio=0.40, art_cy_ratio=0.36, title_cy_ratio=0.64,
+           title_px=84), "cover-square.png")
+save(cover(1008, 1440, art_h_ratio=0.30, art_cy_ratio=0.32, title_cy_ratio=0.58,
+           title_px=64), "cover-portrait.png")
+save(cover(1080, 360, art_h_ratio=0.62, side_by_side=True), "mini-landscape.png")
 
 # Logo lockup (transparent, white for dark surfaces).
 f = title_font(300)
