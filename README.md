@@ -6,6 +6,8 @@ Public Meta Quest app: cast 2D apps into a spatial panel with optional **3D dept
 
 ## Preview
 
+**Demo video:** [YouTube](https://youtu.be/Dv5ACRTrMvQ?si=sxODKhJNHexj7dcK)
+
 ![Dock / home](docs/screenshots/01-dock-home.jpg)
 
 ![Cast + source open](docs/screenshots/02-cast-source-open.jpg)
