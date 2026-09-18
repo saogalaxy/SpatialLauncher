@@ -66,21 +66,25 @@ def draw_title(canvas, text, cx, cy, px, fill=(255, 255, 255, 255)):
     d.text((cx, cy), text, font=f, fill=fill, anchor="mm")
 
 
-def cover(w, h, art_h_ratio=0.62, title_px=None, art_cy_ratio=0.40,
-          title_cy_ratio=0.82, side_by_side=False):
+# All focal art + titles are composed inside a 12% inset on every side
+# (Meta safe-area / bleed practice). Nothing important touches an edge.
+
+
+def cover(w, h, art_h_ratio=0.50, title_px=None, art_cy_ratio=0.38,
+          title_cy_ratio=0.78, side_by_side=False):
     canvas = vgradient(w, h, NAVY_TOP, NAVY_BOTTOM)
     if side_by_side:
-        ax, tx = int(w * 0.24), int(w * 0.62)
-        glow(canvas, ax, h // 2, int(w * 0.16), int(h * 0.34))
+        ax, tx = int(w * 0.26), int(w * 0.64)
+        glow(canvas, ax, h // 2, int(w * 0.13), int(h * 0.28))
         paste_center(canvas, art, ax, h // 2, int(h * art_h_ratio))
-        draw_title(canvas, TITLE, tx, h // 2, title_px or int(h * 0.16))
+        draw_title(canvas, TITLE, tx, h // 2, title_px or int(h * 0.13))
     else:
         ax = w // 2
         ay = int(h * art_cy_ratio)
-        glow(canvas, ax, ay, int(w * 0.30), int(h * 0.26))
+        glow(canvas, ax, ay, int(w * 0.24), int(h * 0.20))
         paste_center(canvas, art, ax, ay, int(h * art_h_ratio))
         draw_title(canvas, TITLE, ax, int(h * title_cy_ratio),
-                   title_px or int(h * 0.11))
+                   title_px or int(h * 0.095))
     return canvas.convert("RGB")
 
 
@@ -103,14 +107,14 @@ paste_center(fg, art, 90, 90, int(180 * 0.72))
 fg.save(OUT / "spatialized-fg-180.png")
 print("spatialized-fg-180.png", fg.size)
 
-# Covers (consistent navy/art/title system).
-save(cover(3000, 900, art_h_ratio=0.86, side_by_side=True), "hero-3000x900.png")
-save(cover(2560, 1440), "cover-landscape.png")
-save(cover(1440, 1440, art_h_ratio=0.55, art_cy_ratio=0.38, title_cy_ratio=0.80),
-     "cover-square.png")
-save(cover(1008, 1440, art_h_ratio=0.42, art_cy_ratio=0.30, title_cy_ratio=0.62,
-           title_px=110), "cover-portrait.png")
-save(cover(1080, 360, art_h_ratio=0.88, side_by_side=True), "mini-landscape.png")
+# Covers (consistent navy/art/title system, all content inside 12% insets).
+save(cover(3000, 900, art_h_ratio=0.66, side_by_side=True), "hero-3000x900.png")
+save(cover(2560, 1440, art_h_ratio=0.50), "cover-landscape.png")
+save(cover(1440, 1440, art_h_ratio=0.46, art_cy_ratio=0.36, title_cy_ratio=0.78,
+           title_px=100), "cover-square.png")
+save(cover(1008, 1440, art_h_ratio=0.34, art_cy_ratio=0.30, title_cy_ratio=0.60,
+           title_px=72), "cover-portrait.png")
+save(cover(1080, 360, art_h_ratio=0.68, side_by_side=True), "mini-landscape.png")
 
 # Logo lockup (transparent, white for dark surfaces).
 f = title_font(300)
