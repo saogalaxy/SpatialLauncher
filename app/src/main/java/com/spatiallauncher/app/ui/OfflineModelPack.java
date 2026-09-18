@@ -83,12 +83,60 @@ final class OfflineModelPack {
         }
     }
 
+    static final String ASR_MODEL_DIR =
+            "sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17";
+
+    static File senseVoiceDir(Context context) {
+        return new File(
+                new File(context.getApplicationContext().getFilesDir(), "asr"), ASR_MODEL_DIR);
+    }
+
+    /**
+     * Upstream archives renamed model.int8.onnx → model.onnx; accept either, but
+     * require plausible completeness — a truncated download must never count as
+     * ready (ORT aborts the whole process on a corrupt model). Current upstream
+     * sizes: int8 ≈ 239 MB, fp32 ≈ 938 MB.
+     */
+    static final long ASR_INT8_MIN_BYTES = 200_000_000L;
+    static final long ASR_FP32_MIN_BYTES = 800_000_000L;
+
+    static File senseVoiceModelFile(Context context) {
+        File dir = senseVoiceDir(context);
+        File int8 = new File(dir, "model.int8.onnx");
+        if (int8.isFile() && int8.length() >= ASR_INT8_MIN_BYTES) {
+            return int8;
+        }
+        File plain = new File(dir, "model.onnx");
+        if (plain.isFile() && plain.length() >= ASR_FP32_MIN_BYTES) {
+            return plain;
+        }
+        return null;
+    }
+
     static boolean isAsrReady(Context context) {
-        Context app = context.getApplicationContext();
-        File dir = new File(new File(app.getFilesDir(), "asr"),
-                "sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17");
-        return new File(dir, "model.int8.onnx").isFile()
-                && new File(dir, "tokens.txt").isFile();
+        return senseVoiceModelFile(context) != null
+                && new File(senseVoiceDir(context), "tokens.txt").isFile();
+    }
+
+    /** Only the int8 weights + tokens are needed; skip the ~900 MB fp32 + test wavs. */
+    private static boolean isAsrWantedEntry(String entryName) {
+        return entryName.endsWith("/model.int8.onnx")
+                || entryName.endsWith("/tokens.txt");
+    }
+
+    private static void deleteAsrFiles(Context context) {
+        try {
+            File dir = senseVoiceDir(context);
+            File[] files = dir.listFiles();
+            if (files != null) {
+                for (File f : files) {
+                    if (f.isFile()) {
+                        f.delete();
+                    }
+                }
+            }
+        } catch (Throwable ignored) {
+        }
     }
 
     static boolean isAsrFetching() {
@@ -292,24 +340,28 @@ final class OfflineModelPack {
 
     private static void unpackAsr(Context context, FetchProgress progress) throws Exception {
         File root = new File(context.getFilesDir(), "asr");
-        File dir = new File(root, "sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17");
-        File onnx = new File(dir, "model.int8.onnx");
+        File dir = new File(root, ASR_MODEL_DIR);
         File tokens = new File(dir, "tokens.txt");
-        if (onnx.isFile() && tokens.isFile()) {
+        if (senseVoiceModelFile(context) != null && tokens.isFile()) {
             return;
         }
         try {
-            BundledArchive.extractTarBz2(
+            BundledArchive.extractTarBz2Selective(
                     context,
                     "models/asr/" + ASR_ARCHIVE,
-                    root);
+                    root,
+                    OfflineModelPack::isAsrWantedEntry);
         } catch (Throwable t) {
             Log.i(TAG, "SenseVoice not in APK — downloading (" + t.getMessage() + ")");
             File archive = new File(context.getFilesDir(), "asr-download/" + ASR_ARCHIVE);
             downloadUrl(ASR_URL, archive, ASR_MIN_BYTES, progress);
-            BundledArchive.extractTarBz2File(archive, root);
+            BundledArchive.extractTarBz2FileSelective(
+                    archive, root, OfflineModelPack::isAsrWantedEntry);
         }
-        if (!onnx.isFile() || !tokens.isFile()) {
+        if (senseVoiceModelFile(context) == null || !tokens.isFile()) {
+            // Never leave partial weights behind: a truncated model passes
+            // existence checks and then aborts the process inside ORT.
+            deleteAsrFiles(context);
             throw new IllegalStateException(
                     "SenseVoice ASR missing after unpack/download. Need Wi‑Fi for first Listen.");
         }

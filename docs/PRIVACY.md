@@ -54,7 +54,7 @@ Listen uses bundled OPUS (not Google ML Kit Translate).
 | Permission | Why |
 |------------|-----|
 | **MediaProjection** (share sheet) | Capture the window you select for cast, OCR, and Listen audio |
-| **RECORD_AUDIO** | Listen path (cast playback / mic as required by the OS) |
+| **RECORD_AUDIO** | Listen path: captures the cast app’s playback audio only (MEDIA/GAME usages, own app excluded). Android requires this permission for any audio capture and labels it “Microphone” — the microphone itself is never opened or recorded |
 | **INTERNET / NETWORK_STATE / WIFI_STATE** | Optional Google Translate button, LAN book import |
 | **FOREGROUND_SERVICE** (+ media projection / data sync types) | Keep capture and import services alive while in use |
 | **POST_NOTIFICATIONS** | Foreground service / status as required by Android |

@@ -34,7 +34,7 @@
     <string name="help_start_subs_title">2. Read on-screen subs / dialogue</string>
     <string name="help_start_subs_body">Cast the show → OCR zones (sidebar) → box the subtitle band → Save → Done. Settings → Reader pipeline Read → Translate engine ML Kit OCR → TTS on → continuous (blue loop). Numbers on boxes are read order — add top first.</string>
     <string name="help_start_listen_title">3. Listen when there are no subs</string>
-    <string name="help_start_listen_body">Cast the app → tap the ear (turns red). Allow mic if asked. First use downloads speech models (~1 GB) over Wi‑Fi — allow it when prompted. Translate uses bundled OPUS (JA/ZH/KO in the APK). Best with pause breaks between lines. Tap ear again to stop.</string>
+    <string name="help_start_listen_body">Cast the app → tap the ear (turns red). Allow audio capture if asked (Android calls it Microphone — the mic itself is never used). First use downloads speech models (~1 GB) over Wi‑Fi — allow it when prompted. Translate uses bundled OPUS (JA/ZH/KO in the APK). Best with pause breaks between lines. Tap ear again to stop.</string>
     <string name="help_start_translate_ocr_title">4. Translate on-screen foreign text</string>
     <string name="help_start_translate_ocr_body">OCR zones on the text → Settings → Reader pipeline Translate → Translate engine OPUS → TTS on if you want it spoken.</string>
     <string name="help_start_browser_title">5. Browser page translate / read</string>
@@ -196,7 +196,7 @@
     <string name="mt_engine_opus">OPUS</string>
     <string name="mt_engine_mlkit">ML Kit OCR</string>
     <string name="assist_listen_need_cast">Listen needs an app cast so it can hear that window</string>
-    <string name="assist_listen_need_mic">Allow microphone access so Listen can tap the other app’s audio</string>
+    <string name="assist_listen_need_mic">Listen captures the cast app’s audio — Android labels this “Microphone” permission, but your mic is never recorded</string>
     <string name="assist_3d_off_for_listen">3D off while Listen is on</string>
     <string name="desktop_link_title">Desktop Link</string>
     <string name="desktop_link_hint">Needs Spatial Launcher Desktop on your Windows PC. Same Wi‑Fi → Start Session on PC → tap the monitor icon here.</string>

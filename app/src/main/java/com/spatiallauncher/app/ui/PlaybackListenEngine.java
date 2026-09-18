@@ -33,7 +33,6 @@ import java.util.concurrent.atomic.AtomicBoolean;
 final class PlaybackListenEngine {
     private static final String TAG = "PlaybackListen";
     private static final String MODEL_DIR = "sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17";
-    private static final String MODEL_FILE = "model.int8.onnx";
     private static final int SAMPLE_RATE = 16000;
     private static final float SPEECH_RMS = 0.012f;
     /** Original smooth defaults (slider = 100). */
@@ -250,9 +249,12 @@ final class PlaybackListenEngine {
     }
 
     private OfflineRecognizer buildRecognizer() {
-        File dir = new File(modelsRoot, MODEL_DIR);
-        String model = new File(dir, MODEL_FILE).getAbsolutePath();
-        String tokens = new File(dir, "tokens.txt").getAbsolutePath();
+        File modelFile = OfflineModelPack.senseVoiceModelFile(app);
+        if (modelFile == null) {
+            throw new IllegalStateException("speech model file missing");
+        }
+        String model = modelFile.getAbsolutePath();
+        String tokens = new File(modelFile.getParentFile(), "tokens.txt").getAbsolutePath();
         OfflineSenseVoiceModelConfig senseVoice = new OfflineSenseVoiceModelConfig();
         senseVoice.setModel(model);
         senseVoice.setUseInverseTextNormalization(true);
@@ -315,14 +317,13 @@ final class PlaybackListenEngine {
 
     private void ensureModel() throws Exception {
         File dir = new File(modelsRoot, MODEL_DIR);
-        File onnx = new File(dir, MODEL_FILE);
         File tokens = new File(dir, "tokens.txt");
-        if (onnx.isFile() && tokens.isFile()) {
+        if (OfflineModelPack.senseVoiceModelFile(app) != null && tokens.isFile()) {
             return;
         }
         BundledArchive.extractTarBz2(
                 app, "models/asr/" + MODEL_DIR + ".tar.bz2", modelsRoot);
-        if (!onnx.isFile() || !tokens.isFile()) {
+        if (OfflineModelPack.senseVoiceModelFile(app) == null || !tokens.isFile()) {
             int state = OfflineModelPack.asrState(app);
             if (state == OfflineModelPack.ASR_FETCHING) {
                 throw new IllegalStateException(

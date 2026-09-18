@@ -43,4 +43,21 @@ for folder, px in sizes.items():
     out.save(d / "ic_launcher.png", optimize=True)
     out.save(d / "ic_launcher_round.png", optimize=True)
 
+# Meta Horizon Store listing icon (180x180 from the same source art).
+fit(180, art_ratio=0.78, bg=WHITE).convert("RGB").save(
+    root / "branding" / "store-icon-180.png", optimize=True
+)
+
+# Windows desktop icon (multi-size ICO from the same source art).
+# Transparent background: the tray/taskbar sit on dark surfaces, so a baked-in
+# white tile would show as a white box (Android tiles keep WHITE above).
+TRANSPARENT = (0, 0, 0, 0)
+desktop_assets = root / "desktop" / "src" / "SpatialLauncher.Desktop" / "Assets"
+desktop_assets.mkdir(parents=True, exist_ok=True)
+ico_canvas = fit(256, art_ratio=0.92, bg=TRANSPARENT)
+ico_canvas.save(
+    desktop_assets / "app.ico",
+    sizes=[(16, 16), (32, 32), (48, 48), (256, 256)],
+)
+
 print("exported launcher icons")
