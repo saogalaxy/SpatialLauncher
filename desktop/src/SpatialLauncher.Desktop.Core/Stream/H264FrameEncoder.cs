@@ -14,6 +14,8 @@ public sealed class H264FrameEncoder : IDisposable
 {
     private readonly object _lock = new();
     private IMFTransform? _mft;
+    private IMFMediaEventGenerator? _events;
+    private bool _asyncMft;
     private int _width;
     private int _height;
     private int _bitrateKbps;
@@ -22,6 +24,11 @@ public sealed class H264FrameEncoder : IDisposable
     private bool _forceHeader = true;
     private bool _mfStarted;
     private bool _disposed;
+    private int _nullStreak;
+    private const int MfEventNoWait = 1; // MF_EVENT_FLAG_NO_WAIT
+    private const int MfEventWait = 0;
+
+    public string? LastDebug { get; private set; }
 
     private static readonly byte[] StartCode = { 0, 0, 0, 1 };
 
@@ -49,6 +56,7 @@ public sealed class H264FrameEncoder : IDisposable
             _bitrateKbps = bitrateKbps;
             _frameIndex = 0;
             _forceHeader = true;
+            _nullStreak = 0;
         }
     }
 
@@ -78,6 +86,7 @@ public sealed class H264FrameEncoder : IDisposable
                 _bitrateKbps = kbps;
                 _frameIndex = 0;
                 _forceHeader = true;
+                _nullStreak = 0;
             }
 
             bool wantKey = forceKeyFrame || _forceHeader;
@@ -112,6 +121,9 @@ public sealed class H264FrameEncoder : IDisposable
                 }
             }
 
+            if (_asyncMft)
+                return EncodeAsyncUnlocked(input);
+
             try
             {
                 _mft.ProcessInput(0, input, 0);
@@ -129,6 +141,119 @@ public sealed class H264FrameEncoder : IDisposable
 
             return DrainOutputsUnlocked();
         }
+    }
+
+    /// <summary>
+    /// Hardware H.264 MFTs are async. Unlock + ProcessInput alone never yields
+    /// samples — we must wait for METransformNeedInput / METransformHaveOutput
+    /// (same pattern as <see cref="Av1FrameEncoder"/>).
+    /// </summary>
+    private byte[]? EncodeAsyncUnlocked(IMFSample input)
+    {
+        if (_mft == null || _events == null) return null;
+
+        // Wait until the encoder wants input (or we already drained a pending output).
+        if (!WaitForAsyncEvent(MediaEventTypes.TransformNeedInput, 200)
+            && !PeekHaveOutput())
+        {
+            // First frames often need a kick: try ProcessInput anyway.
+        }
+
+        try
+        {
+            _mft.ProcessInput(0, input, 0);
+        }
+        catch (SharpGenException ex) when ((uint)ex.HResult == 0xC00D36B5)
+        {
+            var early = DrainOutputsUnlocked();
+            if (early != null) return TrackStreak(early);
+            try { _mft.ProcessInput(0, input, 0); }
+            catch { return TrackStreak(null); }
+        }
+        catch
+        {
+            return TrackStreak(null);
+        }
+
+        if (!WaitForAsyncEvent(MediaEventTypes.TransformHaveOutput, 400))
+        {
+            // Drain any queued events then try ProcessOutput once.
+            DrainAsyncEvents(40);
+        }
+        return TrackStreak(DrainOutputsUnlocked());
+    }
+
+    private byte[]? TrackStreak(byte[]? au)
+    {
+        if (au == null || au.Length == 0)
+        {
+            _nullStreak++;
+            if (_nullStreak >= 8)
+                _forceHeader = true;
+            return null;
+        }
+        _nullStreak = 0;
+        return au;
+    }
+
+    private bool PeekHaveOutput()
+    {
+        DrainAsyncEvents(0);
+        return false;
+    }
+
+    private bool WaitForAsyncEvent(MediaEventTypes want, int timeoutMs)
+    {
+        if (_events == null) return false;
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        int seen = 0;
+        while (sw.ElapsedMilliseconds < timeoutMs)
+        {
+            IMFMediaEvent? ev = null;
+            try
+            {
+                // Blocking wait — async MFTs queue NeedInput/HaveOutput here.
+                ev = _events.GetEvent(MfEventWait);
+            }
+            catch (Exception ex)
+            {
+                LastDebug = $"GetEvent({want}): {ex.GetType().Name} {ex.Message}";
+                System.Threading.Thread.Sleep(2);
+                continue;
+            }
+            if (ev == null)
+            {
+                System.Threading.Thread.Sleep(2);
+                continue;
+            }
+            using (ev)
+            {
+                var t = (MediaEventTypes)ev.EventType;
+                seen++;
+                LastDebug = $"event {t} (want {want}, seen={seen})";
+                if (t == MediaEventTypes.Error)
+                    return false;
+                if (t == want)
+                    return true;
+            }
+        }
+        LastDebug = $"timeout waiting {want} after {timeoutMs}ms seen~{seen}";
+        return false;
+    }
+
+    private void DrainAsyncEvents(int timeoutMs)
+    {
+        if (_events == null) return;
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        do
+        {
+            try
+            {
+                using var ev = _events.GetEvent(MfEventNoWait);
+                if (ev == null) break;
+            }
+            catch { break; }
+        } while (timeoutMs > 0 && sw.ElapsedMilliseconds < timeoutMs);
     }
 
     private byte[]? DrainOutputsUnlocked()
@@ -212,13 +337,26 @@ public sealed class H264FrameEncoder : IDisposable
                 try
                 {
                     candidate = act.ActivateObject<IMFTransform>();
+                    bool isAsync = false;
                     try
                     {
-                        candidate.Attributes.Set(TransformAttributeKeys.TransformAsyncUnlock, 1u);
+                        isAsync = candidate.Attributes.GetUInt32(TransformAttributeKeys.TransformAsync) != 0;
                     }
-                    catch
+                    catch { /* sync */ }
+
+                    if (isAsync)
                     {
-                        // sync encoders may not expose the attribute
+                        try
+                        {
+                            candidate.Attributes.Set(TransformAttributeKeys.TransformAsyncUnlock, 1u);
+                        }
+                        catch
+                        {
+                            candidate.Dispose();
+                            candidate = null;
+                            last = new InvalidOperationException("H.264 async MFT unlock failed.");
+                            continue;
+                        }
                     }
                     try
                     {
@@ -255,6 +393,16 @@ public sealed class H264FrameEncoder : IDisposable
                     // Detach so disposing the activate collection does not shut the MFT down.
                     try { act.DetachObject(); } catch { /* optional */ }
 
+                    _asyncMft = isAsync;
+                    _events = isAsync ? candidate.QueryInterfaceOrNull<IMFMediaEventGenerator>() : null;
+                    if (isAsync && _events == null)
+                    {
+                        candidate.Dispose();
+                        candidate = null;
+                        last = new InvalidOperationException("H.264 async MFT has no event generator.");
+                        continue;
+                    }
+
                     transform = candidate;
                     candidate = null;
                     break;
@@ -286,11 +434,14 @@ public sealed class H264FrameEncoder : IDisposable
             GuidSubtype = VideoFormatGuids.H264
         };
 
-        // Prefer hardware (NVENC/AMF/QSV), then sync software, then anything.
+        // Prefer sync local MFTs first (same order as AV1); HW-first stalled
+        // on some GPUs with Ensure OK but zero ProcessOutput samples (Quest
+        // MPEG pump got one AU then starved). Async HW still works via the
+        // event pump when no sync encoder is available.
         uint[] flagSets =
         {
-            (uint)(EnumFlag.EnumFlagSortandfilter | EnumFlag.EnumFlagLocalmft | EnumFlag.EnumFlagHardware),
             (uint)(EnumFlag.EnumFlagSortandfilter | EnumFlag.EnumFlagSyncmft | EnumFlag.EnumFlagLocalmft),
+            (uint)(EnumFlag.EnumFlagSortandfilter | EnumFlag.EnumFlagLocalmft | EnumFlag.EnumFlagHardware),
             (uint)(EnumFlag.EnumFlagSortandfilter | EnumFlag.EnumFlagAll)
         };
 
@@ -459,8 +610,11 @@ public sealed class H264FrameEncoder : IDisposable
             _mft.Dispose();
             _mft = null;
         }
+        _events = null;
+        _asyncMft = false;
         _sequenceHeaderAnnexB = null;
         _forceHeader = true;
+        _nullStreak = 0;
     }
 
     public void Dispose()

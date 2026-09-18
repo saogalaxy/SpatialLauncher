@@ -175,7 +175,7 @@ public class DesktopLinkActivity extends AppCompatActivity implements SurfaceHol
         activeThinClient = true;
         setContentView(R.layout.activity_desktop_link);
         urlInput = findViewById(R.id.desktop_link_url);
-        status = findViewById(R.id.desktop_link_status);
+        status = findViewById(R.id.desktop_link_menu_status);
         surfaceView = findViewById(R.id.desktop_link_surface);
         chrome = findViewById(R.id.desktop_link_chrome);
         tapCatcher = findViewById(R.id.desktop_link_tap);

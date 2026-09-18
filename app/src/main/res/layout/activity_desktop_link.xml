@@ -17,18 +17,6 @@
         android:focusable="true"
         android:contentDescription="@string/desktop_link_tap_for_controls" />
 
-    <TextView
-        android:id="@+id/desktop_link_status"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_gravity="bottom"
-        android:background="#99000000"
-        android:paddingHorizontal="12dp"
-        android:paddingVertical="6dp"
-        android:text="@string/desktop_link_idle"
-        android:textColor="@color/text_secondary"
-        android:textSize="12sp" />
-
     <LinearLayout
         android:id="@+id/desktop_link_chrome"
         android:layout_width="320dp"
@@ -70,6 +58,18 @@
                 android:minWidth="0dp"
                 android:text="@string/desktop_link_exit" />
         </LinearLayout>
+
+        <TextView
+            android:id="@+id/desktop_link_menu_status"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:background="#991A2332"
+            android:paddingHorizontal="10dp"
+            android:paddingVertical="6dp"
+            android:text="@string/desktop_link_idle"
+            android:textColor="@color/text_secondary"
+            android:textSize="12sp" />
 
         <TextView
             android:layout_width="match_parent"

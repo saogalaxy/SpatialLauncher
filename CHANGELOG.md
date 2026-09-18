@@ -40,6 +40,7 @@ When changing Quest `DesktopLinkActivity` or PC `QuestLinkServer` / `MirrorSessi
 - **AV1 `av1c` once-only on PC:** stop appending sequence-header OBUs every keyframe (was bloating `csd-0` to 15KB+).
 - Quest rejects oversized `av1c` (over 2KB), skips cold-start surface recycle when already valid, waits for surface before claiming a viewer slot, and resumes stream on `surfaceCreated`/`onResume`.
 - **Edge smear clean** (PC + Quest Desktop Link): bias depth discontinuities toward background and shrink edge parallax to cut halos around people. Defaults lower **Motion ghosting** (was “Depth smooth”).
+- **MPEG (H.264) lockup fix (PC):** hardware H.264 MFTs are async — `H264FrameEncoder` now pumps `NeedInput`/`HaveOutput` events like the AV1 encoder (previously one AU then silence, Quest timing out every ~15s). Encoder enum prefers sync MFTs first (same order as AV1). 15 straight null encodes now surface `Encode: MPEG (H.264) encoder produced no frames — try AV1 or JPEG` instead of a silent stall.
 - Per-section **Save** on Stream / 3D look / Quest Link / Reader — persists to `%LocalAppData%\SpatialLauncherDesktop\user_settings.json`.
 - Clearer 3D labels: **3D pop**, **Focus plane**, **Depth refresh**, **Motion ghosting**, **Edge smear clean**.
 
@@ -57,6 +58,7 @@ When changing Quest `DesktopLinkActivity` or PC `QuestLinkServer` / `MirrorSessi
 - **Release signing:** `tools/create_release_keystore.ps1` + `keystore.properties` (gitignored) wire `assembleRelease` for Meta Store uploads — see [docs/RELEASE_SIGNING.md](docs/RELEASE_SIGNING.md).
 - **Lint error fix (Book import):** `BookImportHttp` used `ByteArrayOutputStream.toString(Charset)` (API 33+) with `minSdk 29` — `NoSuchMethodError` on Quest (API 29–32) when reading import request headers; replaced with `new String(bytes, ISO_8859_1)`.
 - **Lint error fix (Listen):** `PlaybackListenEngine.buildRecorder` now checks `RECORD_AUDIO` at the point of use before building the `AudioRecord` (permission already requested in `PanelMainActivity`; guard adds robustness and clears the `MissingPermission` lint error). `lintDebug` is now error-free.
+- **Desktop Link status moved (Quest):** Live/mode status (`Live · MPEG`, `Reconnecting…`) moved from the bottom bar into the top of the settings drawer; bottom bar removed.
 
 ### Docs
 - Added [docs/TECH_STACK.md](docs/TECH_STACK.md) (platforms, libraries, ports, models, audio/video path).

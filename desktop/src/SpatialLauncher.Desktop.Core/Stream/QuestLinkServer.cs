@@ -33,6 +33,7 @@ public sealed class QuestLinkServer : IDisposable
     private readonly H264FrameEncoder _h264 = new();
     private Av1FrameEncoder _av1 = new();
     private int _av1NullStreak;
+    private int _h264NullStreak;
     private long _lastKeyTick;
     private string? _encodeError;
     private int _codecEpoch;
@@ -65,7 +66,10 @@ public sealed class QuestLinkServer : IDisposable
                 Monitor.PulseAll(_frameLock);
             }
             if (_codec == StreamCodec.H264)
+            {
                 _h264.RequestKeyFrame();
+                _h264NullStreak = 0;
+            }
             else if (_codec == StreamCodec.Av1)
             {
                 _av1.RequestKeyFrame();
@@ -169,6 +173,19 @@ public sealed class QuestLinkServer : IDisposable
                     bytes = _h264.Encode(src, forceKeyFrame: wantKey);
                     if (wantKey)
                         _lastKeyTick = now;
+                    if (bytes == null || bytes.Length == 0)
+                    {
+                        _h264NullStreak++;
+                        if (_h264NullStreak == 15)
+                        {
+                            _encodeError = "MPEG (H.264) encoder produced no frames — try AV1 or JPEG";
+                            StatusChanged?.Invoke("Encode: " + _encodeError);
+                        }
+                    }
+                    else
+                    {
+                        _h264NullStreak = 0;
+                    }
                 }
                 else if (_codec == StreamCodec.Av1)
                 {
