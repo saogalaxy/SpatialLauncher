@@ -323,7 +323,17 @@ final class PlaybackListenEngine {
         BundledArchive.extractTarBz2(
                 app, "models/asr/" + MODEL_DIR + ".tar.bz2", modelsRoot);
         if (!onnx.isFile() || !tokens.isFile()) {
-            throw new IllegalStateException("SenseVoice files missing from APK");
+            int state = OfflineModelPack.asrState(app);
+            if (state == OfflineModelPack.ASR_FETCHING) {
+                throw new IllegalStateException(
+                        "speech models still downloading — try again shortly");
+            }
+            if (state == OfflineModelPack.ASR_NEED_WIFI) {
+                throw new IllegalStateException(
+                        "connect to Wi-Fi to download speech models (~1 GB)");
+            }
+            throw new IllegalStateException(
+                    "Listen needs a one-time speech download (~1 GB)");
         }
     }
 

@@ -29,7 +29,7 @@ Screen capture buffers and ASR audio are used in memory for the active feature a
 | Piper TTS | On-device speech synthesis (female voice bundled) |
 | Listen | Cast audio → SenseVoice ASR → optional bundled OPUS → Piper |
 | Reader pipeline | Local mode preference (Read / Translate / Share / Listen) and OPUS vs as-read engine |
-| Page Translate | On-device Qwen (bundled) when you use in-app Translate |
+| Page Translate | On-device OPUS-MT when you use in-app Translate |
 | My Books / EPUB | Files stored in app storage on the headset |
 
 Settings and pinned dock apps are stored in **local app preferences** on the device only.
@@ -67,7 +67,7 @@ We do not use these permissions to build a profile or sell data.
 - **Google ML Kit** — OCR text recognition only (language AARs bundled in the APK; no Play Store model download). Listen/OCR **translate** uses bundled OPUS, not ML Kit Translate.  
 - **Google Translate (optional button)** — only if you tap **Google** in the browser chrome.  
 - **Meta / Horizon OS** — standard system share sheet and store distribution; governed by Meta’s policies.  
-- **Piper / sherpa-onnx / SenseVoice / Qwen / OPUS** — on-device model runtimes; female + male Piper and JA/ZH/KO OPUS are packed into the APK at build time.
+- **Piper / sherpa-onnx / SenseVoice / OPUS** — on-device model runtimes; female + male Piper and JA/ZH/KO OPUS are packed into the APK at build time. SenseVoice downloads once over Wi‑Fi with your consent.
 
 We do not embed third-party ad or analytics SDKs.
 

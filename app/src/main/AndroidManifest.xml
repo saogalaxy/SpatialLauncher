@@ -36,23 +36,6 @@
         android:networkSecurityConfig="@xml/network_security_config"
         tools:targetApi="34">
 
-        <!-- Android 12+ hides vendor .so unless declared. llama.cpp OpenCL needs these. -->
-        <uses-native-library
-            android:name="libOpenCL.so"
-            android:required="false" />
-        <uses-native-library
-            android:name="libOpenCL-pixel.so"
-            android:required="false" />
-        <uses-native-library
-            android:name="libcdsprpc.so"
-            android:required="false" />
-        <uses-native-library
-            android:name="libcb.so"
-            android:required="false" />
-        <uses-native-library
-            android:name="libvndksupport.so"
-            android:required="false" />
-
         <activity
             android:name=".ui.DesktopLinkActivity"
             android:label="@string/desktop_link_title"
@@ -120,11 +103,5 @@
             android:name=".ui.TranslateMtService"
             android:exported="false"
             android:process=":opusmt" />
-
-        <!-- Own process so llama.cpp / jllama is not mixed with sherpa ONNX (Piper). -->
-        <service
-            android:name=".ui.QwenPageService"
-            android:exported="false"
-            android:process=":qwen" />
     </application>
 </manifest>

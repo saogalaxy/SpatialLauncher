@@ -59,6 +59,8 @@ When changing Quest `DesktopLinkActivity` or PC `QuestLinkServer` / `MirrorSessi
 - **Lint error fix (Book import):** `BookImportHttp` used `ByteArrayOutputStream.toString(Charset)` (API 33+) with `minSdk 29` — `NoSuchMethodError` on Quest (API 29–32) when reading import request headers; replaced with `new String(bytes, ISO_8859_1)`.
 - **Lint error fix (Listen):** `PlaybackListenEngine.buildRecorder` now checks `RECORD_AUDIO` at the point of use before building the `AudioRecord` (permission already requested in `PanelMainActivity`; guard adds robustness and clears the `MissingPermission` lint error). `lintDebug` is now error-free.
 - **Desktop Link status moved (Quest):** Live/mode status (`Live · MPEG`, `Reconnecting…`) moved from the bottom bar into the top of the settings drawer; bottom bar removed.
+- **First-use model UX (Listen):** SenseVoice (~1 GB) now asks once before downloading (Download / Later), only fetches on unmetered Wi‑Fi, shows banner progress (`… X MB`), and Listen reports actionable states (downloading / need Wi‑Fi / needs consent) instead of `SenseVoice files missing from APK`. Help strings corrected (they still claimed no download).
+- **Qwen strip (Quest):** removed the dead Novel Translator leftover — `QwenPageEngine` / `QwenPageService` (`:qwen`), llama-opencl dep + OpenCL manifest entries, Qwen Gradle/OfflineModelPack wiring. Page Translate is OPUS-only; docs + `page_translate_3d_off` string updated. (Qwen polish was skipped since 09-12: 1.5B echoed prompts.)
 
 ### Docs
 - Added [docs/TECH_STACK.md](docs/TECH_STACK.md) (platforms, libraries, ports, models, audio/video path).

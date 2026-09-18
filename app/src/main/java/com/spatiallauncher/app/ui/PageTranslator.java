@@ -16,7 +16,8 @@ import java.util.concurrent.Executors;
 /**
  * Browser Read speaks the DOM as-is. Browser Translate uses OPUS-MT (same as OCR /
  * Share) line-by-line, then Piper’s non-blocking queue. The G button runs online
- * Google Translate, then Qwen grammar polish, then a batch read.
+ * Google Translate, then a batch read (the old Qwen grammar-polish step was removed:
+ * it echoed prompts and mangled Google’s draft).
  */
 final class PageTranslator {
     private static final String TAG = "PageTranslator";
@@ -209,8 +210,8 @@ final class PageTranslator {
 
     /**
      * Online Google Translate → clean → apply EN + batch Piper read.
-     * Qwen 1.5B polish is skipped: it echoed prompts ("Corrected:", instruction
-     * text) and mangled Google's draft. Re-enable only with a stronger model.
+     * (The old Qwen 1.5B grammar-polish step was removed: it echoed prompts
+     * and mangled Google's draft. QwenPageEngine/QwenPageService stripped.)
      */
     void googleTranslatePage(WebView web, boolean speakAfter) {
         if (web == null) {

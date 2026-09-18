@@ -23,7 +23,7 @@ OCR zones on the text → Settings → **Reader pipeline → Translate** → **T
 Settings → **Reader pipeline → Share** → **Translate engine → OPUS** (foreign) or **ML Kit OCR** (English as-read). Shows OCR text on the panel overlay; speaks if TTS continuous is on. OCR runs even when TTS is off (caption only).
 
 ### 6. Browser page translate / read
-**Globe** → open a page → **Translate** (on-device Qwen) or **Google** (needs network). TTS on, then **Read**, to hear it. Tap **Translate** again to cancel a stuck job.
+**Globe** → open a page → **Translate** (on-device OPUS) or **Google** (needs network). TTS on, then **Read**, to hear it. Tap **Translate** again to cancel a stuck job.
 
 ### 7. Open or import a book
 Tap **book** = My Books (tap again or **Close** to dismiss). Tap a title to open. Tap **book** again while reading to close. Long-press book = PC EPUB import on/off (same Wi‑Fi as Novel Translator).
@@ -68,7 +68,7 @@ Pick one mode. The **Active:** line under the buttons shows the exact path. Sele
 | **Google Translate** | Network each time (browser button) |
 | **PC EPUB import** | Same Wi‑Fi as Novel Translator on your PC |
 
-**Already in the APK:** female + male TTS (Piper), OPUS JA/ZH/KO, 3D depth, ML Kit OCR AARs. **Qwen** (Page Translate) and **SenseVoice** (Listen) download on first use over Wi‑Fi (~1 GB each). No Play Store model downloads.
+**Already in the APK:** female + male TTS (Piper), OPUS JA/ZH/KO, 3D depth, ML Kit OCR AARs. **SenseVoice** (Listen) downloads on first use over Wi‑Fi (~1 GB) after asking you. No Play Store model downloads.
 
 ## Dual-mode icons
 

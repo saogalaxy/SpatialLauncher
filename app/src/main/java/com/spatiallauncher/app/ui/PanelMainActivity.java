@@ -338,7 +338,11 @@ public class PanelMainActivity extends AppCompatActivity {
         });
         new Thread(() -> {
             OfflineModelPack.unpackAll(getApplicationContext());
-            OfflineModelPack.unpackSpeech(getApplicationContext());
+            OfflineModelPack.unpackSpeechGated(getApplicationContext(), this::postModelProgress);
+            if (OfflineModelPack.asrState(getApplicationContext())
+                    == OfflineModelPack.ASR_NEED_CONSENT) {
+                runOnUiThread(this::showModelConsentDialog);
+            }
             if (assistMode == AssistMode.TRANSLATE || assistMode == AssistMode.SHARE) {
                 OnDeviceTranslator.get(PanelMainActivity.this).ensureReady(ok -> { });
             }
@@ -1627,6 +1631,57 @@ public class PanelMainActivity extends AppCompatActivity {
         setAssistMode(AssistMode.LISTEN);
     }
 
+    private void postModelProgress(long downloadedBytes) {
+        long mb = downloadedBytes / (1024 * 1024);
+        PanelAlerts.show(this, getString(R.string.model_dl_progress, mb));
+    }
+
+    /** One-time prompt before the ~1 GB SenseVoice fetch (Listen). */
+    private void showModelConsentDialog() {
+        if (isFinishing() || isDestroyed()) {
+            return;
+        }
+        if (OfflineModelPack.isAsrReady(this)
+                || OfflineModelPack.getModelConsent(this) == OfflineModelPack.CONSENT_ALLOWED) {
+            return;
+        }
+        new AlertDialog.Builder(this)
+                .setTitle(R.string.model_dl_title)
+                .setMessage(R.string.model_dl_body)
+                .setPositiveButton(R.string.model_dl_download, (d, w) -> {
+                    OfflineModelPack.setModelConsent(this, OfflineModelPack.CONSENT_ALLOWED);
+                    OfflineModelPack.startAsrFetch(getApplicationContext(), this::postModelProgress);
+                    PanelAlerts.show(this, R.string.model_dl_started);
+                })
+                .setNegativeButton(R.string.model_dl_later, (d, w) -> {
+                    OfflineModelPack.setModelConsent(this, OfflineModelPack.CONSENT_LATER);
+                })
+                .setCancelable(true)
+                .show();
+    }
+
+    /** True when Listen may start; otherwise prompts / informs and returns false. */
+    private boolean ensureAsrForListen() {
+        switch (OfflineModelPack.asrState(this)) {
+            case OfflineModelPack.ASR_READY:
+                return true;
+            case OfflineModelPack.ASR_FETCHING:
+                PanelAlerts.show(this, R.string.listen_downloading_retry);
+                return false;
+            case OfflineModelPack.ASR_NEED_WIFI:
+                PanelAlerts.show(this, R.string.listen_need_wifi);
+                return false;
+            case OfflineModelPack.ASR_READY_TO_FETCH:
+                OfflineModelPack.startAsrFetch(getApplicationContext(), this::postModelProgress);
+                PanelAlerts.show(this, R.string.model_dl_started);
+                return false;
+            case OfflineModelPack.ASR_NEED_CONSENT:
+            default:
+                showModelConsentDialog();
+                return false;
+        }
+    }
+
     private void warmListenMt() {
         PanelAlerts.show(this, R.string.listen_mt_downloading);
         ListenMtTranslator.get(this).ensureReady((ok, message) -> {
@@ -1769,6 +1824,9 @@ public class PanelMainActivity extends AppCompatActivity {
             return;
         }
         if (!listenEngine.isRunning()) {
+            if (!ensureAsrForListen()) {
+                return;
+            }
             listenEngine.setSmoothnessPercent(settingsStore.getListenSmoothnessPercent());
             listenEngine.start(mediaProjection);
         }

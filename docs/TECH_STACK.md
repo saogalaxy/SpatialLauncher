@@ -63,7 +63,6 @@ Spatial Launcher is **not** an immersive OpenXR title. Stereo on Quest uses Hori
 | ML Kit text-recognition (+ JA / ZH / KO) | 16.0.1 | OCR (no ML Kit Translate — avoids Play downloads) |
 | sherpa-onnx (JitPack) | v1.13.5 | Piper TTS + SenseVoice ASR |
 | onnxruntime-android | 1.17.3 | OPUS-MT in `:opusmt` process |
-| llama-android-opencl | 5.1.0 | Qwen GGUF page translate (`:qwen` process) |
 | commons-compress | 1.26.2 | Model / archive handling |
 | slf4j-nop | 2.0.17 | Logging stub |
 
@@ -76,7 +75,7 @@ Spatial Launcher is **not** an immersive OpenXR title. Stereo on Quest uses Hori
 | Translate | OCR → OPUS-MT (ORT) → Piper |
 | Share | OCR → OPUS (optional) → Piper + caption |
 | Listen | Cast audio → SenseVoice → OPUS (optional) → Piper |
-| Browser | Widevine WebView; on-device Qwen or Google Translate |
+| Browser | Widevine WebView; on-device OPUS or Google Translate |
 | My Books | EPUB shelf; LAN import HTTP |
 | Desktop Link | MediaCodec JPEG / H.264 / AV1 + Opus UDP `:8767` |
 
@@ -177,7 +176,6 @@ Window/monitor pick → GDI capture → Depth Anything ONNX (DirectML)
 | Piper en_US amy / ryan (sherpa-onnx) | TTS (APK) |
 | SenseVoice multilingual (sherpa-onnx) | ASR Listen — **download on first use** (optional `-PpackHeavyModels`) |
 | Xenova opus-mt ja/zh/ko → en (ORT) | Machine translate (APK) |
-| Qwen2.5-1.5B Instruct Q4_K_M GGUF | Page translate — **download on first use** (optional `-PpackHeavyModels`) |
 | MiDaS / DA-V2 TFLite (when present) | On-headset depth |
 
 ### Desktop (`%LocalAppData%\SpatialLauncherDesktop\models`)
@@ -192,7 +190,7 @@ Window/monitor pick → GDI capture → Depth Anything ONNX (DirectML)
 | `asr/` | SenseVoice (optional) |
 | `paddleocr/` | PP-OCR CLI (optional) |
 
-Approximate Desktop install size: **~900 MB** (app ~450 MB + depth models ~470 MB). Quest debug APK: Piper + OPUS (~hundreds of MB); Qwen/SenseVoice ~1 GB each on first use.
+Approximate Desktop install size: **~900 MB** (app ~450 MB + depth models ~470 MB). Quest debug APK: Piper + OPUS (~hundreds of MB); SenseVoice ~1 GB on first use.
 
 ---
 
@@ -220,7 +218,7 @@ Approximate Desktop install size: **~900 MB** (app ~450 MB + depth models ~470 M
 
 ```text
 ┌──────────────────────────────── Quest (Java 17) ────────────────────────────────┐
-│  Panel: Cast/3D · OCR/Piper · OPUS-MT · SenseVoice · Browser/Qwen · My Books    │
+│  Panel: Cast/3D · OCR/Piper · OPUS-MT · SenseVoice · Browser/OPUS · My Books    │
 │  Desktop Link: MediaCodec (JPEG|H264|AV1) + Opus UDP :8767                       │
 └────────────▲──────────────────────────────▲──────────────────────────▲───────────┘
              │ TCP :8765 video/settings     │ UDP :8766 discovery      │ UDP :8767 audio

@@ -1,7 +1,9 @@
 package com.spatiallauncher.app.ui;
 
 import android.content.Context;
+import android.content.SharedPreferences;
 import android.content.res.AssetManager;
+import android.net.ConnectivityManager;
 import android.util.Log;
 
 import java.io.File;
@@ -13,25 +15,123 @@ import java.net.URL;
 /**
  * Copies bundled models to app files once. Inference engines stay off until a mode
  * actually needs them (Translate = OPUS-MT, TTS = Piper, Listen = SenseVoice).
- * Qwen + SenseVoice are too large for a single APK (AGP packageDebug integer overflow
- * past ~2GB), so they download on first use when not present in assets.
+ * SenseVoice is too large for a single APK (AGP packageDebug integer overflow
+ * past ~2GB), so it downloads on first use when not present in assets.
  */
 final class OfflineModelPack {
     private static final String TAG = "OfflineModelPack";
     private static final Object LOCK = new Object();
     private static volatile boolean unpacked;
 
-    private static final String QWEN_NAME = "Qwen2.5-1.5B-Instruct-Q4_K_M.gguf";
-    private static final String QWEN_URL =
-            "https://huggingface.co/bartowski/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/"
-                    + QWEN_NAME;
-    private static final long QWEN_MIN_BYTES = 400_000_000L;
-
     private static final String ASR_ARCHIVE =
             "sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17.tar.bz2";
     private static final String ASR_URL =
             "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/" + ASR_ARCHIVE;
     private static final long ASR_MIN_BYTES = 100_000_000L;
+
+    /** One-time consent for the ~1 GB SenseVoice fetch (Listen). */
+    private static final String CONSENT_PREFS = "model_pack";
+    private static final String KEY_DL_CONSENT = "dl_consent";
+    static final int CONSENT_UNKNOWN = 0;
+    static final int CONSENT_ALLOWED = 1;
+    static final int CONSENT_LATER = 2;
+
+    /** SenseVoice readiness for Listen. */
+    static final int ASR_READY = 0;
+    static final int ASR_FETCHING = 1;
+    static final int ASR_NEED_CONSENT = 2;
+    static final int ASR_NEED_WIFI = 3;
+    static final int ASR_READY_TO_FETCH = 4;
+
+    private static volatile boolean asrFetching;
+
+    /** Progress callback for large first-use downloads (worker thread). */
+    interface FetchProgress {
+        void onProgress(long downloadedBytes);
+    }
+
+    static int getModelConsent(Context context) {
+        try {
+            SharedPreferences prefs = context.getApplicationContext()
+                    .getSharedPreferences(CONSENT_PREFS, Context.MODE_PRIVATE);
+            return prefs.getInt(KEY_DL_CONSENT, CONSENT_UNKNOWN);
+        } catch (Throwable t) {
+            return CONSENT_UNKNOWN;
+        }
+    }
+
+    static void setModelConsent(Context context, int consent) {
+        try {
+            context.getApplicationContext()
+                    .getSharedPreferences(CONSENT_PREFS, Context.MODE_PRIVATE)
+                    .edit().putInt(KEY_DL_CONSENT, consent).apply();
+        } catch (Throwable ignored) {
+        }
+    }
+
+    /** True when the active network is unmetered (Wi-Fi); false also covers offline. */
+    static boolean isUnmetered(Context context) {
+        try {
+            ConnectivityManager cm = (ConnectivityManager) context.getApplicationContext()
+                    .getSystemService(Context.CONNECTIVITY_SERVICE);
+            if (cm == null) {
+                return true;
+            }
+            return !cm.isActiveNetworkMetered();
+        } catch (Throwable t) {
+            return true;
+        }
+    }
+
+    static boolean isAsrReady(Context context) {
+        Context app = context.getApplicationContext();
+        File dir = new File(new File(app.getFilesDir(), "asr"),
+                "sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17");
+        return new File(dir, "model.int8.onnx").isFile()
+                && new File(dir, "tokens.txt").isFile();
+    }
+
+    static boolean isAsrFetching() {
+        return asrFetching;
+    }
+
+    static int asrState(Context context) {
+        if (isAsrReady(context)) {
+            return ASR_READY;
+        }
+        if (asrFetching) {
+            return ASR_FETCHING;
+        }
+        if (getModelConsent(context) != CONSENT_ALLOWED) {
+            return ASR_NEED_CONSENT;
+        }
+        if (!isUnmetered(context)) {
+            return ASR_NEED_WIFI;
+        }
+        return ASR_READY_TO_FETCH;
+    }
+
+    /** Kick off the SenseVoice fetch on a worker thread (no-op if ready/fetching). */
+    static void startAsrFetch(Context context, FetchProgress progress) {
+        synchronized (LOCK) {
+            if (asrFetching || isAsrReady(context)) {
+                return;
+            }
+            asrFetching = true;
+        }
+        Context app = context.getApplicationContext();
+        new Thread(() -> {
+            try {
+                unpackAsr(app, progress);
+            } catch (Throwable t) {
+                Log.w(TAG, "asr fetch failed", t);
+            } finally {
+                synchronized (LOCK) {
+                    asrFetching = false;
+                }
+            }
+        }, "AsrFetch").start();
+    }
 
     static void unpackAll(Context context) {
         if (unpacked) {
@@ -55,12 +155,41 @@ final class OfflineModelPack {
     }
 
     static void unpackSpeech(Context context) {
+        unpackSpeech(context, null);
+    }
+
+    static void unpackSpeech(Context context, FetchProgress progress) {
         Context app = context.getApplicationContext();
         try {
             PiperTtsEngine.get(app).unpackVoiceArchives();
-            unpackAsr(app);
+            unpackAsr(app, progress);
         } catch (Throwable t) {
             Log.w(TAG, "speech unpack failed", t);
+        }
+    }
+
+    /**
+     * Startup-safe speech unpack: Piper voices always unpack locally, but the
+     * ~1 GB SenseVoice fetch only runs with user consent on unmetered Wi-Fi.
+     * Callers prompt / show status based on {@link #asrState(Context)}.
+     */
+    static void unpackSpeechGated(Context context, FetchProgress progress) {
+        Context app = context.getApplicationContext();
+        try {
+            PiperTtsEngine.get(app).unpackVoiceArchives();
+        } catch (Throwable t) {
+            Log.w(TAG, "piper unpack failed", t);
+        }
+        if (isAsrReady(app)) {
+            try {
+                unpackAsr(app, null);
+            } catch (Throwable t) {
+                Log.w(TAG, "asr unpack failed", t);
+            }
+            return;
+        }
+        if (asrState(app) == ASR_READY_TO_FETCH) {
+            startAsrFetch(app, progress);
         }
     }
 
@@ -140,74 +269,6 @@ final class OfflineModelPack {
         }
     }
 
-    static File unpackQwenGguf(Context context) throws Exception {
-        File dir = new File(context.getFilesDir(), "qwen");
-        File fast = new File(dir, QWEN_NAME);
-        // Drop USB A/B leftovers so LMK isn't fighting multi-GB unused weights on disk+mmap.
-        deleteIfPresent(new File(dir, "Qwen2.5-3B-Instruct-Q4_K_M.gguf"));
-        deleteIfPresent(new File(dir, "Qwen3.5-4B-Q4_K_M.gguf"));
-        deleteIfPresent(new File(dir, "gemma-2-2b-jpn-it-translate.Q4_K_M.gguf"));
-        File ext = context.getExternalFilesDir(null);
-        if (ext != null) {
-            File extQwen = new File(ext, "qwen");
-            deleteIfPresent(new File(extQwen, "Qwen2.5-3B-Instruct-Q4_K_M.gguf"));
-            deleteIfPresent(new File(extQwen, "Qwen3.5-4B-Q4_K_M.gguf"));
-            deleteIfPresent(new File(extQwen, "gemma-2-2b-jpn-it-translate.Q4_K_M.gguf"));
-        }
-        if (fast.isFile() && fast.canRead() && fast.length() > QWEN_MIN_BYTES) {
-            Log.i(TAG, "Qwen 1.5B on disk " + fast.length());
-            return fast;
-        }
-        dir.mkdirs();
-        try {
-            copyAssetGguf(context, QWEN_NAME, fast, QWEN_MIN_BYTES);
-        } catch (Throwable t) {
-            Log.i(TAG, "Qwen not in APK assets — will download (" + t.getMessage() + ")");
-        }
-        if (fast.isFile() && fast.length() > QWEN_MIN_BYTES) {
-            Log.i(TAG, "Qwen 1.5B from APK " + fast.length());
-            return fast;
-        }
-        Log.i(TAG, "Downloading Qwen 1.5B (~1 GB) for Page Translate…");
-        downloadUrl(QWEN_URL, fast, QWEN_MIN_BYTES);
-        if (fast.isFile() && fast.length() > QWEN_MIN_BYTES) {
-            Log.i(TAG, "Qwen 1.5B downloaded " + fast.length());
-            return fast;
-        }
-        throw new IllegalStateException(
-                "Qwen 2.5 1.5B missing (not in APK; download failed). Need Wi‑Fi for first Page Translate.");
-    }
-
-    private static void deleteIfPresent(File file) {
-        if (file != null && file.isFile() && file.delete()) {
-            Log.i(TAG, "removed unused " + file.getName());
-        }
-    }
-
-    private static void copyAssetGguf(Context context, String name, File dest, long minBytes)
-            throws Exception {
-        if (dest.isFile() && dest.length() > minBytes) {
-            return;
-        }
-        dest.getParentFile().mkdirs();
-        File tmp = new File(dest.getParentFile(), dest.getName() + ".part");
-        try (InputStream in = context.getAssets().open("models/qwen/" + name);
-             FileOutputStream fos = new FileOutputStream(tmp)) {
-            byte[] buf = new byte[1024 * 1024];
-            int n;
-            while ((n = in.read(buf)) >= 0) {
-                fos.write(buf, 0, n);
-            }
-        }
-        if (dest.exists()) {
-            dest.delete();
-        }
-        if (!tmp.renameTo(dest)) {
-            throw new IllegalStateException("could not move " + name);
-        }
-        Log.i(TAG, "copied " + name + " " + dest.length() + " bytes");
-    }
-
     static File extractMicrosoftOrt(Context context) throws Exception {
         File out = new File(context.getFilesDir(), "native/ms_onnxruntime.so");
         if (out.isFile() && out.length() > 1_000_000) {
@@ -226,6 +287,10 @@ final class OfflineModelPack {
     }
 
     private static void unpackAsr(Context context) throws Exception {
+        unpackAsr(context, null);
+    }
+
+    private static void unpackAsr(Context context, FetchProgress progress) throws Exception {
         File root = new File(context.getFilesDir(), "asr");
         File dir = new File(root, "sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17");
         File onnx = new File(dir, "model.int8.onnx");
@@ -241,7 +306,7 @@ final class OfflineModelPack {
         } catch (Throwable t) {
             Log.i(TAG, "SenseVoice not in APK — downloading (" + t.getMessage() + ")");
             File archive = new File(context.getFilesDir(), "asr-download/" + ASR_ARCHIVE);
-            downloadUrl(ASR_URL, archive, ASR_MIN_BYTES);
+            downloadUrl(ASR_URL, archive, ASR_MIN_BYTES, progress);
             BundledArchive.extractTarBz2File(archive, root);
         }
         if (!onnx.isFile() || !tokens.isFile()) {
@@ -251,6 +316,11 @@ final class OfflineModelPack {
     }
 
     private static void downloadUrl(String url, File dest, long minBytes) throws Exception {
+        downloadUrl(url, dest, minBytes, null);
+    }
+
+    private static void downloadUrl(String url, File dest, long minBytes,
+            FetchProgress progress) throws Exception {
         if (dest.isFile() && dest.length() >= minBytes) {
             return;
         }
@@ -269,12 +339,21 @@ final class OfflineModelPack {
             byte[] buf = new byte[1024 * 1024];
             int n;
             long got = 0;
+            long lastReportMb = -1;
             while ((n = in.read(buf)) >= 0) {
                 out.write(buf, 0, n);
                 got += n;
+                long mb = got / (1024 * 1024);
                 if (got % (256L * 1024 * 1024) < n) {
-                    Log.i(TAG, "download " + dest.getName() + ": " + (got / (1024 * 1024)) + " MB");
+                    Log.i(TAG, "download " + dest.getName() + ": " + mb + " MB");
                 }
+                if (progress != null && mb != lastReportMb && mb % 64 == 0) {
+                    lastReportMb = mb;
+                    progress.onProgress(got);
+                }
+            }
+            if (progress != null) {
+                progress.onProgress(got);
             }
         } finally {
             conn.disconnect();

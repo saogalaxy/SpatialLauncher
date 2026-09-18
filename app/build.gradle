@@ -35,9 +35,9 @@ android {
     }
 
     aaptOptions {
-        // Keep small speech/ONNX assets uncompressed for mmap. Do NOT list gguf/bz2
-        // here for multi-GB models — packing those STORE'd blew past AGP's ~2GB
-        // packageDebug integer overflow (Qwen ~986MB + SenseVoice ~1GB).
+        // Keep small speech/ONNX assets uncompressed for mmap. Do NOT list bz2
+        // here for the multi-GB SenseVoice archive — packing it STORE'd blew past
+        // AGP's ~2GB packageDebug integer overflow.
         noCompress "tflite", "onnx", "aa", "ab", "ac"
     }
 
@@ -137,24 +137,20 @@ dependencies {
     implementation 'com.github.k2-fsa.sherpa-onnx:sherpa-onnx:v1.13.5'
     implementation 'com.microsoft.onnxruntime:onnxruntime-android:1.17.3'
     implementation 'org.apache.commons:commons-compress:1.26.2'
-    implementation 'net.ladenthin:llama-android-opencl:5.1.0'
     implementation 'org.slf4j:slf4j-nop:2.0.17'
 }
 
 def translateAssets = file("src/main/assets/translate")
 def piperAssets = file("src/main/assets/models/piper")
 def asrAssets = file("src/main/assets/models/asr")
-def qwenFastAsset = file("src/main/assets/models/qwen/Qwen2.5-1.5B-Instruct-Q4_K_M.gguf")
 def asrArchiveName = "sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17.tar.bz2"
 def asrAsset = new File(asrAssets, asrArchiveName)
-// Heavy models (~2GB) stay out of the APK by default. Headset downloads on first use.
+// The SenseVoice archive (~1GB) stays out of the APK by default. Headset downloads
+// on first use (with consent + Wi-Fi gate).
 // Full store pack: ./gradlew :app:assembleRelease -PpackHeavyModels=true
 def packHeavyModels = (findProperty("packHeavyModels") ?: "false").toString() == "true"
 def modelCacheRoot = file("model-cache")
-def qwenCache = new File(modelCacheRoot, "qwen/${qwenFastAsset.name}")
 def asrCache = new File(modelCacheRoot, "asr/${asrArchiveName}")
-def qwenFastBytes = 900_000_000L
-def qwenFastUrl = "https://huggingface.co/bartowski/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/Qwen2.5-1.5B-Instruct-Q4_K_M.gguf"
 def asrUrl = "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/${asrArchiveName}"
 
 def downloadTo = { Object... args ->
@@ -208,17 +204,11 @@ def evacuateHeavyFromApkAssets = {
         }
         logger.lifecycle("Evacuated ${assetFile.name} from APK assets → ${cacheFile} (${cacheFile.length()} bytes)")
     }
-    moveAside(qwenFastAsset, qwenCache)
     moveAside(asrAsset, asrCache)
-    // Drop empty dirs so aapt does not keep stale paths.
-    if (qwenFastAsset.parentFile != null && qwenFastAsset.parentFile.isDirectory()
-            && qwenFastAsset.parentFile.list()?.length == 0) {
-        qwenFastAsset.parentFile.delete()
-    }
 }
 
 tasks.register("downloadOfflineModels") {
-    description = "Pack Piper + OPUS into APK. Qwen/SenseVoice download on headset unless -PpackHeavyModels=true."
+    description = "Pack Piper + OPUS into APK. SenseVoice downloads on headset unless -PpackHeavyModels=true."
     doLast {
         downloadTo(
                 "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-piper-en_US-amy-low.tar.bz2",
@@ -277,28 +267,13 @@ tasks.register("downloadOfflineModels") {
         }
 
         if (packHeavyModels) {
-            downloadTo(qwenFastUrl, qwenFastAsset, qwenFastBytes)
-            if (!qwenFastAsset.exists() || qwenFastAsset.length() < qwenFastBytes) {
-                throw new GradleException("Qwen 1.5B download incomplete: ${qwenFastAsset}")
-            }
             downloadTo(asrUrl, asrAsset, 100_000_000L)
-            logger.lifecycle("Heavy models packed in APK: Qwen ${qwenFastAsset.length()} + ASR ${asrAsset.length()} bytes")
+            logger.lifecycle("Heavy model packed in APK: ASR ${asrAsset.length()} bytes")
             logger.warn("APK may exceed 2GB and fail packageDebug — only use packHeavyModels for store experiments.")
         } else {
             // Keep a PC-side cache if we already downloaded, but never ship in the APK.
             evacuateHeavyFromApkAssets()
-            logger.lifecycle("APK pack: Piper + OPUS only. Qwen/SenseVoice download on first headset use.")
-        }
-
-        // Drop leftover USB A/B caches so builds don't drag multi-GB unused GGUFs.
-        def staleCache = layout.buildDirectory.dir("qwen-cache").get().asFile
-        if (staleCache.isDirectory()) {
-            staleCache.eachFile { f ->
-                if (f.name != qwenFastAsset.name) {
-                    logger.lifecycle("Removing unused cache ${f.name}")
-                    f.delete()
-                }
-            }
+            logger.lifecycle("APK pack: Piper + OPUS only. SenseVoice downloads on first headset use.")
         }
     }
 }

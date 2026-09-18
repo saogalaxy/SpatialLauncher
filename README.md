@@ -29,7 +29,7 @@ Full set: [docs/screenshots/](docs/screenshots/).
 
 That runs `tools/easy_install.ps1`: checks JDK + Node/metavr + headset, builds the debug APK if needed, installs with replace + permissions, and launches the app.
 
-**Storage:** the headset install is smaller than before (Piper + OPUS in the APK). **Qwen** (Page Translate) and **SenseVoice** (Listen) download on first use (~1 GB each) when Wi‑Fi is available. Build outputs stay in this repo folder on the PC.
+**Storage:** the headset install is smaller than before (Piper + OPUS in the APK). **SenseVoice** (Listen) downloads on first use (~1 GB) with your consent when Wi‑Fi is available. Build outputs stay in this repo folder on the PC.
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\easy_install.ps1
@@ -116,7 +116,7 @@ app/
 | Listen | `PlaybackListenEngine`, `ListenMtTranslator` |
 | Page MT | `PageTranslator`, `OnDeviceTranslator`, `TranslateMtService`, `OfflineModelPack` |
 | Books | `EpubLibraryStore`, `BookImportService`, `BookImportHttp` |
-| Browser | `WidevineWebViewConfig`, `GoogleWebTranslate`, `QwenPageEngine` |
+| Browser | `WidevineWebViewConfig`, `GoogleWebTranslate`, `PageTranslator` |
 
 ## Build requirements
 
@@ -135,5 +135,5 @@ npx -y metavr app launch com.spatiallauncher.app
 
 ## Notes
 
-- Store / installer builds pack Piper and OPUS JA/ZH/KO into the APK. Qwen + SenseVoice download on first use (optional `-PpackHeavyModels=true` for experiments; may fail packageDebug past ~2GB).  
+- Store / installer builds pack Piper and OPUS JA/ZH/KO into the APK. SenseVoice downloads on first use (optional `-PpackHeavyModels=true` for experiments; may fail packageDebug past ~2GB).  
 - Large model archives under `assets/models/` may be gitignored locally; `downloadOfflineModels` fetches them at build time.  
