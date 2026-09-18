@@ -290,7 +290,7 @@ final class BookImportHttp {
                 return null;
             }
         }
-        String headerText = headerBuf.toString(StandardCharsets.ISO_8859_1);
+        String headerText = new String(headerBuf.toByteArray(), StandardCharsets.ISO_8859_1);
         String[] lines = headerText.split("\r\n");
         if (lines.length == 0) {
             return null;

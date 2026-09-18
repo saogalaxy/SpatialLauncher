@@ -1,6 +1,8 @@
 package com.spatiallauncher.app.ui;
 
+import android.Manifest;
 import android.content.Context;
+import android.content.pm.PackageManager;
 import android.media.AudioAttributes;
 import android.media.AudioFormat;
 import android.media.AudioPlaybackCaptureConfiguration;
@@ -11,6 +13,8 @@ import android.os.Handler;
 import android.os.Looper;
 import android.os.Process;
 import android.util.Log;
+
+import androidx.core.content.ContextCompat;
 
 import com.k2fsa.sherpa.onnx.OfflineModelConfig;
 import com.k2fsa.sherpa.onnx.OfflineRecognizer;
@@ -266,6 +270,11 @@ final class PlaybackListenEngine {
 
     private AudioRecord buildRecorder(MediaProjection projection) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+            return null;
+        }
+        if (ContextCompat.checkSelfPermission(app, Manifest.permission.RECORD_AUDIO)
+                != PackageManager.PERMISSION_GRANTED) {
+            Log.w(TAG, "RECORD_AUDIO not granted; skipping playback capture");
             return null;
         }
         try {
