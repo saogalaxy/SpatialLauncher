@@ -7,7 +7,6 @@ import android.app.Service;
 import android.content.Intent;
 import android.content.pm.ServiceInfo;
 import android.os.Binder;
-import android.os.Build;
 import android.os.IBinder;
 import android.util.Log;
 
@@ -57,7 +56,7 @@ public class MirrorCaptureService extends Service {
 
     /**
      * Promote to mediaProjection FGS. Safe to call repeatedly; no-op if already up.
-     * Must run after a successful {@code getMediaProjection()}.
+     * Must run while the app is foreground and BEFORE getMediaProjection().
      */
     public void enterProjectionForeground() {
         if (projectionForeground) {
@@ -72,19 +71,12 @@ public class MirrorCaptureService extends Service {
                 .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
                 .build();
         try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-                startForeground(
-                        NOTIFICATION_ID,
-                        notification,
-                        ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION);
-            } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                startForeground(
-                        NOTIFICATION_ID,
-                        notification,
-                        ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION);
-            } else {
-                startForeground(NOTIFICATION_ID, notification);
-            }
+            // minSdk 29: the typed startForeground() exists on all supported OS
+            // versions, so no version branch is needed.
+            startForeground(
+                    NOTIFICATION_ID,
+                    notification,
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION);
             projectionForeground = true;
         } catch (RuntimeException e) {
             Log.e(TAG, "enterProjectionForeground failed", e);
@@ -98,11 +90,8 @@ public class MirrorCaptureService extends Service {
             return;
         }
         try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-                stopForeground(Service.STOP_FOREGROUND_REMOVE);
-            } else {
-                stopForeground(true);
-            }
+            // minSdk 29 (always >= N): STOP_FOREGROUND_REMOVE exists everywhere.
+            stopForeground(Service.STOP_FOREGROUND_REMOVE);
         } catch (RuntimeException e) {
             Log.w(TAG, "leaveProjectionForeground", e);
         }
@@ -110,9 +99,8 @@ public class MirrorCaptureService extends Service {
     }
 
     private void ensureChannel() {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
-            return;
-        }
+        // minSdk 29 (always >= O): channels always exist; manager is non-null
+        // on a running service, but keep the null-guard (cheap, runs once).
         NotificationManager manager = getSystemService(NotificationManager.class);
         if (manager == null) {
             return;

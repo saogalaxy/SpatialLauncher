@@ -63,6 +63,7 @@ import androidx.media3.common.MediaItem;
 import androidx.media3.common.PlaybackException;
 import androidx.media3.common.Player;
 import androidx.media3.common.VideoSize;
+import androidx.media3.common.util.UnstableApi;
 import androidx.media3.exoplayer.DefaultRenderersFactory;
 import androidx.media3.exoplayer.ExoPlayer;
 import androidx.media3.exoplayer.audio.DefaultAudioSink;
@@ -74,6 +75,7 @@ import android.text.style.BackgroundColorSpan;
 import android.text.style.ForegroundColorSpan;
 import android.text.style.StyleSpan;
 
+import androidx.annotation.OptIn;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
@@ -4693,6 +4695,11 @@ public class PanelMainActivity extends AppCompatActivity {
             Log.e(TAG, "enterProjectionForeground failed", e);
             pendingLaunchApp = null;
             pendingLaunchAlreadyStarted = false;
+            // The old session was already torn down above: reset its UI too.
+            try {
+                stopMirroring();
+            } catch (RuntimeException ignored) {
+            }
             PanelAlerts.show(this, getString(R.string.launch_failed_message, app.label));
             return;
         }
@@ -4979,6 +4986,9 @@ public class PanelMainActivity extends AppCompatActivity {
      * correctly — content_area's shape has nothing to do with the captured content's
      * actual shape.
      */
+    // @OptIn (not @UnstableApi): contains the requirement inside this method so
+    // callers are NOT forced to opt in too (@UnstableApi would propagate).
+    @OptIn(markerClass = UnstableApi.class)
     private void fitSurfaceToCaptureAspectRatio() {
         if (contentArea == null || gameRenderSurface == null) {
             return;
