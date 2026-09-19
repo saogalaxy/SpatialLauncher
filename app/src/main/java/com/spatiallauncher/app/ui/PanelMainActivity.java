@@ -245,6 +245,9 @@ public class PanelMainActivity extends AppCompatActivity {
     private InstalledAppInfo pendingLaunchApp;
     private boolean pendingLaunchAlreadyStarted;
     private InstalledAppInfo mirroringApp;
+    // API 34 requires a registered callback before createVirtualDisplay().
+    // One instance, re-registered onto each fresh MediaProjection grant.
+    private MediaProjection.Callback mirrorProjectionCallback;
     private int captureWidth = 1;
     private int captureHeight = 1;
     // Locked bounds of the selected app window inside the VirtualDisplay. Horizon OS
@@ -4669,7 +4672,15 @@ public class PanelMainActivity extends AppCompatActivity {
         pendingLaunchApp = app;
         pendingLaunchAlreadyStarted = true;
         launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-        startActivity(launchIntent);
+        try {
+            startActivity(launchIntent);
+        } catch (RuntimeException e) {
+            Log.e(TAG, "launchGame: startActivity failed for " + app.packageName, e);
+            pendingLaunchApp = null;
+            pendingLaunchAlreadyStarted = false;
+            PanelAlerts.show(this, getString(R.string.launch_failed_message, app.label));
+            return;
+        }
         // API 34 / Horizon OS validates the grant against a live mediaProjection
         // FGS server-side: getMediaProjection() throws SecurityException without
         // one. Promote the (already bound) service here — tap time is foreground,
@@ -4687,11 +4698,22 @@ public class PanelMainActivity extends AppCompatActivity {
         }
         // App window first, then share sheet — otherwise the user dismisses capture,
         // the app appears after, and they have to tap the dock again.
+        final InstalledAppInfo captureApp = app;
         contentArea.postDelayed(() -> {
             if (pendingLaunchApp == null) {
                 return;
             }
-            startActivityForResult(projectionManager.createScreenCaptureIntent(), REQUEST_MEDIA_PROJECTION);
+            try {
+                startActivityForResult(projectionManager.createScreenCaptureIntent(), REQUEST_MEDIA_PROJECTION);
+            } catch (RuntimeException e) {
+                Log.e(TAG, "launchGame: capture intent failed", e);
+                pendingLaunchApp = null;
+                pendingLaunchAlreadyStarted = false;
+                if (mirrorCaptureService != null) {
+                    mirrorCaptureService.leaveProjectionForeground();
+                }
+                PanelAlerts.show(this, getString(R.string.launch_failed_message, captureApp.label));
+            }
         }, 1600);
     }
 
@@ -4764,20 +4786,37 @@ public class PanelMainActivity extends AppCompatActivity {
                 }
             } catch (RuntimeException e) {
                 Log.e(TAG, "MediaProjection / mirror start failed", e);
-                if (mirrorCaptureService != null) {
-                    mirrorCaptureService.leaveProjectionForeground();
+                // Unwind a half-built or half-started session: stopMirroring is
+                // null-safe when setup never completed.
+                try {
+                    stopMirroring();
+                } catch (RuntimeException ignored) {
                 }
                 if (mediaProjection != null) {
+                    if (mirrorProjectionCallback != null) {
+                        try {
+                            mediaProjection.unregisterCallback(mirrorProjectionCallback);
+                        } catch (RuntimeException ignored) {
+                        }
+                    }
                     try {
                         mediaProjection.stop();
                     } catch (RuntimeException ignored) {
                     }
                     mediaProjection = null;
                 }
+                if (mirrorCaptureService != null) {
+                    mirrorCaptureService.leaveProjectionForeground();
+                }
                 PanelAlerts.show(this, getString(R.string.launch_failed_message, app.label));
             }
         } else if (!pendingLaunchAlreadyStarted) {
-            startActivity(launchIntent);
+            try {
+                startActivity(launchIntent);
+            } catch (RuntimeException e) {
+                Log.e(TAG, "onActivityResult: startActivity failed for " + app.packageName, e);
+                PanelAlerts.show(this, getString(R.string.launch_failed_message, app.label));
+            }
         } else {
             Log.w(TAG, "onActivityResult: projection not granted resultCode=" + resultCode
                     + " dataNull=" + (data == null) + " appAlreadyStarted=" + pendingLaunchAlreadyStarted);
@@ -4851,6 +4890,27 @@ public class PanelMainActivity extends AppCompatActivity {
 
         imageReader = ImageReader.newInstance(width, height, PixelFormat.RGBA_8888, 2);
         imageReader.setOnImageAvailableListener(this::onMirrorFrameAvailable, mirrorHandler);
+        // API 34+: createVirtualDisplay() throws IllegalStateException without a
+        // registered callback. onStop tears the session down if the system kills
+        // the projection (e.g. a second app takes capture).
+        if (mirrorProjectionCallback == null) {
+            mirrorProjectionCallback = new MediaProjection.Callback() {
+                @Override
+                public void onStop() {
+                    runOnUiThread(() -> {
+                        if (mirroringApp != null) {
+                            stopMirroring();
+                        }
+                    });
+                }
+            };
+        } else {
+            try {
+                mediaProjection.unregisterCallback(mirrorProjectionCallback);
+            } catch (RuntimeException ignored) {
+            }
+        }
+        mediaProjection.registerCallback(mirrorProjectionCallback, mirrorHandler);
         virtualDisplay = mediaProjection.createVirtualDisplay(
                 "SpatialLauncherMirror", width, height, metrics.densityDpi,
                 DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
@@ -4866,9 +4926,13 @@ public class PanelMainActivity extends AppCompatActivity {
         // to come up, then bring this panel back to front so the mirror is what's
         // actually in view.
         new Handler(Looper.getMainLooper()).postDelayed(() -> {
-            Intent bringToFront = new Intent(this, PanelMainActivity.class);
-            bringToFront.addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT);
-            startActivity(bringToFront);
+            try {
+                Intent bringToFront = new Intent(this, PanelMainActivity.class);
+                bringToFront.addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT);
+                startActivity(bringToFront);
+            } catch (RuntimeException e) {
+                Log.e(TAG, "bring panel to front failed", e);
+            }
         }, 1200);
     }
 
@@ -5959,10 +6023,19 @@ public class PanelMainActivity extends AppCompatActivity {
 
     private void stopMirroring() {
         if (listenEngine != null) {
-            listenEngine.stop();
+            try {
+                listenEngine.stop();
+            } catch (RuntimeException ignored) {
+            }
         }
         releaseCapturePipeline();
         if (mediaProjection != null) {
+            if (mirrorProjectionCallback != null) {
+                try {
+                    mediaProjection.unregisterCallback(mirrorProjectionCallback);
+                } catch (RuntimeException ignored) {
+                }
+            }
             mediaProjection.stop();
             mediaProjection = null;
         }
@@ -6141,7 +6214,10 @@ public class PanelMainActivity extends AppCompatActivity {
             browserCaptureBitmap.recycle();
             browserCaptureBitmap = null;
         }
-        stopMirroring();
+        try {
+            stopMirroring();
+        } catch (RuntimeException ignored) {
+        }
         if (mirrorThread != null) {
             mirrorThread.quitSafely();
             mirrorThread = null;
