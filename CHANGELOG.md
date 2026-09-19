@@ -3,7 +3,9 @@
 All notable changes to **Spatial Launcher** (Quest app + Windows Desktop) are recorded here.
 Format: newest first. Dates are local (US).
 
-## Unreleased
+## Unreleased → 1.0.2 (versionCode 4, 2026-09-19)
+
+Release 1.0.2 packages the Cast crash + Browser 3D Share fixes below (release-signed with `CN=Spatial Launcher`).
 
 ### Desktop Link — invariants (do not regress)
 
@@ -54,6 +56,8 @@ When changing Quest `DesktopLinkActivity` or PC `QuestLinkServer` / `MirrorSessi
 - PC **Listen** (WASAPI → SenseVoice on the desktop) is unchanged.
 
 ### Quest build
+- **Cast crash after targetSdk 34 (bug):** `MirrorCaptureService` called `startForeground(MEDIA_PROJECTION)` in `onCreate` (bound at panel start) before any share-sheet grant. On targetSdk 34 that throws and kills cast/Share when starting a mirror. Fix: bind early without FGS; after `getMediaProjection()` call `enterProjectionForeground()`, then `createVirtualDisplay()`; `leaveProjectionForeground()` when mirroring stops.
+- **Browser 3D + HTML5 video (bug):** stereo letterboxing left the live WebView visible as a flat PiP while `WebView.draw()` / poster `<img>` capture froze the 3D frame (HW video overlays are invisible to canvas). Fix: hide the live WebView under stereo after the first good frame; prefer `<video>`→canvas JS capture, then WebView `SurfaceView` PixelCopy; never fall back to a static poster when a `<video>` is present. DRM/Widevine frames still cannot be bitmapped.
 - **Video player (reel):** My Videos shelf (like My Books); ExoPlayer TextureView + mono-first play; frames feed OCR/TTS/Share/3D; TeeAudioProcessor PCM → Listen on soundtrack; resume after background.
 - **Meta Store Packaging.1:** `targetSdk 34`, `installLocation=auto`, `excludeFromRecents` on launch activity, `com.oculus.supportedDevices` for quest2/pro/3/3s, optional mic + headtracking `required=false`.
 - **Security.2 trim:** dropped unused `POST_NOTIFICATIONS`, `WAKE_LOCK`, and `FOREGROUND_SERVICE_DATA_SYNC`; Listen deny shows an in-app banner and leaves other features working. Dashboard justifications in [docs/RELEASE_SIGNING.md](docs/RELEASE_SIGNING.md).

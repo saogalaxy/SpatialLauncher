@@ -3592,6 +3592,8 @@ public class PanelMainActivity extends AppCompatActivity {
 
     private final Handler browserStereoHandler = new Handler(Looper.getMainLooper());
     private boolean browserStereoRunning = false;
+    /** True after stereo has a frame and the live WebView is hidden (avoids PiP). */
+    private boolean browserStereoLiveHidden;
     private Bitmap browserCaptureBitmap;
     private boolean browserGpuCanvas;
     private final AtomicBoolean browserPixelCopyBusy = new AtomicBoolean(false);
@@ -3617,11 +3619,16 @@ public class PanelMainActivity extends AppCompatActivity {
         if (!isBrowserOpen()) {
             return;
         }
+        browserStereoLiveHidden = false;
         setBrowserStereoCaptureMode(true);
         setStereoOutputVisible(true);
         gameRenderSurface.setClickable(false);
+        if (gameRenderSurface != null) {
+            gameRenderSurface.bringToFront();
+        }
         if (overlayView != null) {
             overlayView.setVisibility(View.VISIBLE);
+            overlayView.bringToFront();
             overlayView.setOnTouchListener((v, event) -> {
                 if (requiresUiInputChannel() || !canPassThroughCastTouches()) {
                     return false;
@@ -3942,7 +3949,9 @@ public class PanelMainActivity extends AppCompatActivity {
         browserStereoRunning = false;
         browserStereoHandler.removeCallbacks(browserStereoTick);
         browserGpuCanvas = false;
+        browserStereoLiveHidden = false;
         setBrowserStereoCaptureMode(false);
+        setBrowserLiveUnderStereo(false);
         if (overlayView != null) {
             overlayView.setOnTouchListener(null);
             overlayView.setVisibility(View.GONE);
@@ -3955,16 +3964,26 @@ public class PanelMainActivity extends AppCompatActivity {
         }
         if (drmWebView != null) {
             drmWebView.setVisibility(View.VISIBLE);
+            drmWebView.setAlpha(1f);
             drmWebView.invalidate();
+        }
+        if (browserHost != null && isBrowserOpen()) {
+            browserHost.setAlpha(1f);
+            browserHost.bringToFront();
         }
     }
 
     private void captureBrowserStereoFrame() {
-        if (!isBrowserOpen() || drmWebView.getWidth() <= 0 || drmWebView.getHeight() <= 0) {
+        if (!isBrowserOpen() || drmWebView == null
+                || drmWebView.getWidth() <= 0 || drmWebView.getHeight() <= 0) {
             return;
         }
-        // One path for every site: try a large canvas (Spine / WebGL), else the
-        // visible WebView. Never stretch a tiny canvas to the page size.
+        // Prefer HTML5 <video> / canvas via JS (draw() cannot see HW video overlays).
+        // SurfaceView PixelCopy is a second chance for decoder surfaces inside WebView.
+        // Viewport draw is last resort (static chrome / posters only).
+        if (tryPixelCopyWebViewSurface()) {
+            return;
+        }
         captureBrowserCanvasViaJs();
     }
 
@@ -3998,6 +4017,24 @@ public class PanelMainActivity extends AppCompatActivity {
         }
         drmWebView.evaluateJavascript(
                 "(function(){"
+                        + "function pickVideo(){"
+                        + "var list=document.querySelectorAll('video'),best=null,area=0;"
+                        + "for(var i=0;i<list.length;i++){"
+                        + "var t=list[i];"
+                        + "if(!t||t.readyState<2)continue;"
+                        + "var s=(t.videoWidth||t.clientWidth||0)*(t.videoHeight||t.clientHeight||0);"
+                        + "if(s>area){area=s;best=t;}"
+                        + "}"
+                        + "if(!best||area<160*160)return '';"
+                        + "try{"
+                        + "var cv=document.createElement('canvas');"
+                        + "cv.width=best.videoWidth||best.clientWidth;"
+                        + "cv.height=best.videoHeight||best.clientHeight;"
+                        + "if(cv.width<2||cv.height<2)return '';"
+                        + "cv.getContext('2d').drawImage(best,0,0,cv.width,cv.height);"
+                        + "return cv.toDataURL('image/jpeg',0.85);"
+                        + "}catch(e){return 'VIDEO_BLOCKED';}"
+                        + "}"
                         + "function pickCanvas(){"
                         + "var list=document.querySelectorAll('canvas'),c=null,best=0;"
                         + "for(var i=0;i<list.length;i++){"
@@ -4028,8 +4065,12 @@ public class PanelMainActivity extends AppCompatActivity {
                         + "return cv.toDataURL('image/jpeg',0.85);"
                         + "}catch(e){return '';}"
                         + "}"
-                        + "var u=pickCanvas();"
+                        + "var hasVideo=document.querySelectorAll('video').length>0;"
+                        + "var u=pickVideo();"
+                        + "if(u&&u!=='VIDEO_BLOCKED')return u;"
+                        + "u=pickCanvas();"
                         + "if(u)return u;"
+                        + "if(hasVideo)return '';"
                         + "return pickImg();"
                         + "})()",
                 value -> {
@@ -4038,7 +4079,11 @@ public class PanelMainActivity extends AppCompatActivity {
                     }
                     Bitmap fromJs = decodeDataUrlBitmap(value);
                     if (fromJs == null) {
-                        captureBrowserViewportDraw();
+                        // Keep trying video/canvas next tick; avoid locking onto a
+                        // one-shot WebView.draw() freeze of page chrome.
+                        if (!browserStereoLiveHidden) {
+                            captureBrowserViewportDraw();
+                        }
                         return;
                     }
                     if (browserCaptureBitmap != null && browserCaptureBitmap != fromJs) {
@@ -4104,6 +4149,80 @@ public class PanelMainActivity extends AppCompatActivity {
         if (wantScreenOcr()) {
             screenFrameCapture.offerFromScreenBuffer(browserCaptureBitmap);
         }
+        // Hide the live WebView under the stereo surface so letterboxed fit mode
+        // does not show a flat PiP beside / behind the 3D picture.
+        if (browserStereoRunning && !browserStereoLiveHidden) {
+            browserStereoLiveHidden = true;
+            setBrowserLiveUnderStereo(true);
+            if (gameRenderSurface != null) {
+                gameRenderSurface.bringToFront();
+            }
+            if (overlayView != null) {
+                overlayView.bringToFront();
+            }
+        }
+    }
+
+    /**
+     * Keep the WebView attached and layout-sized (touches / JS capture still work)
+     * but invisible so it cannot PiP through stereo letterboxing.
+     */
+    private void setBrowserLiveUnderStereo(boolean hide) {
+        if (drmWebView != null) {
+            drmWebView.setAlpha(hide ? 0f : 1f);
+        }
+        if (browserHost != null) {
+            // Host stays VISIBLE so isBrowserOpen() and layout keep working.
+            browserHost.setAlpha(hide ? 0f : 1f);
+        }
+    }
+
+    /** PixelCopy a decoder SurfaceView child inside the WebView (HTML5 video). */
+    private boolean tryPixelCopyWebViewSurface() {
+        if (drmWebView == null || !browserPixelCopyBusy.compareAndSet(false, true)) {
+            return false;
+        }
+        SurfaceView sv = findDescendantSurfaceView(drmWebView);
+        if (sv == null || sv.getWidth() <= 0 || sv.getHeight() <= 0
+                || sv.getHolder() == null || !sv.getHolder().getSurface().isValid()) {
+            browserPixelCopyBusy.set(false);
+            return false;
+        }
+        int tw = Math.min(960, sv.getWidth());
+        int th = Math.max(2, Math.round((float) tw * sv.getHeight() / Math.max(1, sv.getWidth())));
+        if (!ensureBrowserCaptureBitmap(tw, th)) {
+            browserPixelCopyBusy.set(false);
+            return false;
+        }
+        try {
+            PixelCopy.request(sv, browserCaptureBitmap, result -> {
+                browserPixelCopyBusy.set(false);
+                if (result == PixelCopy.SUCCESS && browserStereoRunning) {
+                    publishBrowserStereoFrame();
+                }
+            }, browserStereoHandler);
+            return true;
+        } catch (Throwable t) {
+            browserPixelCopyBusy.set(false);
+            return false;
+        }
+    }
+
+    private static SurfaceView findDescendantSurfaceView(View root) {
+        if (root instanceof SurfaceView) {
+            return (SurfaceView) root;
+        }
+        if (!(root instanceof ViewGroup)) {
+            return null;
+        }
+        ViewGroup group = (ViewGroup) root;
+        for (int i = 0; i < group.getChildCount(); i++) {
+            SurfaceView found = findDescendantSurfaceView(group.getChildAt(i));
+            if (found != null) {
+                return found;
+            }
+        }
+        return null;
     }
 
     private void openSideDrawer(View drawer) {
@@ -4610,10 +4729,31 @@ public class PanelMainActivity extends AppCompatActivity {
         }
 
         if (resultCode == Activity.RESULT_OK && data != null) {
-            mediaProjection = projectionManager.getMediaProjection(resultCode, data);
-            startMirroringAndLaunch(app, launchIntent);
-            if (assistMode == AssistMode.LISTEN) {
-                syncListenEngine(false);
+            try {
+                // targetSdk 34: get the token first, then promote MirrorCaptureService to
+                // mediaProjection FGS — startForeground(MEDIA_PROJECTION) before the grant
+                // throws SecurityException / ForegroundServiceStartNotAllowedException.
+                mediaProjection = projectionManager.getMediaProjection(resultCode, data);
+                if (mirrorCaptureService != null) {
+                    mirrorCaptureService.enterProjectionForeground();
+                }
+                startMirroringAndLaunch(app, launchIntent);
+                if (assistMode == AssistMode.LISTEN) {
+                    syncListenEngine(false);
+                }
+            } catch (RuntimeException e) {
+                Log.e(TAG, "MediaProjection / mirror start failed", e);
+                if (mirrorCaptureService != null) {
+                    mirrorCaptureService.leaveProjectionForeground();
+                }
+                if (mediaProjection != null) {
+                    try {
+                        mediaProjection.stop();
+                    } catch (RuntimeException ignored) {
+                    }
+                    mediaProjection = null;
+                }
+                PanelAlerts.show(this, getString(R.string.launch_failed_message, app.label));
             }
         } else if (!pendingLaunchAlreadyStarted) {
             startActivity(launchIntent);
@@ -4756,14 +4896,34 @@ public class PanelMainActivity extends AppCompatActivity {
             return;
         }
         FrameLayout.LayoutParams params = (FrameLayout.LayoutParams) gameRenderSurface.getLayoutParams();
-        if (!stretchFill && captureWidth > 0 && captureHeight > 0) {
-            // Fit mode: size the surface to the capture aspect, centered, so tall
+        // Size from whatever is actually on the stereo stage — NOT always the cast.
+        // Browser stereo and video 3D reused the cast dims and shrank to a PiP box.
+        int contentW = captureWidth;
+        int contentH = captureHeight;
+        if (mirroringApp == null) {
+            if (videoPlaying && videoPlayer != null) {
+                try {
+                    androidx.media3.common.Format vf = videoPlayer.getVideoFormat();
+                    if (vf != null && vf.width > 0 && vf.height > 0) {
+                        contentW = vf.width;
+                        contentH = vf.height;
+                    }
+                } catch (Throwable ignored) {
+                }
+            } else if (browserStereoRunning && drmWebView != null
+                    && drmWebView.getWidth() > 0 && drmWebView.getHeight() > 0) {
+                contentW = drmWebView.getWidth();
+                contentH = drmWebView.getHeight();
+            }
+        }
+        if (!stretchFill && contentW > 0 && contentH > 0) {
+            // Fit mode: size the surface to the content aspect, centered, so tall
             // apps pillarbox instead of stretching. Guard layout churn the same way
             // as the fill path below (requestLayout storms blank the SurfaceView).
             float scale = Math.min(
-                    areaW / (float) captureWidth, areaH / (float) captureHeight);
-            int sw = Math.max(1, Math.round(captureWidth * scale));
-            int sh = Math.max(1, Math.round(captureHeight * scale));
+                    areaW / (float) contentW, areaH / (float) contentH);
+            int sw = Math.max(1, Math.round(contentW * scale));
+            int sh = Math.max(1, Math.round(contentH * scale));
             if (params.width == sw
                     && params.height == sh
                     && params.gravity == android.view.Gravity.CENTER) {
@@ -5777,9 +5937,10 @@ public class PanelMainActivity extends AppCompatActivity {
             mediaProjection.stop();
             mediaProjection = null;
         }
-        // Note: MirrorCaptureService stays bound (see onCreate()) even after a mirror
-        // session ends — the foreground-service-type grant needs to already be active
-        // before the *next* getMediaProjection() call too, not just this one.
+        // Bound service stays alive for the next cast; drop mediaProjection FGS until then.
+        if (mirrorCaptureService != null) {
+            mirrorCaptureService.leaveProjectionForeground();
+        }
         mirroringApp = null;
         setStereoComposition(false);
         setStereoOutputVisible(false);
