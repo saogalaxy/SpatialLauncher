@@ -21,6 +21,7 @@ public class UserSettingsStore {
     private static final String SUFFIX_STATIC = "_static";
     private static final String KEY_DEPTH_STATIC = "depth_mode_static";
     private static final String KEY_GLES_Z_MESH = "gles_z_mesh";
+    private static final String KEY_STRETCH_FILL = "stretch_fill";
     private static final String KEY_TTS_ENABLED = "tts_enabled";
     private static final String KEY_TTS_SPEED_PERCENT = "tts_speed_percent";
     private static final String KEY_TTS_MANUAL = "tts_manual_mode";
@@ -48,6 +49,7 @@ public class UserSettingsStore {
     static final int DEFAULT_DEPTH_UPDATE_SPEED = 100;
     static final boolean DEFAULT_DEPTH_STATIC = false;
     static final boolean DEFAULT_GLES_Z_MESH = true;
+    static final boolean DEFAULT_STRETCH_FILL = false;
     static final boolean DEFAULT_FORCE_STEREO = true;
     static final boolean DEFAULT_TTS_ENABLED = false;
     /** 100 = normal Piper pace; slider range 50–200. */
@@ -156,6 +158,14 @@ public class UserSettingsStore {
 
     public void setGlesZMesh(boolean enabled) {
         prefs.edit().putBoolean(KEY_GLES_Z_MESH, enabled).apply();
+    }
+
+    public boolean getStretchFill() {
+        return prefs.getBoolean(KEY_STRETCH_FILL, DEFAULT_STRETCH_FILL);
+    }
+
+    public void setStretchFill(boolean enabled) {
+        prefs.edit().putBoolean(KEY_STRETCH_FILL, enabled).apply();
     }
 
     public boolean getDepthModeStatic() {

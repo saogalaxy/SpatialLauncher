@@ -315,6 +315,7 @@ public class PanelMainActivity extends AppCompatActivity {
         screenFrameCapture.setPeriodicIntervalMs(dialogueTextExtractor.recommendedCaptureIntervalMs());
         forceStereoEnabled = settingsStore.getForceStereo();
         useGlesZMesh = settingsStore.getGlesZMesh();
+        stretchFill = settingsStore.getStretchFill();
         depthModeStatic = settingsStore.getDepthModeStatic();
         int savedDepthPercent = Math.max(10, settingsStore.getDepthStrengthPercent(depthModeStatic));
         depthStrengthMultiplier = savedDepthPercent / 100f;
@@ -1341,6 +1342,21 @@ public class PanelMainActivity extends AppCompatActivity {
         }
         epubLibraryStore.scanInbox();
         List<EpubLibraryStore.BookEntry> books = epubLibraryStore.list(epubSortByTitle);
+        if (books.isEmpty()) {
+            // Empty shelf: importing is the primary action (Open other stays too).
+            AlertDialog.Builder emptyBuilder = new AlertDialog.Builder(this)
+                    .setTitle(R.string.my_books_title)
+                    .setMessage(R.string.my_books_empty)
+                    .setPositiveButton(bookImportRunning
+                            ? R.string.my_books_stop_import : R.string.my_books_import_wifi,
+                            (d, w) -> toggleBookImportServer())
+                    .setNeutralButton(R.string.my_books_open_other, (d, w) -> openEpubPicker())
+                    .setNegativeButton(R.string.my_books_close, null);
+            myBooksDialog = emptyBuilder.create();
+            myBooksDialog.setOnDismissListener(d -> myBooksDialog = null);
+            myBooksDialog.show();
+            return;
+        }
         AlertDialog.Builder builder = new AlertDialog.Builder(this)
                 .setTitle(R.string.my_books_title)
                 .setPositiveButton(R.string.my_books_open_other, (d, w) -> openEpubPicker())
@@ -1351,19 +1367,19 @@ public class PanelMainActivity extends AppCompatActivity {
                             showMyBooksShelf();
                         })
                 .setNegativeButton(R.string.my_books_close, null);
-        if (books.isEmpty()) {
-            myBooksDialog = builder.setMessage(R.string.my_books_empty).create();
-            myBooksDialog.setOnDismissListener(d -> myBooksDialog = null);
-            myBooksDialog.show();
-            return;
-        }
-        String[] labels = new String[books.size()];
+        String[] labels = new String[books.size() + 1];
+        labels[0] = getString(bookImportRunning
+                ? R.string.my_books_stop_import : R.string.my_books_import_wifi);
         for (int i = 0; i < books.size(); i++) {
-            labels[i] = books.get(i).title;
+            labels[i + 1] = books.get(i).title;
         }
         myBooksDialog = builder
                 .setItems(labels, (d, which) -> {
-                    EpubLibraryStore.BookEntry entry = books.get(which);
+                    if (which == 0) {
+                        toggleBookImportServer();
+                        return;
+                    }
+                    EpubLibraryStore.BookEntry entry = books.get(which - 1);
                     openEpubFromUri(Uri.fromFile(new File(entry.path)));
                 })
                 .create();
@@ -2838,6 +2854,15 @@ public class PanelMainActivity extends AppCompatActivity {
         float castH = Math.max(1, castView.getHeight());
         float nx = event.getX() / overlayW;
         float ny = event.getY() / overlayH;
+        if (!stretchFill) {
+            // Fit mode letterboxes: discount the bars so pokes land on content.
+            // (Stretch mode fills edge-to-edge, so raw ratios already match.)
+            RectF content = fittedContentRect(overlayW, overlayH, castW, castH);
+            if (content.width() < overlayW - 0.5f || content.height() < overlayH - 0.5f) {
+                nx = clamp01((event.getX() - content.left) / Math.max(1f, content.width()));
+                ny = clamp01((event.getY() - content.top) / Math.max(1f, content.height()));
+            }
+        }
         if (forceStereoEnabled && !isHorizonStereoCompositionActive()) {
             nx = nx >= 0.5f ? (nx - 0.5f) * 2f : nx * 2f;
         }
@@ -3749,10 +3774,29 @@ public class PanelMainActivity extends AppCompatActivity {
         if (areaW <= 0 || areaH <= 0) {
             return;
         }
+        FrameLayout.LayoutParams params = (FrameLayout.LayoutParams) gameRenderSurface.getLayoutParams();
+        if (!stretchFill && captureWidth > 0 && captureHeight > 0) {
+            // Fit mode: size the surface to the capture aspect, centered, so tall
+            // apps pillarbox instead of stretching. Guard layout churn the same way
+            // as the fill path below (requestLayout storms blank the SurfaceView).
+            float scale = Math.min(
+                    areaW / (float) captureWidth, areaH / (float) captureHeight);
+            int sw = Math.max(1, Math.round(captureWidth * scale));
+            int sh = Math.max(1, Math.round(captureHeight * scale));
+            if (params.width == sw
+                    && params.height == sh
+                    && params.gravity == android.view.Gravity.CENTER) {
+                return;
+            }
+            params.width = sw;
+            params.height = sh;
+            params.gravity = android.view.Gravity.CENTER;
+            gameRenderSurface.setLayoutParams(params);
+            return;
+        }
         // Fill content_area edge-to-edge. Only touch LayoutParams when size actually
         // changes — setLayoutParams on every layout pass caused an infinite
         // requestLayout storm that blanked the SurfaceView (black cast).
-        FrameLayout.LayoutParams params = (FrameLayout.LayoutParams) gameRenderSurface.getLayoutParams();
         if (params.width == areaW
                 && params.height == areaH
                 && params.gravity == android.view.Gravity.FILL) {
@@ -4096,6 +4140,8 @@ public class PanelMainActivity extends AppCompatActivity {
     private volatile long lastDepthKickMs;
     private volatile boolean depthModeStatic;
     private boolean useGlesZMesh;
+    /** True = stretch capture to fill (legacy); false = contain-fit tall apps. */
+    private boolean stretchFill;
     private volatile boolean stereoHandoff;
     private int glesHandoffTries;
     private int lastStaticDepthFingerprint = Integer.MIN_VALUE;
@@ -4183,6 +4229,21 @@ public class PanelMainActivity extends AppCompatActivity {
             settingsStore.setGlesZMesh(isChecked);
             restartStereoAfterGlesToggle();
         });
+
+        stretchFill = settingsStore.getStretchFill();
+        Switch stretchToggle = findViewById(R.id.toggle_stretch_fill);
+        if (stretchToggle != null) {
+            stretchToggle.setChecked(stretchFill);
+            stretchToggle.setOnCheckedChangeListener((buttonView, isChecked) -> {
+                stretchFill = isChecked;
+                settingsStore.setStretchFill(isChecked);
+                fitSurfaceToCaptureAspectRatio();
+                contentArea.post(() -> {
+                    fitSurfaceToCaptureAspectRatio();
+                    lockSurfaceBufferSize();
+                });
+            });
+        }
 
         SeekBar contrastBar = findViewById(R.id.seekbar_depth_contrast);
         TextView contrastValue = findViewById(R.id.depth_contrast_value);
@@ -4426,8 +4487,26 @@ public class PanelMainActivity extends AppCompatActivity {
     /**
      * Renders {@code frame} into the mirror surface. With 3D on: side-by-side eyes +
      * parallax mesh. With 3D off: one full-bleed image (no mesh, no half-width stretch).
-     * Fills each destination rect edge-to-edge (no letterbox bars in the panel).
+     * Stretch-fill mode fills each destination rect edge-to-edge; fit mode contain-fits
+     * the frame (letterbox bars) so tall apps are not distorted — matching what the
+     * overlay/TTS mapping math assumes.
      */
+    private static Rect containRect(int boxW, int boxH, int contentW, int contentH) {
+        if (boxW <= 0 || boxH <= 0 || contentW <= 0 || contentH <= 0) {
+            return new Rect(0, 0, Math.max(1, boxW), Math.max(1, boxH));
+        }
+        float scale = Math.min(boxW / (float) contentW, boxH / (float) contentH);
+        int dw = Math.max(1, Math.round(contentW * scale));
+        int dh = Math.max(1, Math.round(contentH * scale));
+        int dx = (boxW - dw) / 2;
+        int dy = (boxH - dh) / 2;
+        return new Rect(dx, dy, dx + dw, dy + dh);
+    }
+
+    private static Rect offsetRect(Rect r, int dx, int dy) {
+        return new Rect(r.left + dx, r.top + dy, r.right + dx, r.bottom + dy);
+    }
+
     private void drawStereoMirrorFrame(Bitmap frame) {
         if (stereoHandoff) {
             return;
@@ -4455,16 +4534,26 @@ public class PanelMainActivity extends AppCompatActivity {
         }
         try {
             canvas.drawColor(Color.BLACK);
+            int cw = canvas.getWidth();
+            int ch = canvas.getHeight();
+            int fw = frame.getWidth();
+            int fh = frame.getHeight();
             if (!forceStereoEnabled) {
-                Rect fill = new Rect(0, 0, canvas.getWidth(), canvas.getHeight());
-                canvas.drawBitmap(frame, null, fill, MESH_PAINT);
+                Rect dest = stretchFill
+                        ? new Rect(0, 0, cw, ch)
+                        : containRect(cw, ch, fw, fh);
+                canvas.drawBitmap(frame, null, dest, MESH_PAINT);
                 return;
             }
-            int halfWidth = canvas.getWidth() / 2;
+            int halfWidth = cw / 2;
             float[][] parallaxGrid = cachedParallaxGrid;
-            Rect leftEye = new Rect(0, 0, halfWidth, canvas.getHeight());
+            Rect leftEye = stretchFill
+                    ? new Rect(0, 0, halfWidth, ch)
+                    : containRect(halfWidth, ch, fw, fh);
             // Same width as left — avoid odd-pixel right eye looking wider.
-            Rect rightEye = new Rect(halfWidth, 0, halfWidth + halfWidth, canvas.getHeight());
+            Rect rightEye = stretchFill
+                    ? new Rect(halfWidth, 0, halfWidth + halfWidth, ch)
+                    : offsetRect(containRect(halfWidth, ch, fw, fh), halfWidth, 0);
             drawEyeWithParallaxMesh(canvas, frame, leftEye, parallaxGrid, 1);
             drawEyeWithParallaxMesh(canvas, frame, rightEye, parallaxGrid, -1);
         } finally {

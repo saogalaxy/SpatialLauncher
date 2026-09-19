@@ -97,7 +97,7 @@ Pick one mode. The **Active:** line under the buttons shows the exact path. Sele
 - **Share + ML Kit OCR** — OCR → Piper + caption (English as-read)  
 - **Listen + cast** — talk / no-subs audio path  
 - **Browser + Translate / Google** — page MT + optional Read  
-- **Books long-press + PC** — Novel Translator EPUB import  
+- **Books long-press + PC** — Novel Translator EPUB import (My Books → Import over Wi‑Fi, or long-press book; same Wi‑Fi; Novel Translator must Find headset again if the Quest IP changed — stale addresses refuse)  
 - **Listen vs OCR** — Listen = audio; OCR+TTS = on-screen text. Don’t run both for the same job.
 
 ## Toolbar buttons (short)

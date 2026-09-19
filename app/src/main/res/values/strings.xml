@@ -10,6 +10,7 @@
     <string name="setting_3d_live">Live</string>
     <string name="setting_3d_static">Static</string>
     <string name="setting_gles_z_mesh">GLES Z-mesh</string>
+    <string name="setting_stretch_fill">Stretch fill (off = fit tall apps)</string>
     <string name="setting_depth_contrast">Depth contrast</string>
     <string name="setting_invert_depth">Invert depth</string>
     <string name="setting_edge_softness">Edge softness</string>
@@ -119,7 +120,7 @@
     <string name="help_combo_browser_translate_title">Browser + Translate / Google</string>
     <string name="help_combo_browser_translate_body">Open a page, tap Translate for offline/on-device, or Google Translate when online. Pair with TTS to hear it.</string>
     <string name="help_combo_books_import_title">Books long-press + PC</string>
-    <string name="help_combo_books_import_body">Long-press the book icon to start PC import, then send an EPUB from Novel Translator on the same Wi‑Fi.</string>
+    <string name="help_combo_books_import_body">My Books → Import over Wi‑Fi (or long-press the book icon) to start PC import, then send an EPUB from Novel Translator on the same Wi‑Fi. Send fails? Import mode must be on, both on the same Wi‑Fi, and Novel Translator must Find headset again — the Quest IP changes and stale addresses refuse.</string>
     <string name="help_combo_listen_vs_ocr_title">Listen vs OCR reading</string>
     <string name="help_combo_listen_vs_ocr_body">Listen = talk / no subs (audio). OCR + TTS / Translate = on-screen text / subs. Don’t run both for the same job.</string>
     <string name="browser_button_description">Open browser</string>
@@ -154,6 +155,8 @@
     <string name="my_books_title">My Books</string>
     <string name="my_books_empty">No books yet. Send an EPUB from Novel Translator, or open one from Files.</string>
     <string name="my_books_open_other">Open other…</string>
+    <string name="my_books_import_wifi">Import over Wi‑Fi…</string>
+    <string name="my_books_stop_import">Stop Wi‑Fi import</string>
     <string name="my_books_close">Close</string>
     <string name="my_books_sort_recent">Sort: Recent</string>
     <string name="my_books_sort_title">Sort: Title</string>
