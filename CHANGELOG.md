@@ -9,6 +9,7 @@ Release 1.0.2 packages the Cast crash + Browser 3D Share fixes below (release-si
 
 - **Lint cleanup + lock:** `lintDebug` is fully clean (was 28 errors: media3 opt-ins contained per-method, notification shade guarded + documented, control-layout orientations). Remaining 195 warnings locked in `app/lint-baseline.xml` — any new lint finding fails the build.
 - **SenseVoice strictly on-demand:** no more download prompt or background fetch at startup — first tap on the Listen (ear) icon drives consent + Wi‑Fi download via the existing Listen gate.
+- **Browser desktop UA:** WebView now reports desktop Chrome (was mobile) so Netflix & co. serve the desktop page instead of pushing their native app.
 
 ### Desktop Link — invariants (do not regress)
 

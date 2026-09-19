@@ -103,11 +103,13 @@ public final class WidevineWebViewConfig {
         settings.setAllowContentAccess(true);
         settings.setAllowFileAccessFromFileURLs(true);
         settings.setAllowUniversalAccessFromFileURLs(true);
-        // Modern mobile Chrome UA so streaming sites don't treat the WebView as a
-        // blocked / outdated browser and refuse Widevine / EME playback.
+        // Desktop Chrome UA so sites (Netflix et al.) serve the real desktop page
+        // instead of sniffing a mobile token and pushing their native app.
+        // setUseWideViewPort + setLoadWithOverviewMode above keep desktop
+        // layouts usable on the panel width.
         settings.setUserAgentString(
-                "Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 "
-                        + "(KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36");
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                        + "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36");
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
             settings.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
