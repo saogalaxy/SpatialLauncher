@@ -4670,6 +4670,21 @@ public class PanelMainActivity extends AppCompatActivity {
         pendingLaunchAlreadyStarted = true;
         launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
         startActivity(launchIntent);
+        // API 34 / Horizon OS validates the grant against a live mediaProjection
+        // FGS server-side: getMediaProjection() throws SecurityException without
+        // one. Promote the (already bound) service here — tap time is foreground,
+        // so no background-start restriction. Dropped on dismiss/stop.
+        try {
+            if (mirrorCaptureService != null) {
+                mirrorCaptureService.enterProjectionForeground();
+            }
+        } catch (RuntimeException e) {
+            Log.e(TAG, "enterProjectionForeground failed", e);
+            pendingLaunchApp = null;
+            pendingLaunchAlreadyStarted = false;
+            PanelAlerts.show(this, getString(R.string.launch_failed_message, app.label));
+            return;
+        }
         // App window first, then share sheet — otherwise the user dismisses capture,
         // the app appears after, and they have to tap the dock again.
         contentArea.postDelayed(() -> {
@@ -4737,9 +4752,8 @@ public class PanelMainActivity extends AppCompatActivity {
                 + " serviceNull=" + (mirrorCaptureService == null));
         if (resultCode == Activity.RESULT_OK && data != null) {
             try {
-                // targetSdk 34: get the token first, then promote MirrorCaptureService to
-                // mediaProjection FGS — startForeground(MEDIA_PROJECTION) before the grant
-                // throws SecurityException / ForegroundServiceStartNotAllowedException.
+                // FGS was promoted at tap time (see launchGame) so the grant
+                // validates; this re-enter is an idempotent no-op.
                 mediaProjection = projectionManager.getMediaProjection(resultCode, data);
                 if (mirrorCaptureService != null) {
                     mirrorCaptureService.enterProjectionForeground();
@@ -4767,6 +4781,11 @@ public class PanelMainActivity extends AppCompatActivity {
         } else {
             Log.w(TAG, "onActivityResult: projection not granted resultCode=" + resultCode
                     + " dataNull=" + (data == null) + " appAlreadyStarted=" + pendingLaunchAlreadyStarted);
+            // Sheet dismissed: drop the tap-time FGS promotion (stopMirroring
+            // covers the session-stop case).
+            if (mirrorCaptureService != null) {
+                mirrorCaptureService.leaveProjectionForeground();
+            }
         }
         pendingLaunchAlreadyStarted = false;
     }

@@ -20,11 +20,14 @@ import com.spatiallauncher.app.R;
  * while a foreground service of type {@code FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION}
  * is active.
  *
- * <p>targetSdk 34+: do <b>not</b> call {@code startForeground(MEDIA_PROJECTION)} before
- * the user has granted a MediaProjection token — the system throws
- * {@link SecurityException} / {@code ForegroundServiceStartNotAllowedException}.
- * Bind early (so the service process exists), then call {@link #enterProjectionForeground()}
- * only after {@code getMediaProjection()} succeeds and before {@code createVirtualDisplay()}.
+ * <p>targetSdk 34 / Horizon OS ordering: {@code getMediaProjection()} is validated
+ * server-side against a live FGS of this type, so {@link #enterProjectionForeground()}
+ * must run BEFORE the capture intent returns — {@code PanelMainActivity.launchGame()}
+ * promotes at tap time (foreground, so no background-start restriction), keeps it
+ * across the share-sheet grant, and drops it on dismiss ({@code onActivityResult})
+ * or session stop ({@code stopMirroring()}). Promoting in {@code onCreate()} was
+ * unreliable (not necessarily foreground yet); promoting only after the grant is
+ * too late ({@code SecurityException} from {@code getMediaProjection()}).
  */
 public class MirrorCaptureService extends Service {
     private static final String TAG = "MirrorCaptureService";
