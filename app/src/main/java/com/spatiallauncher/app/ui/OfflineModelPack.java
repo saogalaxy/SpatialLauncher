@@ -217,27 +217,16 @@ final class OfflineModelPack {
     }
 
     /**
-     * Startup-safe speech unpack: Piper voices always unpack locally, but the
-     * ~1 GB SenseVoice fetch only runs with user consent on unmetered Wi-Fi.
-     * Callers prompt / show status based on {@link #asrState(Context)}.
+     * Startup-safe speech unpack: Piper voices only. SenseVoice (~1 GB) is
+     * strictly on-demand — it prompts and fetches only when the user taps the
+     * Listen icon (see PanelMainActivity.ensureAsrForListen), never at startup.
      */
-    static void unpackSpeechGated(Context context, FetchProgress progress) {
+    static void unpackPiperOnly(Context context) {
         Context app = context.getApplicationContext();
         try {
             PiperTtsEngine.get(app).unpackVoiceArchives();
         } catch (Throwable t) {
             Log.w(TAG, "piper unpack failed", t);
-        }
-        if (isAsrReady(app)) {
-            try {
-                unpackAsr(app, null);
-            } catch (Throwable t) {
-                Log.w(TAG, "asr unpack failed", t);
-            }
-            return;
-        }
-        if (asrState(app) == ASR_READY_TO_FETCH) {
-            startAsrFetch(app, progress);
         }
     }
 

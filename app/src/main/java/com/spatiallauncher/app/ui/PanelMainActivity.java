@@ -381,11 +381,10 @@ public class PanelMainActivity extends AppCompatActivity {
         });
         new Thread(() -> {
             OfflineModelPack.unpackAll(getApplicationContext());
-            OfflineModelPack.unpackSpeechGated(getApplicationContext(), this::postModelProgress);
-            if (OfflineModelPack.asrState(getApplicationContext())
-                    == OfflineModelPack.ASR_NEED_CONSENT) {
-                runOnUiThread(this::showModelConsentDialog);
-            }
+            // Piper voices only. SenseVoice (~1 GB) never prompts or fetches
+            // here — first tap on the Listen icon drives consent + download
+            // via ensureAsrForListen().
+            OfflineModelPack.unpackPiperOnly(getApplicationContext());
             if (assistMode == AssistMode.TRANSLATE || assistMode == AssistMode.SHARE) {
                 OnDeviceTranslator.get(PanelMainActivity.this).ensureReady(ok -> { });
             }

@@ -68,7 +68,7 @@ Pick one mode. The **Active:** line under the buttons shows the exact path. Sele
 | **Google Translate** | Network each time (browser button) |
 | **PC EPUB import** | Same Wi‑Fi as Novel Translator on your PC |
 
-**Already in the APK:** female + male TTS (Piper), OPUS JA/ZH/KO, 3D depth, ML Kit OCR AARs. **SenseVoice** (Listen) downloads on first use over Wi‑Fi (~1 GB) after asking you. No Play Store model downloads.
+**Already in the APK:** female + male TTS (Piper), OPUS JA/ZH/KO, 3D depth, ML Kit OCR AARs. **SenseVoice** (Listen) downloads only when you first tap the ear icon — over Wi‑Fi (~1 GB) after asking you. No Play Store model downloads.
 
 ## Dual-mode icons
 
