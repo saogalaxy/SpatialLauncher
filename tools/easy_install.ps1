@@ -109,7 +109,20 @@ $installCmd = @(
 if ($Device -ne "") {
     $installCmd += @("--device", $Device)
 }
-$installCode = Invoke-NpxMetavr -MetavrArgs $installCmd
+# Capture output so a debug<->release signature mismatch can auto-recover
+# (replace alone cannot cross signatures: INSTALL_FAILED_UPDATE_INCOMPATIBLE).
+$installOut = & npx -y metavr @installCmd 2>&1 | Out-String
+Write-Host $installOut
+$installCode = $LASTEXITCODE
+if ($installCode -ne 0 -and $installOut -match "INSTALL_FAILED_UPDATE_INCOMPATIBLE") {
+    Write-Host "  Signature mismatch (e.g. release vs debug on headset) - uninstalling, then retrying (app data will be wiped)..." -ForegroundColor Yellow
+    $uninstallCmd = @("app", "uninstall", $PackageId)
+    if ($Device -ne "") { $uninstallCmd += @("--device", $Device) }
+    [void](Invoke-NpxMetavr -MetavrArgs $uninstallCmd)
+    $installOut = & npx -y metavr @installCmd 2>&1 | Out-String
+    Write-Host $installOut
+    $installCode = $LASTEXITCODE
+}
 if ($installCode -ne 0) {
     Fail "Install failed. Unplug/replug USB, unlock the headset, accept debugging, try again."
 }
