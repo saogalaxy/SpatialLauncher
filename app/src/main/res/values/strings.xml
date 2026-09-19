@@ -152,6 +152,9 @@
     <string name="browser_address_hint">Search or enter website</string>
     <string name="browser_back_description">Back</string>
     <string name="browser_forward_description">Forward</string>
+    <string name="browser_home_description">Home</string>
+    <string name="browser_stop_description">Stop loading</string>
+    <string name="browser_clear_address_description">Clear address</string>
     <string name="browser_bookmark_description">Bookmark this page</string>
     <string name="browser_history_description">History</string>
     <string name="browser_translate_page">Translate</string>

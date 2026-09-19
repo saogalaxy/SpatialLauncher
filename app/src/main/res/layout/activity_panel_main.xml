@@ -64,6 +64,26 @@
                     android:padding="8dp"
                     android:src="@drawable/ic_nav_forward" />
 
+                <ImageButton
+                    android:id="@+id/browser_home_button"
+                    android:layout_width="40dp"
+                    android:layout_height="40dp"
+                    android:layout_marginEnd="8dp"
+                    android:background="@drawable/bg_circle_button"
+                    android:contentDescription="@string/browser_home_description"
+                    android:padding="8dp"
+                    android:src="@drawable/ic_home" />
+
+                <ImageButton
+                    android:id="@+id/browser_stop_button"
+                    android:layout_width="40dp"
+                    android:layout_height="40dp"
+                    android:layout_marginEnd="8dp"
+                    android:background="@drawable/bg_circle_button"
+                    android:contentDescription="@string/browser_stop_description"
+                    android:padding="8dp"
+                    android:src="@drawable/ic_stop" />
+
                 <EditText
                     android:id="@+id/browser_address"
                     android:layout_width="0dp"
@@ -90,6 +110,16 @@
                     android:contentDescription="@string/browser_go_description"
                     android:padding="8dp"
                     android:src="@drawable/ic_globe" />
+
+                <ImageButton
+                    android:id="@+id/browser_clear_address_button"
+                    android:layout_width="40dp"
+                    android:layout_height="40dp"
+                    android:layout_marginStart="8dp"
+                    android:background="@drawable/bg_circle_button"
+                    android:contentDescription="@string/browser_clear_address_description"
+                    android:padding="8dp"
+                    android:src="@drawable/ic_close" />
 
                 <LinearLayout
                     android:id="@+id/browser_translate_meter"

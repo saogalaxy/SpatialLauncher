@@ -544,6 +544,35 @@ public class PanelMainActivity extends AppCompatActivity {
                 drmWebView.goForward();
             }
         });
+        findViewById(R.id.browser_home_button).setOnClickListener(v -> {
+            if (drmWebView != null) {
+                WidevineWebViewConfig.loadSecureUrl(drmWebView, BrowserLibraryStore.HOME_URL);
+            }
+        });
+        findViewById(R.id.browser_stop_button).setOnClickListener(v -> {
+            if (drmWebView != null) {
+                try {
+                    drmWebView.stopLoading();
+                } catch (Throwable t) {
+                    Log.w(TAG, "stop loading failed", t);
+                }
+            }
+        });
+        findViewById(R.id.browser_clear_address_button).setOnClickListener(v -> {
+            if (browserAddress != null) {
+                browserAddress.setText("");
+                browserAddress.requestFocus();
+                try {
+                    InputMethodManager imm = (InputMethodManager)
+                            getSystemService(Context.INPUT_METHOD_SERVICE);
+                    if (imm != null) {
+                        imm.showSoftInput(browserAddress, InputMethodManager.SHOW_IMPLICIT);
+                    }
+                } catch (Throwable t) {
+                    Log.w(TAG, "show keyboard failed", t);
+                }
+            }
+        });
         epubPageBar = findViewById(R.id.epub_page_bar);
         View epubPrev = findViewById(R.id.epub_prev_page);
         View epubNext = findViewById(R.id.epub_next_page);
