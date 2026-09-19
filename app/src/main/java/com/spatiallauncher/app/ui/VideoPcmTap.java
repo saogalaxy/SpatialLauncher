@@ -1,5 +1,7 @@
 package com.spatiallauncher.app.ui;
 
+import android.annotation.SuppressLint;
+
 import androidx.media3.common.C;
 import androidx.media3.exoplayer.audio.TeeAudioProcessor;
 
@@ -10,6 +12,10 @@ import java.nio.ByteOrder;
  * ExoPlayer {@link TeeAudioProcessor} sink → 16 kHz mono float ring for Listen ASR.
  * Playback continues normally; this only forks PCM.
  */
+// SuppressLint (not @UnstableApi): the marker would propagate the opt-in
+// requirement to every caller, including the field initializer and the Listen
+// engine. This one small class is the only touching surface.
+@SuppressLint("UnsafeOptInUsageError")
 final class VideoPcmTap implements TeeAudioProcessor.AudioBufferSink, PlaybackListenEngine.PcmSource {
     private static final int OUT_RATE = 16000;
     private static final int RING_SAMPLES = OUT_RATE * 4; // ~4 s

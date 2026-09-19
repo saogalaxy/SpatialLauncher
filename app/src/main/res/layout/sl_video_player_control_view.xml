@@ -113,12 +113,14 @@
         android:id="@id/exo_time"
         android:layout_width="0dp"
         android:layout_height="0dp"
+        android:orientation="horizontal"
         android:visibility="gone" />
 
     <LinearLayout
         android:id="@id/exo_basic_controls"
         android:layout_width="0dp"
         android:layout_height="0dp"
+        android:orientation="horizontal"
         android:visibility="gone" />
 
     <HorizontalScrollView
@@ -130,6 +132,7 @@
         <LinearLayout
             android:id="@id/exo_extra_controls"
             android:layout_width="wrap_content"
-            android:layout_height="wrap_content" />
+            android:layout_height="wrap_content"
+            android:orientation="horizontal" />
     </HorizontalScrollView>
 </merge>

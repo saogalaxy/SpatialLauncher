@@ -7,6 +7,9 @@ import android.app.Service;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.content.pm.PackageManager;
+import android.Manifest;
+import android.annotation.SuppressLint;
 import android.os.Binder;
 import android.os.Build;
 import android.os.Handler;
@@ -152,9 +155,17 @@ public class BookImportService extends Service {
                 .build();
     }
 
+    // POST_NOTIFICATIONS is intentionally undeclared (Security.2 trim): import
+    // progress already shows in the panel UI, the shade copy is best-effort.
+    @SuppressLint("NotificationPermission")
     private void postNotification(String text) {
         NotificationManager manager = getSystemService(NotificationManager.class);
         if (manager != null) {
+            if (Build.VERSION.SDK_INT >= 33
+                    && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)
+                            != PackageManager.PERMISSION_GRANTED) {
+                return;
+            }
             manager.notify(NOTIFICATION_ID, buildNotification(text));
         }
     }

@@ -52,6 +52,13 @@ android {
         pickFirst 'lib/x86_64/libonnxruntime.so'
     }
 
+    // Lint lock: `lint-baseline.xml` snapshots all currently-accepted warnings.
+    // Any NEW lint error or warning fails the build — clean it up or, if it is
+    // genuinely acceptable, regenerate with `./gradlew :app:updateLintBaseline`.
+    lint {
+        baseline = file("lint-baseline.xml")
+    }
+
     // Release signing: copy keystore.properties.example → keystore.properties (gitignored)
     // or run tools/create_release_keystore.ps1. Without it, release falls back to debug
     // signing so local assembleRelease still works — do NOT upload that to Meta Store.

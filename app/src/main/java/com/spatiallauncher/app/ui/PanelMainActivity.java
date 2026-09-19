@@ -510,11 +510,7 @@ public class PanelMainActivity extends AppCompatActivity {
         });
         videoHost = findViewById(R.id.video_host);
         hostedPlayerView = findViewById(R.id.video_player_view);
-        if (hostedPlayerView != null) {
-            hostedPlayerView.setUseController(false);
-            hostedPlayerView.setResizeMode(
-                    androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FIT);
-        }
+        // use_controller=false + resize_mode=fit are set in activity_panel_main.xml.
         bindVideoBar();
         View videoButton = findViewById(R.id.video_button);
         if (videoButton != null) {
@@ -1631,6 +1627,7 @@ public class PanelMainActivity extends AppCompatActivity {
         return -1;
     }
 
+    @OptIn(markerClass = UnstableApi.class) // ExoPlayer builder/AudioSink opt-ins.
     private void playVideoFile(File file, String title) {
         if (file == null || !file.isFile() || file.length() <= 0) {
             Log.w(TAG, "playVideoFile: missing or empty file");
@@ -1726,6 +1723,7 @@ public class PanelMainActivity extends AppCompatActivity {
      * stereo pipeline. Stereo overlay is shown only after the first good frame so
      * toggling 3D never covers the picture with a blank surface.
      */
+    @OptIn(markerClass = UnstableApi.class) // PlayerView surface/controller opt-ins.
     private void setVideoDisplayMode() {
         if (!videoPlaying) {
             stopVideoFramePump();
@@ -1769,6 +1767,7 @@ public class PanelMainActivity extends AppCompatActivity {
     }
 
     /** Restore flat PlayerView surface after leaving video 3D (transport is external). */
+    @OptIn(markerClass = UnstableApi.class) // getVideoSurfaceView()/shutter opt-ins.
     private void restoreVideoPlayerChrome() {
         if (hostedPlayerView != null) {
             View surface = hostedPlayerView.getVideoSurfaceView();
@@ -1793,6 +1792,7 @@ public class PanelMainActivity extends AppCompatActivity {
      * invisible for PixelCopy. Transport lives outside content_area (not on the
      * Horizon stereo surface), so flat chrome never draws over SBS.
      */
+    @OptIn(markerClass = UnstableApi.class) // PlayerView surface/controller opt-ins.
     private void showVideoStereoOverlayAfterFirstFrame() {
         if (!videoPlaying || !forceStereoEnabled || videoStereoSurfaceShown) {
             return;
@@ -2042,6 +2042,7 @@ public class PanelMainActivity extends AppCompatActivity {
         // Overlay is wired in showVideoStereoOverlayAfterFirstFrame / hideVideoStereoOverlay.
     }
 
+    @OptIn(markerClass = UnstableApi.class) // getVideoSurfaceView() opt-in.
     private void startVideoFramePump() {
         if (videoFramePumpRunning) {
             return;

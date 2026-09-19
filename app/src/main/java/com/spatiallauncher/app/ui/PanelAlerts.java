@@ -3,6 +3,9 @@ package com.spatiallauncher.app.ui;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.content.Context;
+import android.content.pm.PackageManager;
+import android.Manifest;
+import android.annotation.SuppressLint;
 import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
@@ -61,10 +64,19 @@ final class PanelAlerts {
         postShade(app, text);
     }
 
+    // POST_NOTIFICATIONS is intentionally undeclared (Security.2 trim): the in-app
+    // banner above is the status surface, the shade copy is best-effort and skipped
+    // when the grant is absent (notify() would be a silent no-op anyway).
+    @SuppressLint("NotificationPermission")
     private static void postShade(Context app, String text) {
         try {
             NotificationManager manager = app.getSystemService(NotificationManager.class);
             if (manager == null) {
+                return;
+            }
+            if (Build.VERSION.SDK_INT >= 33
+                    && app.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)
+                            != PackageManager.PERMISSION_GRANTED) {
                 return;
             }
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
