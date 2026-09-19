@@ -60,7 +60,51 @@ Write-Step "Checking JDK"
 if (-not (Test-Java)) {
     Fail "JDK not found. Install JDK 17+ and set JAVA_HOME, or add java to PATH. https://adoptium.net/"
 }
+try {
+    $javaVerOut = (& java -version 2>&1 | Out-String)
+    $major = 0
+    if ($javaVerOut -match 'version "1\.(\d+)') {
+        $major = 1  # old-style 1.x numbering (e.g. 1.8) is always too old
+    } elseif ($javaVerOut -match 'version "(\d+)') {
+        $major = [int]$Matches[1]
+    }
+    if ($major -ne 0 -and $major -lt 17) {
+        Fail "JDK $major found - need JDK 17+. Install from https://adoptium.net/ and set JAVA_HOME."
+    }
+} catch {
+    Fail "Could not run 'java -version'. Install JDK 17+ from https://adoptium.net/"
+}
 Write-Host "  JDK OK"
+
+Write-Step "Checking Android SDK"
+# Fresh git clones have no local.properties (gitignored by design), so accept
+# ANDROID_HOME / ANDROID_SDK_ROOT too. Without any of these, Gradle fails late
+# with a cryptic 'SDK location not found' - catch it here instead.
+$sdkDir = $null
+$localProps = Join-Path $Root "local.properties"
+if (Test-Path -LiteralPath $localProps) {
+    foreach ($line in (Get-Content -LiteralPath $localProps)) {
+        if ($line -match '^\s*sdk\.dir\s*=\s*(.+?)\s*$') {
+            $sdkDir = $Matches[1] -replace '\\\\', '\'
+        }
+    }
+}
+if ([string]::IsNullOrWhiteSpace($sdkDir)) { $sdkDir = $env:ANDROID_HOME }
+if ([string]::IsNullOrWhiteSpace($sdkDir)) { $sdkDir = $env:ANDROID_SDK_ROOT }
+$adbOk = $false
+if (-not [string]::IsNullOrWhiteSpace($sdkDir)) {
+    $adbExe = Join-Path $sdkDir "platform-tools\adb.exe"
+    $adbBin = Join-Path $sdkDir "platform-tools\adb"
+    if ((Test-Path -LiteralPath $adbExe) -or (Test-Path -LiteralPath $adbBin)) {
+        $adbOk = $true
+    }
+}
+if (-not $adbOk) {
+    Fail ("Android SDK not found (no local.properties sdk.dir, ANDROID_HOME, or ANDROID_SDK_ROOT with platform-tools).`n" +
+        "Install Android Studio (https://developer.android.com/studio) or the SDK command-line tools,`n" +
+        "then re-run. (SDK Manager packages needed: platform-tools, platforms;android-34, build-tools;34.0.0)")
+}
+Write-Host ("  Android SDK OK (" + $sdkDir + ")")
 
 Write-Step "Checking Node / npx (for metavr)"
 $npxCmd = Get-Command npx -ErrorAction SilentlyContinue
