@@ -64,7 +64,9 @@ When changing Quest `DesktopLinkActivity` or PC `QuestLinkServer` / `MirrorSessi
 - **SenseVoice hardening (Quest):** upstream archive renamed `model.int8.onnx` → `model.onnx` and ships an 894 MB fp32 next to the 239 MB int8 — a truncated extract passed existence checks and ORT aborted the process (SIGABRT). Now: selective extract (int8 + tokens only), per-entry byte-exact verification, partial cleanup on failure, int8 preferred with size floors. Verified live: int8 byte-exact, Listen transcribing.
 - **Mic wording (Quest):** no microphone source exists in the codebase (cast-playback capture only); Listen prompt / Help / privacy now say Android labels the required audio-capture permission “Microphone” but the mic is never recorded.
 - **New app icon:** 3D-glasses character (transparent source) across Quest mipmaps + adaptive foreground, desktop ICO (transparent, denser fill for tray), 180px store tile. Export script also emits the ICO + store icon.
-- **Store assets:** `docs/store-assets/` built from Meta's asset spec — icon 512, spatialized 180 bg+fg, hero/covers/mini, transparent logo lockup, 6× 2560×1440 screenshots (upscaled first drafts). Trailer MP4 + dashboard upload still manual.
+- **Store assets:** `docs/store-assets/` built from Meta's asset spec — icon 512, spatialized 180 bg+fg, hero/covers/mini, transparent logo lockup, 6× 2560×1440 screenshots (upscaled first drafts). Trailers: user-shot 30s + full promo cut to spec. Dashboard upload still manual.
+- **Stretch/fit toggle (Quest):** cast scaling is now a setting (default fit). Canvas path letterboxes tall apps instead of stretching; surface sizing + touch mapping follow the mode. Fixes TTS/OCR boxes misaligning on stretched content.
+- **My Books import row (Quest):** shelf has an explicit Import over Wi‑Fi / Stop entry (empty shelf too) — import no longer hides behind long-press. Both apps' help now cover the stale-IP/refused fix (Find headset again).
 
 ### Docs
 - Added [docs/TECH_STACK.md](docs/TECH_STACK.md) (platforms, libraries, ports, models, audio/video path).
