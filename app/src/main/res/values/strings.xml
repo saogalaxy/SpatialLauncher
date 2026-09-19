@@ -200,6 +200,10 @@
     <string name="browser_clear_data_title">Clear cookies &amp; site data</string>
     <string name="browser_clear_data_body">Signs you out of all sites in this browser.</string>
     <string name="browser_clear_data_done">Site data cleared — reloading</string>
+    <string name="browser_clear_site_title">Clear this site</string>
+    <string name="browser_clear_site_body">Forgets %1$s cookies and site storage. Other sites stay signed in.</string>
+    <string name="browser_clear_site_done">Site cleared — reloading</string>
+    <string name="browser_no_site">No site open to clear</string>
     <string name="browser_tab_close">Close tab</string>
     <string name="setting_tts">TTS</string>
     <string name="setting_tts_auto">Read dialogue automatically</string>

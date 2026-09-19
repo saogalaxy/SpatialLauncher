@@ -11,6 +11,7 @@ Release 1.0.2 packages the Cast crash + Browser 3D Share fixes below (release-si
 - **SenseVoice strictly on-demand:** no more download prompt or background fetch at startup — first tap on the Listen (ear) icon drives consent + Wi‑Fi download via the existing Listen gate.
 - **Browser desktop UA:** WebView now reports desktop Chrome (was mobile) so Netflix & co. serve the desktop page instead of pushing their native app.
 - **Browser clear-data:** history dialog gains “Clear cookies & site data” (cookies, DOM storage, caches, history + reload) for stale sessions.
+- **Browser per-site clear:** “Clear this site” forgets just the open host (visible cookies + origin storage) — other sites stay signed in. Best-effort: parent-domain cookies and IndexedDB may survive; the full clear covers those.
 
 ### Desktop Link — invariants (do not regress)
 

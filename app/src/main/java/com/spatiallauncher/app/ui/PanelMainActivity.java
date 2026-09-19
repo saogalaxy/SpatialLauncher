@@ -3461,6 +3461,7 @@ public class PanelMainActivity extends AppCompatActivity {
         String[] choices = new String[] {
                 getString(R.string.browser_bookmarks_title),
                 getString(R.string.browser_history_title),
+                getString(R.string.browser_clear_site_title),
                 getString(R.string.browser_clear_data_title)
         };
         new AlertDialog.Builder(this)
@@ -3471,6 +3472,8 @@ public class PanelMainActivity extends AppCompatActivity {
                     } else if (which == 1) {
                         showPageList(getString(R.string.browser_history_title),
                                 browserLibraryStore.getHistory());
+                    } else if (which == 2) {
+                        confirmClearCurrentSite();
                     } else {
                         confirmClearBrowserSiteData();
                     }
@@ -3485,6 +3488,82 @@ public class PanelMainActivity extends AppCompatActivity {
                 .setPositiveButton(R.string.browser_clear_data_title, (d, w) -> clearBrowserSiteData())
                 .setNegativeButton(android.R.string.cancel, null)
                 .show();
+    }
+
+    private void confirmClearCurrentSite() {
+        String host = currentSiteHost();
+        if (host == null) {
+            PanelAlerts.show(this, R.string.browser_no_site);
+            return;
+        }
+        new AlertDialog.Builder(this)
+                .setTitle(R.string.browser_clear_site_title)
+                .setMessage(getString(R.string.browser_clear_site_body, host))
+                .setPositiveButton(R.string.browser_clear_site_title, (d, w) -> clearCurrentSiteData())
+                .setNegativeButton(android.R.string.cancel, null)
+                .show();
+    }
+
+    private String currentSiteHost() {
+        try {
+            String url = drmWebView != null ? drmWebView.getUrl() : null;
+            if (url == null || url.isEmpty()) {
+                return null;
+            }
+            String host = android.net.Uri.parse(url).getHost();
+            return (host == null || host.isEmpty()) ? null : host;
+        } catch (Throwable t) {
+            Log.w(TAG, "current host failed", t);
+            return null;
+        }
+    }
+
+    /**
+     * Best-effort per-site forget: expires every cookie visible at the current
+     * URL and drops this host's DOM storage origins, then reloads. WebView has
+     * no true per-domain clear API (no cookie enumeration, IndexedDB is out of
+     * reach), so parent-domain cookies and IndexedDB may survive — the full
+     * clear above covers those.
+     */
+    private void clearCurrentSiteData() {
+        if (drmWebView == null) {
+            return;
+        }
+        String url = drmWebView.getUrl();
+        String host = currentSiteHost();
+        if (url == null || host == null) {
+            PanelAlerts.show(this, R.string.browser_no_site);
+            return;
+        }
+        try {
+            android.webkit.CookieManager cm = android.webkit.CookieManager.getInstance();
+            String cookieString = cm.getCookie(url);
+            if (cookieString != null) {
+                for (String pair : cookieString.split(";")) {
+                    int eq = pair.indexOf('=');
+                    String name = (eq > 0 ? pair.substring(0, eq) : pair).trim();
+                    if (!name.isEmpty()) {
+                        cm.setCookie(url, name + "=; Expires=Thu, 01 Jan 1970 00:00:00 GMT");
+                    }
+                }
+                cm.flush();
+            }
+        } catch (Throwable t) {
+            Log.w(TAG, "clear site cookies failed", t);
+        }
+        try {
+            android.webkit.WebStorage ws = android.webkit.WebStorage.getInstance();
+            ws.deleteOrigin("https://" + host);
+            ws.deleteOrigin("http://" + host);
+        } catch (Throwable t) {
+            Log.w(TAG, "clear site storage failed", t);
+        }
+        PanelAlerts.show(this, R.string.browser_clear_site_done);
+        try {
+            drmWebView.reload();
+        } catch (Throwable t) {
+            Log.w(TAG, "reload after clear failed", t);
+        }
     }
 
     /** Drops cookies, DOM storage, caches, and history across all tabs. */
