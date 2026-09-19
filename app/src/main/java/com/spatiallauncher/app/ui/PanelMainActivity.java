@@ -2534,8 +2534,13 @@ public class PanelMainActivity extends AppCompatActivity {
                 .show();
     }
 
-    /** True when Listen may start; otherwise prompts / informs and returns false. */
-    private boolean ensureAsrForListen() {
+    /**
+     * True when Listen may start. The ASR gate runs first so tapping the ear
+     * icon itself drives consent/download even with nothing cast yet. The
+     * consent dialog only shows for real taps (promptForConsent) — background
+     * entries (resume, cast grant, video start) get a status banner instead.
+     */
+    private boolean ensureAsrForListen(boolean promptForConsent) {
         switch (OfflineModelPack.asrState(this)) {
             case OfflineModelPack.ASR_READY:
                 return true;
@@ -2551,7 +2556,11 @@ public class PanelMainActivity extends AppCompatActivity {
                 return false;
             case OfflineModelPack.ASR_NEED_CONSENT:
             default:
-                showModelConsentDialog();
+                if (promptForConsent) {
+                    showModelConsentDialog();
+                } else {
+                    PanelAlerts.show(this, R.string.listen_need_download);
+                }
                 return false;
         }
     }
@@ -2698,11 +2707,14 @@ public class PanelMainActivity extends AppCompatActivity {
         if (assistMode != AssistMode.LISTEN || listenEngine == null) {
             return;
         }
+        // ASR before source: the ear tap drives consent/download even when
+        // nothing is cast yet. notifyIfNoSource is true only for real taps
+        // (see all call sites), so background entries never pop the dialog.
+        if (!ensureAsrForListen(notifyIfNoSource)) {
+            return;
+        }
         if (videoPlaying && videoPlayer != null) {
             if (!listenEngine.isRunning()) {
-                if (!ensureAsrForListen()) {
-                    return;
-                }
                 listenEngine.setSmoothnessPercent(settingsStore.getListenSmoothnessPercent());
                 listenEngine.startFromPcm(videoPcmTap);
             }
@@ -2715,9 +2727,6 @@ public class PanelMainActivity extends AppCompatActivity {
             return;
         }
         if (!listenEngine.isRunning()) {
-            if (!ensureAsrForListen()) {
-                return;
-            }
             listenEngine.setSmoothnessPercent(settingsStore.getListenSmoothnessPercent());
             listenEngine.start(mediaProjection);
         }

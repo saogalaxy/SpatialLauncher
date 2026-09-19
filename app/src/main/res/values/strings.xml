@@ -294,6 +294,7 @@
     <string name="model_dl_progress">Downloading speech models… %1$d MB</string>
     <string name="listen_need_wifi">Connect to Wi‑Fi to download speech models (~1 GB)</string>
     <string name="listen_downloading_retry">Speech models still downloading — try again shortly</string>
+    <string name="listen_need_download">Listen needs its one-time speech download (~1 GB) — tap the ear icon</string>
     <string name="setting_ocr_smoothness">OCR smoothness</string>
     <string name="setting_ocr_smoothness_hint">Higher = wait longer for a stable caption (fewer cuts/repeats). Lower = snappier, may speak partial lines.</string>
     <string name="ocr_smoothness_smooth">Smooth</string>
