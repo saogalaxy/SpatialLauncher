@@ -197,6 +197,9 @@
     <string name="browser_bookmarks_title">Bookmarks</string>
     <string name="browser_history_title">History</string>
     <string name="browser_empty_list">Nothing saved yet</string>
+    <string name="browser_clear_data_title">Clear cookies &amp; site data</string>
+    <string name="browser_clear_data_body">Signs you out of all sites in this browser.</string>
+    <string name="browser_clear_data_done">Site data cleared — reloading</string>
     <string name="browser_tab_close">Close tab</string>
     <string name="setting_tts">TTS</string>
     <string name="setting_tts_auto">Read dialogue automatically</string>

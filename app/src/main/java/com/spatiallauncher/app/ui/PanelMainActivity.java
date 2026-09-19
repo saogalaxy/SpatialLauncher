@@ -3460,19 +3460,66 @@ public class PanelMainActivity extends AppCompatActivity {
     private void showBrowserLists() {
         String[] choices = new String[] {
                 getString(R.string.browser_bookmarks_title),
-                getString(R.string.browser_history_title)
+                getString(R.string.browser_history_title),
+                getString(R.string.browser_clear_data_title)
         };
         new AlertDialog.Builder(this)
                 .setItems(choices, (d, which) -> {
                     if (which == 0) {
                         showPageList(getString(R.string.browser_bookmarks_title),
                                 browserLibraryStore.getBookmarks());
-                    } else {
+                    } else if (which == 1) {
                         showPageList(getString(R.string.browser_history_title),
                                 browserLibraryStore.getHistory());
+                    } else {
+                        confirmClearBrowserSiteData();
                     }
                 })
                 .show();
+    }
+
+    private void confirmClearBrowserSiteData() {
+        new AlertDialog.Builder(this)
+                .setTitle(R.string.browser_clear_data_title)
+                .setMessage(R.string.browser_clear_data_body)
+                .setPositiveButton(R.string.browser_clear_data_title, (d, w) -> clearBrowserSiteData())
+                .setNegativeButton(android.R.string.cancel, null)
+                .show();
+    }
+
+    /** Drops cookies, DOM storage, caches, and history across all tabs. */
+    private void clearBrowserSiteData() {
+        try {
+            android.webkit.CookieManager cm = android.webkit.CookieManager.getInstance();
+            cm.removeAllCookies(null);
+            cm.flush();
+        } catch (Throwable t) {
+            Log.w(TAG, "clear cookies failed", t);
+        }
+        try {
+            android.webkit.WebStorage.getInstance().deleteAllData();
+        } catch (Throwable t) {
+            Log.w(TAG, "clear webstorage failed", t);
+        }
+        for (WebView tab : browserTabs) {
+            try {
+                if (tab != null) {
+                    tab.clearCache(true);
+                    tab.clearHistory();
+                    tab.clearFormData();
+                }
+            } catch (Throwable t) {
+                Log.w(TAG, "clear tab data failed", t);
+            }
+        }
+        PanelAlerts.show(this, R.string.browser_clear_data_done);
+        if (drmWebView != null) {
+            try {
+                drmWebView.reload();
+            } catch (Throwable t) {
+                Log.w(TAG, "reload after clear failed", t);
+            }
+        }
     }
 
     private void showPageList(String title, java.util.List<BrowserLibraryStore.PageEntry> entries) {
