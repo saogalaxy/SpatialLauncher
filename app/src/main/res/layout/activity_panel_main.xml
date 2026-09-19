@@ -109,7 +109,7 @@
                     android:background="@drawable/bg_circle_button"
                     android:contentDescription="@string/browser_go_description"
                     android:padding="8dp"
-                    android:src="@drawable/ic_globe" />
+                    android:src="@drawable/ic_go" />
 
                 <ImageButton
                     android:id="@+id/browser_clear_address_button"
