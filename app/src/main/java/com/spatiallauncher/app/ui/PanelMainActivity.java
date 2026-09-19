@@ -3763,6 +3763,10 @@ public class PanelMainActivity extends AppCompatActivity {
     private boolean browserStereoRunning = false;
     /** True after stereo has a frame and the live WebView is hidden (avoids PiP). */
     private boolean browserStereoLiveHidden;
+    /** Protected (DRM) video showing flat: capture is black by hardware design. */
+    private boolean browserProtectedVideo;
+    /** Consecutive ticks where page video refused capture (VIDEO_BLOCKED/black). */
+    private int browserVideoBlockedTicks;
     private Bitmap browserCaptureBitmap;
     private boolean browserGpuCanvas;
     private final AtomicBoolean browserPixelCopyBusy = new AtomicBoolean(false);
@@ -3789,6 +3793,8 @@ public class PanelMainActivity extends AppCompatActivity {
             return;
         }
         browserStereoLiveHidden = false;
+        browserProtectedVideo = false;
+        browserVideoBlockedTicks = 0;
         setBrowserStereoCaptureMode(true);
         setStereoOutputVisible(true);
         gameRenderSurface.setClickable(false);
@@ -3796,18 +3802,7 @@ public class PanelMainActivity extends AppCompatActivity {
             gameRenderSurface.bringToFront();
         }
         if (overlayView != null) {
-            overlayView.setVisibility(View.VISIBLE);
-            overlayView.bringToFront();
-            overlayView.setOnTouchListener((v, event) -> {
-                if (requiresUiInputChannel() || !canPassThroughCastTouches()) {
-                    return false;
-                }
-                View castView = resolveCastTarget();
-                if (castView == null) {
-                    return false;
-                }
-                return forwardTouchToCastView(event, castView, v);
-            });
+            armStereoTouchOverlay();
         }
         setStereoComposition(forceStereoEnabled);
         activeStereoSurface().post(() -> {
@@ -4114,11 +4109,32 @@ public class PanelMainActivity extends AppCompatActivity {
         return Math.max(browserPageScrollY, drmWebView.getScrollY());
     }
 
+    /** Overlay poke-target with stereo touch forwarding (shared by start + fallback exit). */
+    private void armStereoTouchOverlay() {
+        if (overlayView == null) {
+            return;
+        }
+        overlayView.setVisibility(View.VISIBLE);
+        overlayView.bringToFront();
+        overlayView.setOnTouchListener((v, event) -> {
+            if (requiresUiInputChannel() || !canPassThroughCastTouches()) {
+                return false;
+            }
+            View castView = resolveCastTarget();
+            if (castView == null) {
+                return false;
+            }
+            return forwardTouchToCastView(event, castView, v);
+        });
+    }
+
     private void stopBrowserStereo() {
         browserStereoRunning = false;
         browserStereoHandler.removeCallbacks(browserStereoTick);
         browserGpuCanvas = false;
         browserStereoLiveHidden = false;
+        browserProtectedVideo = false;
+        browserVideoBlockedTicks = 0;
         setBrowserStereoCaptureMode(false);
         setBrowserLiveUnderStereo(false);
         if (overlayView != null) {
@@ -4246,6 +4262,16 @@ public class PanelMainActivity extends AppCompatActivity {
                     if (!browserStereoRunning) {
                         return;
                     }
+                    if (isVideoBlockedMarker(value)) {
+                        // Page video explicitly refused canvas capture (protected
+                        // path). A few consecutive refusals + black frames below
+                        // means DRM, not a loading spinner.
+                        browserVideoBlockedTicks++;
+                        if (browserVideoBlockedTicks >= 3) {
+                            enterProtectedVideoFallback();
+                        }
+                        return;
+                    }
                     Bitmap fromJs = decodeDataUrlBitmap(value);
                     if (fromJs == null) {
                         // Keep trying video/canvas next tick; avoid locking onto a
@@ -4284,6 +4310,69 @@ public class PanelMainActivity extends AppCompatActivity {
         }, browserStereoHandler);
     }
 
+    private static boolean isVideoBlockedMarker(String jsValue) {
+        if (jsValue == null) {
+            return false;
+        }
+        String raw = jsValue.trim();
+        if (raw.length() >= 2 && raw.charAt(0) == '"') {
+            raw = raw.substring(1, raw.length() - 1);
+        }
+        return "VIDEO_BLOCKED".equals(raw);
+    }
+
+    /** 8x8 sample: true when essentially every pixel is near-black. */
+    private static boolean isBitmapMostlyBlack(Bitmap bm) {
+        if (bm == null) {
+            return false;
+        }
+        int w = bm.getWidth();
+        int h = bm.getHeight();
+        if (w <= 0 || h <= 0) {
+            return false;
+        }
+        int dark = 0;
+        int total = 0;
+        for (int i = 0; i < 8; i++) {
+            for (int j = 0; j < 8; j++) {
+                int px = bm.getPixel(i * (w - 1) / 7, j * (h - 1) / 7);
+                total++;
+                int r = (px >> 16) & 0xFF;
+                int g = (px >> 8) & 0xFF;
+                int b = px & 0xFF;
+                if (r < 24 && g < 24 && b < 24) {
+                    dark++;
+                }
+            }
+        }
+        return dark >= total - 1;
+    }
+
+    /**
+     * Protected video fallback: the hardware secure path hands capture black
+     * pixels by design, so stereo would be a black box. Show the live page
+     * flat (watchable, touchable) and say so. Exits automatically when
+     * watchable frames return (see publishBrowserStereoFrame).
+     */
+    private void enterProtectedVideoFallback() {
+        if (browserProtectedVideo || !browserStereoRunning) {
+            return;
+        }
+        browserProtectedVideo = true;
+        browserStereoLiveHidden = false;
+        setBrowserLiveUnderStereo(false);
+        setStereoOutputVisible(false);
+        if (overlayView != null) {
+            overlayView.setOnTouchListener(null);
+            overlayView.setVisibility(View.GONE);
+        }
+        if (browserHost != null && isBrowserOpen()) {
+            browserHost.bringToFront();
+        }
+        PanelAlerts.show(this, R.string.browser_protected_video_flat);
+        Log.i(TAG, "protected video: live page flat, stereo off");
+    }
+
     private static Bitmap decodeDataUrlBitmap(String jsValue) {
         if (jsValue == null || jsValue.length() < 32 || "null".equals(jsValue) || "\"\"".equals(jsValue)) {
             return null;
@@ -4307,6 +4396,22 @@ public class PanelMainActivity extends AppCompatActivity {
     private void publishBrowserStereoFrame() {
         if (browserCaptureBitmap == null) {
             return;
+        }
+        // Secure-path signature: page video refused capture AND the frame is
+        // (near-)black. Normal dark pages never set blockedTicks, so they
+        // publish untouched.
+        if (browserStereoRunning && browserVideoBlockedTicks > 0
+                && isBitmapMostlyBlack(browserCaptureBitmap)) {
+            browserVideoBlockedTicks++;
+            enterProtectedVideoFallback();
+            return;
+        }
+        browserVideoBlockedTicks = 0;
+        if (browserProtectedVideo) {
+            // Watchable frames again (navigated away) — resume normal stereo:
+            // re-arm touch forwarding and let publish below re-hide the live view.
+            browserProtectedVideo = false;
+            armStereoTouchOverlay();
         }
         if (ttsEnabled) {
             screenFrameCapture.retainSourceForTap(browserCaptureBitmap);

@@ -155,6 +155,7 @@
     <string name="browser_home_description">Home</string>
     <string name="browser_stop_description">Stop loading</string>
     <string name="browser_clear_address_description">Clear address</string>
+    <string name="browser_protected_video_flat">Protected video can’t do 3D — showing flat</string>
     <string name="browser_bookmark_description">Bookmark this page</string>
     <string name="browser_history_description">History</string>
     <string name="browser_translate_page">Translate</string>
