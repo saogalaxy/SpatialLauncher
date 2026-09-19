@@ -4641,6 +4641,7 @@ public class PanelMainActivity extends AppCompatActivity {
         stopBookImportServerQuiet();
         Intent launchIntent = packageManager.getLaunchIntentForPackage(app.packageName);
         if (launchIntent == null) {
+            Log.w(TAG, "launchGame: no launch intent for " + app.packageName);
             PanelAlerts.show(this, getString(R.string.launch_failed_message, app.label));
             return;
         }
@@ -4724,10 +4725,16 @@ public class PanelMainActivity extends AppCompatActivity {
 
         Intent launchIntent = packageManager.getLaunchIntentForPackage(app.packageName);
         if (launchIntent == null) {
+            Log.w(TAG, "onActivityResult: no launch intent for " + app.packageName
+                    + " resultCode=" + resultCode);
             PanelAlerts.show(this, getString(R.string.launch_failed_message, app.label));
             return;
         }
 
+        Log.i(TAG, "onActivityResult: media projection resultCode=" + resultCode
+                + " dataNull=" + (data == null)
+                + " serviceBound=" + mirrorServiceBound
+                + " serviceNull=" + (mirrorCaptureService == null));
         if (resultCode == Activity.RESULT_OK && data != null) {
             try {
                 // targetSdk 34: get the token first, then promote MirrorCaptureService to
@@ -4757,6 +4764,9 @@ public class PanelMainActivity extends AppCompatActivity {
             }
         } else if (!pendingLaunchAlreadyStarted) {
             startActivity(launchIntent);
+        } else {
+            Log.w(TAG, "onActivityResult: projection not granted resultCode=" + resultCode
+                    + " dataNull=" + (data == null) + " appAlreadyStarted=" + pendingLaunchAlreadyStarted);
         }
         pendingLaunchAlreadyStarted = false;
     }
