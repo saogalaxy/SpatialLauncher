@@ -54,11 +54,12 @@ Listen uses bundled OPUS (not Google ML Kit Translate).
 | Permission | Why |
 |------------|-----|
 | **MediaProjection** (share sheet) | Capture the window you select for cast, OCR, and Listen audio |
-| **RECORD_AUDIO** | Listen path: captures the cast app’s playback audio only (MEDIA/GAME usages, own app excluded). Android requires this permission for any audio capture and labels it “Microphone” — the microphone itself is never opened or recorded |
-| **INTERNET / NETWORK_STATE / WIFI_STATE** | Optional Google Translate button, LAN book import |
-| **FOREGROUND_SERVICE** (+ media projection / data sync types) | Keep capture and import services alive while in use |
-| **POST_NOTIFICATIONS** | Foreground service / status as required by Android |
+| **RECORD_AUDIO** | Listen path: captures the cast app’s playback audio only (MEDIA/GAME usages, own app excluded). Android requires this permission for any audio capture and labels it “Microphone” — the microphone itself is never opened or recorded. If denied, Listen stays off; other features continue |
+| **INTERNET / NETWORK_STATE / WIFI_STATE** | Optional Google Translate button, LAN book import, Desktop Link, first-use SenseVoice download (with consent) |
+| **FOREGROUND_SERVICE** (+ mediaProjection) | Keep MirrorCaptureService alive while casting |
 | **Package visibility (queries)** | List installed apps for the dock “Add App” picker |
+
+We do **not** declare `POST_NOTIFICATIONS` or `WAKE_LOCK`. Status messages use the in-app banner; foreground-service notifications are system-exempt.
 
 We do not use these permissions to build a profile or sell data.
 

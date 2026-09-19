@@ -400,6 +400,15 @@ public class DesktopLinkActivity extends AppCompatActivity implements SurfaceHol
     }
 
     @Override
+    protected void onStop() {
+        // Leaving for another VR app: stop video pumps + headset audio so the
+        // link doesn't burn CPU/GPU/network behind the foreground title.
+        // streamDesired stays true, so onResume restarts via startStream().
+        new Thread(() -> stopStreamJoin(true), "DesktopLinkBgStop").start();
+        super.onStop();
+    }
+
+    @Override
     protected void onResume() {
         super.onResume();
         activeThinClient = true;

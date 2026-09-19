@@ -54,6 +54,9 @@ When changing Quest `DesktopLinkActivity` or PC `QuestLinkServer` / `MirrorSessi
 - PC **Listen** (WASAPI → SenseVoice on the desktop) is unchanged.
 
 ### Quest build
+- **Video player (reel):** My Videos shelf (like My Books); ExoPlayer TextureView + mono-first play; frames feed OCR/TTS/Share/3D; TeeAudioProcessor PCM → Listen on soundtrack; resume after background.
+- **Meta Store Packaging.1:** `targetSdk 34`, `installLocation=auto`, `excludeFromRecents` on launch activity, `com.oculus.supportedDevices` for quest2/pro/3/3s, optional mic + headtracking `required=false`.
+- **Security.2 trim:** dropped unused `POST_NOTIFICATIONS`, `WAKE_LOCK`, and `FOREGROUND_SERVICE_DATA_SYNC`; Listen deny shows an in-app banner and leaves other features working. Dashboard justifications in [docs/RELEASE_SIGNING.md](docs/RELEASE_SIGNING.md).
 - **APK size fix:** stop packing Qwen (~986 MB) + SenseVoice (~1 GB) into the debug APK (AGP `packageDebug` **integer overflow** past ~2GB uncompressed). Piper + OPUS stay in the APK; Qwen/SenseVoice download on first headset use. Optional `-PpackHeavyModels=true`.
 - **Release signing:** `tools/create_release_keystore.ps1` + `keystore.properties` (gitignored) wire `assembleRelease` for Meta Store uploads — see [docs/RELEASE_SIGNING.md](docs/RELEASE_SIGNING.md).
 - **Lint error fix (Book import):** `BookImportHttp` used `ByteArrayOutputStream.toString(Charset)` (API 33+) with `minSdk 29` — `NoSuchMethodError` on Quest (API 29–32) when reading import request headers; replaced with `new String(bytes, ISO_8859_1)`.
@@ -63,6 +66,7 @@ When changing Quest `DesktopLinkActivity` or PC `QuestLinkServer` / `MirrorSessi
 - **Qwen strip (Quest):** removed the dead Novel Translator leftover — `QwenPageEngine` / `QwenPageService` (`:qwen`), llama-opencl dep + OpenCL manifest entries, Qwen Gradle/OfflineModelPack wiring. Page Translate is OPUS-only; docs + `page_translate_3d_off` string updated. (Qwen polish was skipped since 09-12: 1.5B echoed prompts.)
 - **SenseVoice hardening (Quest):** upstream archive renamed `model.int8.onnx` → `model.onnx` and ships an 894 MB fp32 next to the 239 MB int8 — a truncated extract passed existence checks and ORT aborted the process (SIGABRT). Now: selective extract (int8 + tokens only), per-entry byte-exact verification, partial cleanup on failure, int8 preferred with size floors. Verified live: int8 byte-exact, Listen transcribing.
 - **Mic wording (Quest):** no microphone source exists in the codebase (cast-playback capture only); Listen prompt / Help / privacy now say Android labels the required audio-capture permission “Microphone” but the mic is never recorded.
+- **Quit button (Quest):** X at the end of the dock bar asks once, then kills the process outright (no cached linger). 1.0.1 / versionCode 3.
 - **New app icon:** 3D-glasses character (transparent source) across Quest mipmaps + adaptive foreground, desktop ICO (transparent, denser fill for tray), 180px store tile. Export script also emits the ICO + store icon.
 - **Store assets:** `docs/store-assets/` built from Meta's asset spec — icon 512, spatialized 180 bg+fg, hero/covers/mini, transparent logo lockup, 6× 2560×1440 screenshots (upscaled first drafts). Trailers: user-shot 30s + full promo cut to spec. Dashboard upload still manual.
 - **Stretch/fit toggle (Quest):** cast scaling is now a setting (default fit). Canvas path letterboxes tall apps instead of stretching; surface sizing + touch mapping follow the mode. Fixes TTS/OCR boxes misaligning on stretched content.

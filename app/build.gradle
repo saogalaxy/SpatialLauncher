@@ -7,9 +7,10 @@ android {
     defaultConfig {
         applicationId "com.spatiallauncher.app"
         minSdk 29
-        targetSdk 32
-        versionCode 1
-        versionName "0.1.0"
+        // Meta Store: apps created after 2026-03-01 must target 34 (VRC Packaging.1/4).
+        targetSdk 34
+        versionCode 3
+        versionName "1.0.1"
         ndk {
             abiFilters "arm64-v8a"
         }
@@ -132,6 +133,10 @@ dependencies {
 
     // Desktop Link PC→Quest audio: Opus decode (not OPUS-MT translate).
     implementation 'io.github.jaredmdobson:concentus:1.0.2'
+
+    // Gallery video player: ExoPlayer + UI (offline androidx, no Play Services).
+    implementation 'androidx.media3:media3-exoplayer:1.4.1'
+    implementation 'androidx.media3:media3-ui:1.4.1'
 
     // Piper first so pickFirst libonnxruntime.so is sherpa's (OrtGetApiBase).
     implementation 'com.github.k2-fsa.sherpa-onnx:sherpa-onnx:v1.13.5'

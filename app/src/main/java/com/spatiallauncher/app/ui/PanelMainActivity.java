@@ -33,6 +33,7 @@ import android.os.Handler;
 import android.os.HandlerThread;
 import android.os.IBinder;
 import android.os.Looper;
+import android.os.Process;
 import java.util.concurrent.atomic.AtomicBoolean;
 import android.util.Base64;
 import android.util.DisplayMetrics;
@@ -57,6 +58,16 @@ import android.widget.SeekBar;
 import android.widget.Switch;
 import android.widget.TextView;
 import android.widget.ToggleButton;
+
+import androidx.media3.common.MediaItem;
+import androidx.media3.common.PlaybackException;
+import androidx.media3.common.Player;
+import androidx.media3.common.VideoSize;
+import androidx.media3.exoplayer.DefaultRenderersFactory;
+import androidx.media3.exoplayer.ExoPlayer;
+import androidx.media3.exoplayer.audio.DefaultAudioSink;
+import androidx.media3.exoplayer.audio.TeeAudioProcessor;
+import androidx.media3.ui.PlayerView;
 import android.text.SpannableString;
 import android.text.Spanned;
 import android.text.style.BackgroundColorSpan;
@@ -121,6 +132,30 @@ public class PanelMainActivity extends AppCompatActivity {
     private boolean epubScrollToBottomOnLoad = false;
     private View epubPageBar;
     private AlertDialog myBooksDialog;
+    private VideoLibraryStore videoLibraryStore;
+    private View videoHost;
+    private PlayerView hostedPlayerView;
+    private View videoBar;
+    private ImageButton videoBarRew;
+    private ImageButton videoBarPlay;
+    private ImageButton videoBarFfwd;
+    private SeekBar videoBarSeek;
+    private boolean videoBarSeekDragging;
+    private final Handler videoBarHandler = new Handler(Looper.getMainLooper());
+    private final Runnable videoBarTick = this::updateVideoBarUi;
+    private ExoPlayer videoPlayer;
+    private boolean videoPlaying;
+    private boolean videoPausedForBackground;
+    private boolean stereoBeforeVideo = true;
+    /** True after first good video frame is drawn to the stereo surface (avoids black cover). */
+    private volatile boolean videoStereoSurfaceShown;
+    /** Intrinsic video pixels from ExoPlayer — stage is letterboxed to this aspect. */
+    private int videoContentWidth;
+    private int videoContentHeight;
+    private final VideoPcmTap videoPcmTap = new VideoPcmTap();
+    /** Frame pump for 3D and/or OCR/TTS/Share while video plays. */
+    private volatile boolean videoFramePumpRunning;
+    private Thread videoFramePumpThread;
     private PackageManager packageManager;
 
     private LinearLayout dockContainer;
@@ -151,6 +186,7 @@ public class PanelMainActivity extends AppCompatActivity {
     private boolean suppressStereoPersist;
     private static final int REQUEST_LISTEN_AUDIO = 7101;
     private static final int REQUEST_OPEN_EPUB = 7103;
+    private static final int REQUEST_OPEN_VIDEO = 7104;
     private LinearLayout ttsPlayer;
     private ImageButton ttsSpeakButton;
     private ImageButton ttsPrevButton;
@@ -307,6 +343,7 @@ public class PanelMainActivity extends AppCompatActivity {
         settingsStore = new UserSettingsStore(this);
         browserLibraryStore = new BrowserLibraryStore(this);
         epubLibraryStore = new EpubLibraryStore(this);
+        videoLibraryStore = new VideoLibraryStore(this);
         ocrRegionStore = new OcrRegionStore(this);
         dialogueTextExtractor = new DialogueTextExtractor(this);
         dialogueTextExtractor.setMode(DialogueTextExtractor.ReadingStepMode.OPTION_B_FAST_OCR);
@@ -391,7 +428,7 @@ public class PanelMainActivity extends AppCompatActivity {
             screenFrameCapture.setOcrRegions(ocrRegionStore.load());
         }
         screenFrameCapture.setSnapshotListener((frame, heavy) -> {
-            if (wantScreenOcr()) {
+            if (!backgrounded && wantScreenOcr()) {
                 dialogueTextExtractor.analyze(frame, heavy);
             }
         });
@@ -466,6 +503,25 @@ public class PanelMainActivity extends AppCompatActivity {
             toggleBookImportServer();
             return true;
         });
+        videoHost = findViewById(R.id.video_host);
+        hostedPlayerView = findViewById(R.id.video_player_view);
+        if (hostedPlayerView != null) {
+            hostedPlayerView.setUseController(false);
+            hostedPlayerView.setResizeMode(
+                    androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FIT);
+        }
+        bindVideoBar();
+        View videoButton = findViewById(R.id.video_button);
+        if (videoButton != null) {
+            // Reel: stop if playing, else system video picker (import → play).
+            videoButton.setOnClickListener(v -> {
+                if (videoPlaying) {
+                    stopVideoPlayback();
+                } else {
+                    openVideoPicker();
+                }
+            });
+        }
         findViewById(R.id.browser_close_button).setOnClickListener(v -> hideDrmBrowser());
         findViewById(R.id.browser_go_button).setOnClickListener(v -> goToAddressBarUrl());
         findViewById(R.id.browser_bookmark_button).setOnClickListener(v -> toggleCurrentBookmark());
@@ -538,7 +594,12 @@ public class PanelMainActivity extends AppCompatActivity {
             return insets;
         });
         contentArea.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or_, ob) -> {
-            if (mirroringApp != null || isBrowserOpen()) {
+            if (r - l == or_ - ol && b - t == ob - ot) {
+                return;
+            }
+            if (videoPlaying) {
+                fitVideoStageToAspect();
+            } else if (mirroringApp != null || isBrowserOpen()) {
                 fitSurfaceToCaptureAspectRatio();
             }
         });
@@ -546,7 +607,10 @@ public class PanelMainActivity extends AppCompatActivity {
             if (r - l == or_ - ol && b - t == ob - ot) {
                 return;
             }
-            setHomeRowCompact(mirroringApp != null || isBrowserOpen());
+            setHomeRowCompact(mirroringApp != null || isBrowserOpen() || videoPlaying);
+            if (videoPlaying) {
+                fitVideoStageToAspect();
+            }
         });
         stopMirrorButton = findViewById(R.id.stop_mirror_button);
         stopMirrorButton.setOnClickListener(v -> stopMirroring());
@@ -579,6 +643,8 @@ public class PanelMainActivity extends AppCompatActivity {
                 } else {
                     stopBrowserStereo();
                 }
+            } else if (videoPlaying) {
+                setVideoDisplayMode();
             }
         });
 
@@ -590,6 +656,10 @@ public class PanelMainActivity extends AppCompatActivity {
         View helpDrawer = findViewById(R.id.help_drawer);
         this.helpDrawer = helpDrawer;
         populateHelpContent();
+        View exitButton = findViewById(R.id.exit_button);
+        if (exitButton != null) {
+            exitButton.setOnClickListener(v -> confirmQuitApp());
+        }
         ImageButton settingsButton = findViewById(R.id.settings_button);
         settingsButton.setOnClickListener(v -> {
             if (helpDrawer != null && helpDrawer.getVisibility() == View.VISIBLE) {
@@ -995,6 +1065,9 @@ public class PanelMainActivity extends AppCompatActivity {
             settingsStore.setSessionApp(mirroringApp.packageName);
         } else if (isBrowserOpen()) {
             settingsStore.setSessionBrowser();
+        } else if (videoPlaying) {
+            // No dedicated session token yet — keep last non-idle if any; else idle.
+            settingsStore.setSessionIdle();
         } else {
             settingsStore.setSessionIdle();
         }
@@ -1457,6 +1530,786 @@ public class PanelMainActivity extends AppCompatActivity {
         }
     }
 
+    // ------------------------------ Video player ------------------------------
+    // Reel opens the system picker; playback fills the main viewer with ExoPlayer.
+    // Frames feed OCR/TTS/Share/3D; TeeAudioProcessor feeds Listen.
+
+    private void openVideoPicker() {
+        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        intent.setType("video/*");
+        intent.putExtra(Intent.EXTRA_MIME_TYPES, new String[] {
+                "video/*", "application/octet-stream"
+        });
+        intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION
+                | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
+        startActivityForResult(intent, REQUEST_OPEN_VIDEO);
+    }
+
+    /**
+     * Copy content:// picks into the video inbox so they reopen from the gallery.
+     * Verifies byte count against the source — a truncated copy plays as a black
+     * failure, so partials are deleted instead of shelved.
+     */
+    private File ensureVideoInInbox(Uri uri) {
+        if (uri == null) {
+            return null;
+        }
+        if ("file".equalsIgnoreCase(uri.getScheme()) && uri.getPath() != null) {
+            File file = new File(uri.getPath());
+            if (file.isFile() && file.length() > 0
+                    && VideoLibraryStore.isVideoName(file.getName())) {
+                return file;
+            }
+            return null;
+        }
+        if (videoLibraryStore == null) {
+            videoLibraryStore = new VideoLibraryStore(this);
+        }
+        String name = uri.getLastPathSegment();
+        if (name == null || name.isEmpty()) {
+            name = "video.mp4";
+        }
+        name = name.replace('\\', '/');
+        int slash = name.lastIndexOf('/');
+        if (slash >= 0) {
+            name = name.substring(slash + 1);
+        }
+        if (!VideoLibraryStore.isVideoName(name)) {
+            name = name + ".mp4";
+        }
+        File dest = new File(videoLibraryStore.getInboxDir(), name);
+        if (dest.exists()) {
+            int dot = name.lastIndexOf('.');
+            String base = dot > 0 ? name.substring(0, dot) : name;
+            String ext = dot > 0 ? name.substring(dot) : ".mp4";
+            dest = new File(videoLibraryStore.getInboxDir(),
+                    base + "-" + System.currentTimeMillis() + ext);
+        }
+        long expected = querySourceSize(uri);
+        long copied = 0;
+        try (InputStream in = getContentResolver().openInputStream(uri);
+             FileOutputStream out = new FileOutputStream(dest)) {
+            if (in == null) {
+                return null;
+            }
+            byte[] buf = new byte[65536];
+            int n;
+            while ((n = in.read(buf)) >= 0) {
+                out.write(buf, 0, n);
+                copied += n;
+            }
+        } catch (Exception e) {
+            Log.w("PanelMainActivity", "Video import failed", e);
+            //noinspection ResultOfMethodCallIgnored
+            dest.delete();
+            return null;
+        }
+        if (copied <= 0 || (expected > 0 && copied != expected)) {
+            Log.w("PanelMainActivity", "Video import short: " + copied + "/" + expected);
+            //noinspection ResultOfMethodCallIgnored
+            dest.delete();
+            return null;
+        }
+        return dest;
+    }
+
+    private long querySourceSize(Uri uri) {
+        try (android.database.Cursor c = getContentResolver().query(
+                uri, new String[] {
+                        android.provider.OpenableColumns.SIZE }, null, null, null)) {
+            if (c != null && c.moveToFirst()) {
+                return c.getLong(0);
+            }
+        } catch (Exception ignored) {
+        }
+        return -1;
+    }
+
+    private void playVideoFile(File file, String title) {
+        if (file == null || !file.isFile() || file.length() <= 0) {
+            Log.w(TAG, "playVideoFile: missing or empty file");
+            return;
+        }
+        if (hostedPlayerView == null || videoHost == null) {
+            Log.w(TAG, "playVideoFile: player views missing");
+            return;
+        }
+        if (videoLibraryStore != null) {
+            videoLibraryStore.markOpened(file.getAbsolutePath(), title);
+        }
+        stopVideoPlayback();
+        if (mirroringApp != null) {
+            stopMirroring();
+        }
+        if (isBrowserOpen()) {
+            hideDrmBrowser();
+        }
+        // Mono first so transport controls work; user can turn 3D on afterward.
+        stereoBeforeVideo = forceStereoEnabled;
+        if (forceStereoEnabled) {
+            setSessionStereo(false);
+        }
+        videoPcmTap.clear();
+        ExoPlayer player;
+        try {
+            DefaultRenderersFactory renderersFactory = new DefaultRenderersFactory(this) {
+                @Override
+                protected androidx.media3.exoplayer.audio.AudioSink buildAudioSink(
+                        Context context,
+                        boolean enableFloatOutput,
+                        boolean enableAudioTrackPlaybackParams) {
+                    TeeAudioProcessor tee = new TeeAudioProcessor(videoPcmTap);
+                    return new DefaultAudioSink.Builder()
+                            .setEnableFloatOutput(enableFloatOutput)
+                            .setEnableAudioTrackPlaybackParams(enableAudioTrackPlaybackParams)
+                            .setAudioProcessors(new androidx.media3.common.audio.AudioProcessor[] { tee })
+                            .build();
+                }
+            };
+            player = new ExoPlayer.Builder(this, renderersFactory).build();
+        } catch (Throwable t) {
+            Log.w("PanelMainActivity", "ExoPlayer init failed", t);
+            // Fallback without PCM tap (Listen on video won't hear soundtrack).
+            try {
+                player = new ExoPlayer.Builder(this).build();
+            } catch (Throwable t2) {
+                Log.w("PanelMainActivity", "ExoPlayer fallback failed", t2);
+                return;
+            }
+        }
+        videoPlayer = player;
+        hostedPlayerView.setPlayer(player);
+        videoContentWidth = 0;
+        videoContentHeight = 0;
+        player.addListener(new Player.Listener() {
+            @Override
+            public void onPlayerError(PlaybackException error) {
+                Log.w("PanelMainActivity", "ExoPlayer error file=" + file.getAbsolutePath()
+                        + " size=" + file.length() + " "
+                        + (error != null
+                                ? ("code=" + error.errorCode + " " + error.getMessage()) : "null"));
+            }
+
+            @Override
+            public void onVideoSizeChanged(VideoSize videoSize) {
+                if (videoSize == null || videoSize.width <= 0 || videoSize.height <= 0) {
+                    return;
+                }
+                videoContentWidth = videoSize.width;
+                videoContentHeight = videoSize.height;
+                runOnUiThread(() -> fitVideoStageToAspect());
+            }
+
+        });
+        player.setMediaItem(MediaItem.fromUri(Uri.fromFile(file)));
+        player.setPlayWhenReady(true);
+        player.prepare();
+        showVideoHostOnly();
+        videoPlaying = true;
+        videoPausedForBackground = false;
+        fitVideoStageToAspect();
+        setVideoDisplayMode();
+        if (assistMode == AssistMode.LISTEN) {
+            syncListenEngine(false);
+        }
+        showVideoBar(true);
+    }
+
+    /**
+     * Mono = PlayerView + optional OCR pump. 3D = PixelCopy player SurfaceView →
+     * stereo pipeline. Stereo overlay is shown only after the first good frame so
+     * toggling 3D never covers the picture with a blank surface.
+     */
+    private void setVideoDisplayMode() {
+        if (!videoPlaying) {
+            stopVideoFramePump();
+            hideVideoStereoOverlay();
+            return;
+        }
+        boolean want3d = forceStereoEnabled;
+        boolean wantOcrFrames = wantScreenOcr() || (ttsEnabled && ttsManualMode);
+        boolean needPump = want3d || wantOcrFrames;
+        if (needPump && !videoFramePumpRunning) {
+            startVideoFramePump();
+        } else if (!needPump && videoFramePumpRunning) {
+            stopVideoFramePump();
+        }
+        if (!want3d) {
+            hideVideoStereoOverlay();
+        }
+        // want3d: wait for publishVideoFrame → showVideoStereoOverlayAfterFirstFrame
+    }
+
+    private void hideVideoStereoOverlay() {
+        videoStereoSurfaceShown = false;
+        if (overlayView != null && mirroringApp == null && !browserStereoRunning) {
+            overlayView.setVisibility(View.GONE);
+            overlayView.setOnTouchListener(null);
+        }
+        restoreVideoPlayerChrome();
+        if (mirroringApp == null && !isBrowserOpen()) {
+            setStereoOutputVisible(false);
+            setStereoComposition(false);
+        }
+        if (gameRenderSurface != null) {
+            FrameLayout.LayoutParams surfLp =
+                    (FrameLayout.LayoutParams) gameRenderSurface.getLayoutParams();
+            surfLp.topMargin = 0;
+            surfLp.bottomMargin = 0;
+            surfLp.gravity = android.view.Gravity.CENTER;
+            gameRenderSurface.setLayoutParams(surfLp);
+            gameRenderSurface.setTranslationY(0f);
+        }
+    }
+
+    /** Restore flat PlayerView surface after leaving video 3D (transport is external). */
+    private void restoreVideoPlayerChrome() {
+        if (hostedPlayerView != null) {
+            View surface = hostedPlayerView.getVideoSurfaceView();
+            if (surface != null) {
+                surface.setVisibility(View.VISIBLE);
+            }
+            hostedPlayerView.setBackgroundColor(Color.BLACK);
+            hostedPlayerView.setShutterBackgroundColor(Color.BLACK);
+            hostedPlayerView.setUseController(false);
+            hostedPlayerView.setAlpha(1f);
+        }
+        if (videoHost != null && videoPlaying) {
+            videoHost.setVisibility(View.VISIBLE);
+            videoHost.setAlpha(1f);
+            videoHost.bringToFront();
+        }
+        showVideoBar(videoPlaying);
+    }
+
+    /**
+     * Stereo SBS over the letterboxed stage. Decoder SurfaceView stays alive but
+     * invisible for PixelCopy. Transport lives outside content_area (not on the
+     * Horizon stereo surface), so flat chrome never draws over SBS.
+     */
+    private void showVideoStereoOverlayAfterFirstFrame() {
+        if (!videoPlaying || !forceStereoEnabled || videoStereoSurfaceShown) {
+            return;
+        }
+        videoStereoSurfaceShown = true;
+        setStereoOutputVisible(true);
+        setStereoComposition(true);
+        gameRenderSurface.setClickable(false);
+        fitVideoStageToAspect();
+        if (videoHost != null) {
+            videoHost.post(this::fitVideoStageToAspect);
+        }
+        activeStereoSurface().post(this::lockSurfaceBufferSize);
+
+        if (hostedPlayerView != null) {
+            View surface = hostedPlayerView.getVideoSurfaceView();
+            if (surface != null) {
+                surface.setVisibility(View.INVISIBLE);
+            }
+            // Flat Exo chrome on SBS causes the fold — hide controller in 3D.
+            hostedPlayerView.setUseController(false);
+            hostedPlayerView.hideController();
+            hostedPlayerView.setBackgroundColor(Color.TRANSPARENT);
+            hostedPlayerView.setShutterBackgroundColor(Color.TRANSPARENT);
+            hostedPlayerView.setAlpha(1f);
+        }
+        if (videoHost != null) {
+            videoHost.setVisibility(View.VISIBLE);
+            videoHost.setAlpha(1f);
+        }
+        if (gameRenderSurface != null) {
+            gameRenderSurface.bringToFront();
+        }
+        showVideoBar(true);
+        if (overlayView != null) {
+            overlayView.setVisibility(View.GONE);
+            overlayView.setOnTouchListener(null);
+        }
+    }
+
+    /**
+     * Letterbox {@code video_host} (+ stereo surface when 3D) to the video's aspect
+     * inside {@code content_area}. Transport chrome lives outside content_area.
+     */
+    private void fitVideoStageToAspect() {
+        if (!videoPlaying || contentArea == null) {
+            return;
+        }
+        int areaW = contentArea.getWidth();
+        int areaH = contentArea.getHeight();
+        if (areaW <= 0 || areaH <= 0) {
+            contentArea.post(this::fitVideoStageToAspect);
+            return;
+        }
+        int vw = videoContentWidth;
+        int vh = videoContentHeight;
+        if ((vw <= 1 || vh <= 1) && videoPlayer != null) {
+            VideoSize vs = videoPlayer.getVideoSize();
+            if (vs != null && vs.width > 1 && vs.height > 1) {
+                vw = vs.width;
+                vh = vs.height;
+                videoContentWidth = vw;
+                videoContentHeight = vh;
+            }
+        }
+        if (vw <= 1 || vh <= 1) {
+            sizeVideoStage(areaW, areaH, android.view.Gravity.CENTER);
+            return;
+        }
+        float scale = Math.min(areaW / (float) vw, areaH / (float) vh);
+        int sw = Math.max(1, Math.round(vw * scale));
+        int sh = Math.max(1, Math.round(vh * scale));
+        sizeVideoStage(sw, sh, android.view.Gravity.CENTER);
+    }
+
+    private void sizeVideoStage(int pictureW, int pictureH, int gravity) {
+        if (videoHost != null) {
+            FrameLayout.LayoutParams hostLp =
+                    (FrameLayout.LayoutParams) videoHost.getLayoutParams();
+            if (hostLp.width != pictureW
+                    || hostLp.height != pictureH
+                    || hostLp.gravity != gravity) {
+                hostLp.width = pictureW;
+                hostLp.height = pictureH;
+                hostLp.gravity = gravity;
+                videoHost.setLayoutParams(hostLp);
+            }
+        }
+        if (gameRenderSurface != null && videoStereoSurfaceShown) {
+            FrameLayout.LayoutParams surfLp =
+                    (FrameLayout.LayoutParams) gameRenderSurface.getLayoutParams();
+            boolean changed = surfLp.width != pictureW
+                    || surfLp.height != pictureH
+                    || surfLp.gravity != gravity
+                    || surfLp.topMargin != 0
+                    || surfLp.bottomMargin != 0;
+            if (changed) {
+                surfLp.width = pictureW;
+                surfLp.height = pictureH;
+                surfLp.gravity = gravity;
+                surfLp.topMargin = 0;
+                surfLp.bottomMargin = 0;
+                gameRenderSurface.setLayoutParams(surfLp);
+            }
+            gameRenderSurface.setTranslationY(0f);
+            gameRenderSurface.post(this::lockSurfaceBufferSize);
+        } else if (gameRenderSurface != null) {
+            gameRenderSurface.setTranslationY(0f);
+            FrameLayout.LayoutParams surfLp =
+                    (FrameLayout.LayoutParams) gameRenderSurface.getLayoutParams();
+            if (surfLp.topMargin != 0
+                    || surfLp.bottomMargin != 0
+                    || surfLp.gravity != android.view.Gravity.CENTER) {
+                surfLp.topMargin = 0;
+                surfLp.bottomMargin = 0;
+                surfLp.gravity = android.view.Gravity.CENTER;
+                gameRenderSurface.setLayoutParams(surfLp);
+            }
+        }
+    }
+
+
+    private void bindVideoBar() {
+        videoBar = findViewById(R.id.video_player);
+        videoBarRew = findViewById(R.id.video_bar_rew);
+        videoBarPlay = findViewById(R.id.video_bar_play);
+        videoBarFfwd = findViewById(R.id.video_bar_ffwd);
+        videoBarSeek = findViewById(R.id.video_bar_seek);
+        if (videoBarRew != null) {
+            videoBarRew.setOnClickListener(v -> seekVideoByMs(-10_000));
+        }
+        if (videoBarFfwd != null) {
+            videoBarFfwd.setOnClickListener(v -> seekVideoByMs(10_000));
+        }
+        if (videoBarPlay != null) {
+            videoBarPlay.setOnClickListener(v -> toggleVideoPlayPause());
+        }
+        if (videoBarSeek != null) {
+            videoBarSeek.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+                @Override
+                public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
+                }
+
+                @Override
+                public void onStartTrackingTouch(SeekBar seekBar) {
+                    videoBarSeekDragging = true;
+                }
+
+                @Override
+                public void onStopTrackingTouch(SeekBar seekBar) {
+                    videoBarSeekDragging = false;
+                    if (videoPlayer == null) {
+                        return;
+                    }
+                    long dur = videoPlayer.getDuration();
+                    if (dur <= 0 || dur == androidx.media3.common.C.TIME_UNSET) {
+                        return;
+                    }
+                    long pos = seekBar.getProgress() * dur / Math.max(1, seekBar.getMax());
+                    videoPlayer.seekTo(pos);
+                    updateVideoBarUi();
+                }
+            });
+        }
+        showVideoBar(false);
+    }
+
+    private void showVideoBar(boolean show) {
+        if (videoBar == null) {
+            return;
+        }
+        boolean on = show && videoPlaying;
+        videoBar.setVisibility(on ? View.VISIBLE : View.GONE);
+        // Collapse the app dock while a reel plays so the transport owns that end.
+        if (dockContainer != null) {
+            dockContainer.setVisibility(on ? View.GONE : View.VISIBLE);
+        }
+        if (on) {
+            videoBarHandler.removeCallbacks(videoBarTick);
+            videoBarHandler.post(videoBarTick);
+        } else {
+            videoBarHandler.removeCallbacks(videoBarTick);
+        }
+    }
+
+    private void updateVideoBarUi() {
+        if (!videoPlaying || videoPlayer == null) {
+            videoBarHandler.removeCallbacks(videoBarTick);
+            if (videoBar != null) {
+                videoBar.setVisibility(View.GONE);
+            }
+            if (dockContainer != null) {
+                dockContainer.setVisibility(View.VISIBLE);
+            }
+            return;
+        }
+        long pos = Math.max(0, videoPlayer.getCurrentPosition());
+        long dur = videoPlayer.getDuration();
+        if (dur < 0 || dur == androidx.media3.common.C.TIME_UNSET) {
+            dur = 0;
+        }
+        if (videoBarSeek != null && !videoBarSeekDragging) {
+            int max = Math.max(1, videoBarSeek.getMax());
+            int progress = dur > 0 ? (int) Math.min(max, pos * max / dur) : 0;
+            videoBarSeek.setProgress(progress);
+        }
+        if (videoBarPlay != null) {
+            videoBarPlay.setImageResource(
+                    videoPlayer.isPlaying()
+                            ? android.R.drawable.ic_media_pause
+                            : android.R.drawable.ic_media_play);
+        }
+        videoBarHandler.removeCallbacks(videoBarTick);
+        videoBarHandler.postDelayed(videoBarTick, 500);
+    }
+
+    private void toggleVideoPlayPause() {
+        if (videoPlayer == null) {
+            return;
+        }
+        if (videoPlayer.isPlaying()) {
+            videoPlayer.pause();
+        } else {
+            videoPlayer.play();
+        }
+        updateVideoBarUi();
+    }
+
+    private void seekVideoByMs(long deltaMs) {
+        if (videoPlayer == null) {
+            return;
+        }
+        long pos = Math.max(0, videoPlayer.getCurrentPosition() + deltaMs);
+        long dur = videoPlayer.getDuration();
+        if (dur > 0 && dur != androidx.media3.common.C.TIME_UNSET) {
+            pos = Math.min(pos, dur);
+        }
+        videoPlayer.seekTo(pos);
+        updateVideoBarUi();
+    }
+
+    private void fitSurfaceForVideoStereo() {
+        fitVideoStageToAspect();
+    }
+
+    private void refreshVideoTouchOverlay() {
+        // Overlay is wired in showVideoStereoOverlayAfterFirstFrame / hideVideoStereoOverlay.
+    }
+
+    private void startVideoFramePump() {
+        if (videoFramePumpRunning) {
+            return;
+        }
+        videoFramePumpRunning = true;
+        Log.i(TAG, "VideoFramePump start gles=" + useGlesZMesh
+                + " ownsSurface=" + glesZMeshView.ownsSurface());
+        videoFramePumpThread = new Thread(() -> {
+            android.os.Handler mainH =
+                    new android.os.Handler(android.os.Looper.getMainLooper());
+            int iters = 0;
+            int drawn = 0;
+            while (videoFramePumpRunning && videoPlaying) {
+                try {
+                    iters++;
+                    boolean want3d = forceStereoEnabled;
+                    boolean wantOcr = wantScreenOcr() || (ttsEnabled && ttsManualMode);
+                    if (!want3d && !wantOcr) {
+                        sleepQuiet(200);
+                        continue;
+                    }
+                    View surfaceChild = hostedPlayerView != null
+                            ? hostedPlayerView.getVideoSurfaceView() : null;
+                    ExoPlayer pl = videoPlayer;
+                    if (pl == null) {
+                        sleepQuiet(150);
+                        continue;
+                    }
+                    // Prefer SurfaceView PixelCopy — reads the decoder buffer even when
+                    // the stereo SurfaceView is stacked above (TextureView.getBitmap often
+                    // returns black once covered / HW-composited).
+                    if (!(surfaceChild instanceof SurfaceView)) {
+                        if (iters % 40 == 1) {
+                            Log.i(TAG, "VideoFramePump waiting SurfaceView child="
+                                    + (surfaceChild == null ? "null"
+                                            : surfaceChild.getClass().getSimpleName()));
+                        }
+                        sleepQuiet(150);
+                        continue;
+                    }
+                    SurfaceView sv = (SurfaceView) surfaceChild;
+                    if (sv.getHolder() == null
+                            || !sv.getHolder().getSurface().isValid()) {
+                        sleepQuiet(150);
+                        continue;
+                    }
+                    int sw = sv.getWidth();
+                    int sh = sv.getHeight();
+                    if (sw <= 0 || sh <= 0) {
+                        sleepQuiet(150);
+                        continue;
+                    }
+                    int tw = Math.min(960, sw);
+                    int th = Math.max(2, Math.round((float) tw * sh / sw));
+                    final Bitmap bmp = Bitmap.createBitmap(tw, th, Bitmap.Config.ARGB_8888);
+                    final int[] status = {PixelCopy.ERROR_SOURCE_INVALID};
+                    final java.util.concurrent.CountDownLatch latch =
+                            new java.util.concurrent.CountDownLatch(1);
+                    try {
+                        PixelCopy.request(sv, bmp, copyResult -> {
+                            status[0] = copyResult;
+                            latch.countDown();
+                        }, mainH);
+                    } catch (Throwable t) {
+                        bmp.recycle();
+                        sleepQuiet(150);
+                        continue;
+                    }
+                    boolean done = false;
+                    try {
+                        done = latch.await(800, java.util.concurrent.TimeUnit.MILLISECONDS);
+                    } catch (InterruptedException e) {
+                        bmp.recycle();
+                        Thread.currentThread().interrupt();
+                        return;
+                    }
+                    if (!done || status[0] != PixelCopy.SUCCESS
+                            || !videoFramePumpRunning || !videoPlaying) {
+                        if (iters % 40 == 1) {
+                            Log.i(TAG, "VideoFramePump no frame done=" + done
+                                    + " status=" + status[0]);
+                        }
+                        bmp.recycle();
+                        sleepQuiet(80);
+                        continue;
+                    }
+                    if (isMostlyBlack(bmp)) {
+                        if (iters % 40 == 1) {
+                            Log.i(TAG, "VideoFramePump skipped near-black frame");
+                        }
+                        bmp.recycle();
+                        sleepQuiet(80);
+                        continue;
+                    }
+                    try {
+                        if (want3d && !videoStereoSurfaceShown) {
+                            final java.util.concurrent.CountDownLatch shown =
+                                    new java.util.concurrent.CountDownLatch(1);
+                            mainH.post(() -> {
+                                try {
+                                    showVideoStereoOverlayAfterFirstFrame();
+                                } finally {
+                                    shown.countDown();
+                                }
+                            });
+                            try {
+                                shown.await(500, java.util.concurrent.TimeUnit.MILLISECONDS);
+                            } catch (InterruptedException e) {
+                                Thread.currentThread().interrupt();
+                                bmp.recycle();
+                                return;
+                            }
+                        }
+                        publishVideoFrame(bmp, want3d, wantOcr);
+                        drawn++;
+                        if (drawn == 1 || drawn % 120 == 0) {
+                            Log.i(TAG, "VideoFramePump drew frame #" + drawn
+                                    + " 3d=" + want3d + " ocr=" + wantOcr);
+                        }
+                    } catch (Throwable t) {
+                        Log.w(TAG, "VideoFramePump publish failed", t);
+                    } finally {
+                        bmp.recycle();
+                    }
+                    sleepQuiet(want3d ? 70 : 200);
+                } catch (Throwable t) {
+                    Log.w(TAG, "VideoFramePump loop failed", t);
+                    sleepQuiet(200);
+                }
+            }
+            Log.i(TAG, "VideoFramePump exit");
+        }, "VideoFramePump");
+        videoFramePumpThread.start();
+    }
+
+    /** Reject empty / not-yet-decoded frames so we never cover the player with black. */
+    private static boolean isMostlyBlack(Bitmap bmp) {
+        if (bmp == null || bmp.getWidth() < 2 || bmp.getHeight() < 2) {
+            return true;
+        }
+        int w = bmp.getWidth();
+        int h = bmp.getHeight();
+        int samples = 0;
+        long lumSum = 0;
+        for (int y = h / 8; y < h; y += Math.max(1, h / 8)) {
+            for (int x = w / 8; x < w; x += Math.max(1, w / 8)) {
+                int c = bmp.getPixel(x, y);
+                int r = (c >> 16) & 0xff;
+                int g = (c >> 8) & 0xff;
+                int b = c & 0xff;
+                lumSum += (r * 3 + g * 6 + b) / 10;
+                samples++;
+            }
+        }
+        return samples == 0 || (lumSum / samples) < 12;
+    }
+
+    /** Same publish contract as {@link #publishBrowserStereoFrame()}. */
+    private void publishVideoFrame(Bitmap frame, boolean want3d, boolean wantOcr) {
+        if (frame == null) {
+            return;
+        }
+        // Keep fit helpers honest if anything else reads capture size during video.
+        captureWidth = Math.max(1, frame.getWidth());
+        captureHeight = Math.max(1, frame.getHeight());
+        if (ttsEnabled) {
+            screenFrameCapture.retainSourceForTap(frame);
+        }
+        if (want3d) {
+            try {
+                requestDepthUpdate(frame);
+            } catch (Throwable t) {
+                Log.w(TAG, "VideoFramePump depth failed", t);
+            }
+            try {
+                drawStereoMirrorFrame(frame);
+            } catch (Throwable t) {
+                Log.w(TAG, "VideoFramePump draw failed", t);
+            }
+        }
+        if (wantOcr && wantScreenOcr()) {
+            screenFrameCapture.offerFromScreenBuffer(frame);
+        }
+    }
+
+    private void stopVideoFramePump() {
+        videoFramePumpRunning = false;
+        Thread t = videoFramePumpThread;
+        videoFramePumpThread = null;
+        if (t != null) {
+            try {
+                t.interrupt();
+                t.join(800);
+            } catch (Throwable ignored) {
+            }
+        }
+    }
+
+    private static void sleepQuiet(long ms) {
+        try {
+            Thread.sleep(ms);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+    }
+
+    private void showVideoHostOnly() {
+        emptyStateText.setVisibility(View.GONE);
+        if (videoHost != null) {
+            videoHost.setVisibility(View.VISIBLE);
+        }
+        // Clear any leftover status banner so reel playback stays quiet.
+        View banner = findViewById(R.id.panel_message_bar);
+        if (banner != null) {
+            banner.setVisibility(View.GONE);
+        }
+        setHomeRowCompact(true);
+        setCastTheme(true);
+        persistSession();
+        refreshDock();
+    }
+
+    private void stopVideoPlayback() {
+        boolean wasPlaying = videoPlaying;
+        videoPlaying = false;
+        videoPausedForBackground = false;
+        videoContentWidth = 0;
+        videoContentHeight = 0;
+        showVideoBar(false);
+        stopVideoFramePump();
+        hideVideoStereoOverlay();
+        if (listenEngine != null && listenEngine.isRunning() && assistMode == AssistMode.LISTEN
+                && mediaProjection == null) {
+            listenEngine.stop();
+        }
+        if (videoPlayer != null) {
+            try {
+                videoPlayer.stop();
+                videoPlayer.release();
+            } catch (Throwable ignored) {
+            }
+            videoPlayer = null;
+        }
+        if (hostedPlayerView != null) {
+            try {
+                hostedPlayerView.setPlayer(null);
+            } catch (Throwable ignored) {
+            }
+        }
+        videoPcmTap.clear();
+        if (videoHost != null) {
+            videoHost.setVisibility(View.GONE);
+            // Restore full-bleed host for the next session.
+            FrameLayout.LayoutParams hostLp =
+                    (FrameLayout.LayoutParams) videoHost.getLayoutParams();
+            hostLp.width = FrameLayout.LayoutParams.MATCH_PARENT;
+            hostLp.height = FrameLayout.LayoutParams.MATCH_PARENT;
+            hostLp.gravity = android.view.Gravity.FILL;
+            videoHost.setLayoutParams(hostLp);
+        }
+        if (wasPlaying && assistMode != AssistMode.LISTEN) {
+            setSessionStereo(stereoBeforeVideo);
+        }
+        setHomeRowCompact(false);
+        setCastTheme(false);
+        if (emptyStateText != null
+                && mirroringApp == null && !isBrowserOpen()) {
+            emptyStateText.setVisibility(View.VISIBLE);
+        }
+        persistSession();
+        refreshDock();
+    }
+
     private void showDrmBrowserHostOnly() {
         emptyStateText.setVisibility(View.GONE);
         browserHost.setVisibility(View.VISIBLE);
@@ -1763,6 +2616,9 @@ public class PanelMainActivity extends AppCompatActivity {
             }
         }
         refreshControlRowChrome();
+        if (videoPlaying) {
+            setVideoDisplayMode();
+        }
     }
 
     /**
@@ -1778,6 +2634,10 @@ public class PanelMainActivity extends AppCompatActivity {
         View epub = findViewById(R.id.epub_button);
         if (epub != null) {
             epub.setVisibility(readingVisibility);
+        }
+        View video = findViewById(R.id.video_button);
+        if (video != null) {
+            video.setVisibility(readingVisibility);
         }
     }
 
@@ -1829,13 +2689,23 @@ public class PanelMainActivity extends AppCompatActivity {
         suppressStereoPersist = false;
     }
 
-    private void syncListenEngine(boolean notifyIfNoCast) {
+    private void syncListenEngine(boolean notifyIfNoSource) {
         if (assistMode != AssistMode.LISTEN || listenEngine == null) {
             return;
         }
+        if (videoPlaying && videoPlayer != null) {
+            if (!listenEngine.isRunning()) {
+                if (!ensureAsrForListen()) {
+                    return;
+                }
+                listenEngine.setSmoothnessPercent(settingsStore.getListenSmoothnessPercent());
+                listenEngine.startFromPcm(videoPcmTap);
+            }
+            return;
+        }
         if (mediaProjection == null) {
-            if (notifyIfNoCast) {
-                PanelAlerts.show(this, R.string.assist_listen_need_cast);
+            if (notifyIfNoSource) {
+                PanelAlerts.show(this, R.string.video_listen_no_file);
             }
             return;
         }
@@ -1867,6 +2737,9 @@ public class PanelMainActivity extends AppCompatActivity {
         }
         refreshTtsModeSwitches();
         refreshTtsSpeakButton();
+        if (videoPlaying) {
+            setVideoDisplayMode();
+        }
     }
 
     private void setTtsManualMode(boolean manual) {
@@ -1881,6 +2754,9 @@ public class PanelMainActivity extends AppCompatActivity {
         }
         refreshTtsModeSwitches();
         refreshTtsSpeakButton();
+        if (videoPlaying) {
+            setVideoDisplayMode();
+        }
     }
 
     private void refreshTtsModeSwitches() {
@@ -2790,6 +3666,9 @@ public class PanelMainActivity extends AppCompatActivity {
     }
 
     private CastSourceType currentCastSourceType() {
+        if (videoPlaying && forceStereoEnabled && hostedPlayerView != null) {
+            return CastSourceType.LOCAL_APP_STREAM;
+        }
         if (isBrowserOpen() && drmWebView != null && drmWebView.getVisibility() == View.VISIBLE) {
             return CastSourceType.LOCAL_APP_STREAM;
         }
@@ -2810,6 +3689,9 @@ public class PanelMainActivity extends AppCompatActivity {
     }
 
     private View resolveCastTarget() {
+        if (videoPlaying && forceStereoEnabled && hostedPlayerView != null) {
+            return hostedPlayerView;
+        }
         if (currentCastSourceType() == CastSourceType.LOCAL_APP_STREAM) {
             return drmWebView;
         }
@@ -2818,7 +3700,7 @@ public class PanelMainActivity extends AppCompatActivity {
 
     private void muteCastPointerChrome() {
         View.OnHoverListener eatHover = (v, event) ->
-                mirroringApp != null || browserStereoRunning;
+                mirroringApp != null || browserStereoRunning || (videoPlaying && forceStereoEnabled);
         if (contentArea != null) {
             contentArea.setSoundEffectsEnabled(false);
             contentArea.setHapticFeedbackEnabled(false);
@@ -3261,6 +4143,7 @@ public class PanelMainActivity extends AppCompatActivity {
         addHelpCombo(content, R.string.help_start_translate_ocr_title, R.string.help_start_translate_ocr_body);
         addHelpCombo(content, R.string.help_start_browser_title, R.string.help_start_browser_body);
         addHelpCombo(content, R.string.help_start_books_title, R.string.help_start_books_body);
+        addHelpCombo(content, R.string.help_start_videos_title, R.string.help_start_videos_body);
         addHelpCombo(content, R.string.help_start_desktop_link_title, R.string.help_start_desktop_link_body);
 
         addHelpSection(content, R.string.help_section_downloads);
@@ -3300,6 +4183,7 @@ public class PanelMainActivity extends AppCompatActivity {
         addHelpRow(content, R.drawable.ic_3d_glasses, R.string.help_btn_3d_title, R.string.help_btn_3d_body);
         addHelpRow(content, R.drawable.ic_globe, R.string.help_btn_browser_title, R.string.help_btn_browser_body);
         addHelpRow(content, R.drawable.ic_epub_book, R.string.help_btn_books_title, R.string.help_btn_books_body);
+        addHelpRow(content, R.drawable.ic_movie_reel, R.string.help_btn_videos_title, R.string.help_btn_videos_body);
         addHelpRow(content, R.drawable.ic_tts_speaker, R.string.help_btn_tts_title, R.string.help_btn_tts_body);
         addHelpRow(content, R.drawable.ic_listen_ear, R.string.help_btn_listen_title, R.string.help_btn_listen_body);
         addHelpRow(content, R.drawable.ic_ocr_region, R.string.help_btn_ocr_title, R.string.help_btn_ocr_body);
@@ -3403,9 +4287,79 @@ public class PanelMainActivity extends AppCompatActivity {
     }
 
     @Override
+    protected void onStop() {
+        backgrounded = true;
+        if (listenEngine != null) {
+            listenEngine.stop();
+        }
+        if (videoPlayer != null) {
+            try {
+                if (videoPlayer.isPlaying()) {
+                    videoPlayer.pause();
+                    videoPausedForBackground = true;
+                }
+            } catch (Throwable ignored) {
+            }
+        }
+        try {
+            PiperTtsEngine piper = PiperTtsEngine.get(this);
+            if (piper.isSpeaking()) {
+                piper.pausePlayback();
+                ttsPausedForBackground = true;
+            }
+        } catch (Throwable ignored) {
+        }
+        for (WebView tab : browserTabs) {
+            try {
+                if (tab != null) {
+                    tab.onPause();
+                }
+            } catch (Throwable ignored) {
+            }
+        }
+        super.onStop();
+    }
+
+    @Override
+    protected void onStart() {
+        super.onStart();
+        backgrounded = false;
+        for (WebView tab : browserTabs) {
+            try {
+                if (tab != null) {
+                    tab.onResume();
+                }
+            } catch (Throwable ignored) {
+            }
+        }
+        if (ttsPausedForBackground) {
+            ttsPausedForBackground = false;
+            try {
+                PiperTtsEngine.get(this).resumePlayback();
+            } catch (Throwable ignored) {
+            }
+        }
+        if (videoPausedForBackground && videoPlayer != null && videoPlaying) {
+            videoPausedForBackground = false;
+            try {
+                videoPlayer.play();
+            } catch (Throwable ignored) {
+            }
+        }
+        if (videoPlaying) {
+            setVideoDisplayMode();
+        }
+        if (assistMode == AssistMode.LISTEN) {
+            syncListenEngine(false);
+        }
+    }
+
+    @Override
     protected void onResume() {
         super.onResume();
-        boolean glesLive = useGlesZMesh && (mirroringApp != null || browserStereoRunning);
+        boolean glesLive = useGlesZMesh
+                && (mirroringApp != null || browserStereoRunning
+                || (videoPlaying && forceStereoEnabled));
         glesZMeshView.onResume(gameRenderSurface, glesLive);
         // A pinned app may have been uninstalled while we were in the background;
         // re-resolving on every resume keeps the dock honest without extra bookkeeping.
@@ -3443,9 +4397,9 @@ public class PanelMainActivity extends AppCompatActivity {
         rebuildDockForCompact(isContentViewActive());
     }
 
-    /** True while cast, browser, or book is filling the content area. */
+    /** True while cast, browser, book, or video is filling the content area. */
     private boolean isContentViewActive() {
-        return mirroringApp != null || isBrowserOpen();
+        return mirroringApp != null || isBrowserOpen() || videoPlaying;
     }
 
     private void rebuildDockForCompact(boolean compact) {
@@ -3615,6 +4569,30 @@ public class PanelMainActivity extends AppCompatActivity {
             }
             return;
         }
+        if (requestCode == REQUEST_OPEN_VIDEO) {
+            if (resultCode == Activity.RESULT_OK && data != null && data.getData() != null) {
+                // Large videos must not copy on the UI thread (ANR + truncated
+                // files when the panel backgrounds mid-copy).
+                Uri pick = data.getData();
+                new Thread(() -> {
+                    File imported = ensureVideoInInbox(pick);
+                    runOnUiThread(() -> {
+                        if (imported != null) {
+                            if (videoLibraryStore == null) {
+                                videoLibraryStore = new VideoLibraryStore(this);
+                            }
+                            VideoLibraryStore.VideoEntry entry =
+                                    videoLibraryStore.upsert(imported, imported.getName());
+                            playVideoFile(imported,
+                                    entry != null ? entry.title : imported.getName());
+                        } else {
+                            Log.w(TAG, "Video import failed uri=" + pick);
+                        }
+                    });
+                }, "VideoImport").start();
+            }
+            return;
+        }
         if (requestCode != REQUEST_MEDIA_PROJECTION) {
             return;
         }
@@ -3651,6 +4629,9 @@ public class PanelMainActivity extends AppCompatActivity {
         }
         if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
             applyAssistMode(AssistMode.LISTEN, true);
+        } else {
+            // Security.2: deny must not crash — stay on current mode and explain.
+            PanelAlerts.show(this, R.string.assist_listen_mic_denied);
         }
     }
 
@@ -4142,6 +5123,15 @@ public class PanelMainActivity extends AppCompatActivity {
     private boolean useGlesZMesh;
     /** True = stretch capture to fill (legacy); false = contain-fit tall apps. */
     private boolean stretchFill;
+    /**
+     * True while the panel is fully hidden (another VR app in front). Heavy
+     * pipelines (depth inference, OCR captures, Listen, TTS, WebViews) pause so
+     * they don't lag the foreground title. MediaProjection itself stays alive
+     * (re-consent is too expensive); everything here restarts in onStart().
+     */
+    private volatile boolean backgrounded;
+    /** True only when *we* paused TTS for backgrounding (vs. the user's own pause). */
+    private boolean ttsPausedForBackground;
     private volatile boolean stereoHandoff;
     private int glesHandoffTries;
     private int lastStaticDepthFingerprint = Integer.MIN_VALUE;
@@ -4237,9 +5227,17 @@ public class PanelMainActivity extends AppCompatActivity {
             stretchToggle.setOnCheckedChangeListener((buttonView, isChecked) -> {
                 stretchFill = isChecked;
                 settingsStore.setStretchFill(isChecked);
-                fitSurfaceToCaptureAspectRatio();
-                contentArea.post(() -> {
+                if (videoPlaying) {
+                    fitVideoStageToAspect();
+                } else {
                     fitSurfaceToCaptureAspectRatio();
+                }
+                contentArea.post(() -> {
+                    if (videoPlaying) {
+                        fitVideoStageToAspect();
+                    } else {
+                        fitSurfaceToCaptureAspectRatio();
+                    }
                     lockSurfaceBufferSize();
                 });
             });
@@ -4538,8 +5536,10 @@ public class PanelMainActivity extends AppCompatActivity {
             int ch = canvas.getHeight();
             int fw = frame.getWidth();
             int fh = frame.getHeight();
+            // Video 3D always fills the stereo surface (avoid cast-style letterbox PiP).
+            boolean fillEyes = stretchFill || videoPlaying;
             if (!forceStereoEnabled) {
-                Rect dest = stretchFill
+                Rect dest = fillEyes
                         ? new Rect(0, 0, cw, ch)
                         : containRect(cw, ch, fw, fh);
                 canvas.drawBitmap(frame, null, dest, MESH_PAINT);
@@ -4547,11 +5547,11 @@ public class PanelMainActivity extends AppCompatActivity {
             }
             int halfWidth = cw / 2;
             float[][] parallaxGrid = cachedParallaxGrid;
-            Rect leftEye = stretchFill
+            Rect leftEye = fillEyes
                     ? new Rect(0, 0, halfWidth, ch)
                     : containRect(halfWidth, ch, fw, fh);
             // Same width as left — avoid odd-pixel right eye looking wider.
-            Rect rightEye = stretchFill
+            Rect rightEye = fillEyes
                     ? new Rect(halfWidth, 0, halfWidth + halfWidth, ch)
                     : offsetRect(containRect(halfWidth, ch, fw, fh), halfWidth, 0);
             drawEyeWithParallaxMesh(canvas, frame, leftEye, parallaxGrid, 1);
@@ -4570,6 +5570,9 @@ public class PanelMainActivity extends AppCompatActivity {
      * (read by the fast draw path above) once each pass finishes.
      */
     private void requestDepthUpdate(Bitmap frame) {
+        if (backgrounded) {
+            return;
+        }
         DepthEstimator estimator = depthModeStatic && depthStaticEstimator != null
                 && depthStaticEstimator.isAvailable()
                 ? depthStaticEstimator
@@ -4852,12 +5855,16 @@ public class PanelMainActivity extends AppCompatActivity {
         resizeSquareView(findViewById(R.id.toggle_stereo_3d), buttonSize, 0);
         resizeSquareView(findViewById(R.id.browser_button), buttonSize, buttonPad);
         resizeSquareView(findViewById(R.id.epub_button), buttonSize, buttonPad);
+        resizeSquareView(findViewById(R.id.video_button), buttonSize, buttonPad);
         resizeSquareView(findViewById(R.id.tts_speak_button), buttonSize, buttonPad);
         resizeSquareView(findViewById(R.id.listen_button), buttonSize, buttonPad);
         resizeSquareView(findViewById(R.id.desktop_link_button), buttonSize, buttonPad);
         // Transport cluster: slightly tighter than the main round buttons.
         int playerSize = Math.max(dp(32), Math.round(buttonSize * 0.9f));
         int playerPad = Math.max(dp(4), playerSize / 5);
+        resizeSquareView(findViewById(R.id.video_bar_rew), playerSize, playerPad);
+        resizeSquareView(findViewById(R.id.video_bar_play), playerSize, playerPad);
+        resizeSquareView(findViewById(R.id.video_bar_ffwd), playerSize, playerPad);
         resizeSquareView(findViewById(R.id.tts_prev_button), playerSize, playerPad);
         resizeSquareView(findViewById(R.id.tts_play_button), playerSize, playerPad);
         resizeSquareView(findViewById(R.id.tts_pause_button), playerSize, playerPad);
@@ -4970,6 +5977,7 @@ public class PanelMainActivity extends AppCompatActivity {
             depthStaticEstimator = null;
         }
         depthExecutor.shutdownNow();
+        stopVideoPlayback();
         for (WebView tab : browserTabs) {
             if (tab != null) {
                 tab.destroy();
@@ -4978,6 +5986,34 @@ public class PanelMainActivity extends AppCompatActivity {
         browserTabs.clear();
         drmWebView = null;
         super.onDestroy();
+    }
+
+    /** X button on the bar: confirm, then kill the process (frees RAM/CPU now). */
+    private void confirmQuitApp() {
+        new AlertDialog.Builder(this)
+                .setTitle(R.string.quit_dialog_title)
+                .setMessage(R.string.quit_dialog_message)
+                .setPositiveButton(R.string.action_quit, (dialog, which) -> quitAppNow())
+                .setNegativeButton(R.string.action_cancel, null)
+                .show();
+    }
+
+    private void quitAppNow() {
+        try {
+            stopBookImportServerQuiet();
+        } catch (Throwable ignored) {
+        }
+        try {
+            finishAndRemoveTask();
+        } catch (Throwable t) {
+            finish();
+        }
+        // Let finish()/onPause()/onDestroy persist + release, then kill outright
+        // so no cached process (or :opusmt helper) lingers behind.
+        new Handler(Looper.getMainLooper()).postDelayed(() -> {
+            Process.killProcess(Process.myPid());
+            System.exit(0);
+        }, 400);
     }
 
     private void confirmRemoveFromDock(InstalledAppInfo app) {
