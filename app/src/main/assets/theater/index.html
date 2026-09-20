@@ -55,12 +55,14 @@
   var canvas = document.createElement('canvas');
   canvas.width = 960; canvas.height = 540;
   var ctx = canvas.getContext('2d');
-  function eyeTexture(xOffset) {
+  // Inside-view of the cylinder mirrors U, so sample with negative repeat.
+  // texL = left half unmirrored, texR = right half unmirrored.
+  function eyeTexture(offset) {
     var tex = new THREE.CanvasTexture(canvas);
-    tex.repeat.x = 0.5; tex.offset.x = xOffset;
+    tex.repeat.x = -0.5; tex.offset.x = offset;
     return tex;
   }
-  var texL = eyeTexture(0.5), texR = eyeTexture(0);
+  var texL = eyeTexture(0.5), texR = eyeTexture(1.0);
 
   // Curved screen at eye height. Per-eye halves are pre-squeezed 2x (SBS), so
   // the arc is sized for the UNSQUEEZED aspect: width = height * fullAspect.
@@ -79,7 +81,8 @@
     return mesh;
   }
   if (bothEyes) {
-    var both = eyeTexture(0); both.repeat.x = 1;
+    var both = new THREE.CanvasTexture(canvas);
+    both.repeat.x = -1; both.offset.x = 1;
     var m = new THREE.Mesh(
       new THREE.CylinderGeometry(R, R, SCREEN_H, 48, 1, true, Math.PI - ARC / 2, ARC),
       new THREE.MeshBasicMaterial({ map: both, side: THREE.DoubleSide }));
