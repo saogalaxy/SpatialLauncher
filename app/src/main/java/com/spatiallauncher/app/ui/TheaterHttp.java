@@ -111,6 +111,22 @@ final class TheaterHttp {
                 streamMjpeg(rawOut);
                 return;
             }
+            if ("/frame.jpg".equals(path)) {
+                // Stateless snapshot for fragile viewers: each GET is independent,
+                // so a killed renderer/decoder recovers on the next poll instead
+                // of hanging on a dead multipart socket. 503 = no frame yet.
+                byte[] jpeg = TheaterFrames.latestJpeg();
+                if (jpeg == null) {
+                    writeHead(rawOut, 503, "text/plain", 13);
+                    rawOut.write("no frame yet".getBytes(StandardCharsets.UTF_8));
+                    rawOut.flush();
+                    return;
+                }
+                writeHead(rawOut, 200, "image/jpeg", jpeg.length);
+                rawOut.write(jpeg);
+                rawOut.flush();
+                return;
+            }
             writeHead(rawOut, 404, "text/plain", 9);
             rawOut.write("not found".getBytes(StandardCharsets.UTF_8));
             rawOut.flush();

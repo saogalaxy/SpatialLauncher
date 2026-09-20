@@ -25,7 +25,7 @@
   <div id="info">open <b>http://127.0.0.1:8768/theater</b> in Quest Browser,<br>cast something, then Enter VR</div>
   <button id="enter">Enter VR</button>
 </div>
-<img id="frames" src="/theater.mjpg" alt="">
+<img id="frames" src="/frame.jpg" alt="">
 <script>
 (function () {
   var statusEl = document.getElementById('status');
@@ -164,12 +164,22 @@
 
   var dot = document.getElementById('livedot');
   var status = document.getElementById('status');
+  // Snapshot polling (not MJPEG): the OS reclaims Chromium sandboxes around
+  // immersive sessions, killing persistent multipart decodes. Stateless
+  // per-frame GETs recover on the next poll instead of freezing forever.
+  var lastLoad = 0;
+  setInterval(function () {
+    img.src = '/frame.jpg?t=' + Date.now();
+  }, 150);
+  img.onload = function () { dot.className = 'dot live'; lastLoad = performance.now(); };
+  img.onerror = function () { /* stale frame stays; NO-SIGNAL logic below covers */ };
   var frames = 0, lastT = performance.now(), lastFrameT = 0;
   img.onload = function () { dot.className = 'dot live'; };
   renderer.setAnimationLoop(function () {
     var fed = false;
     try {
-      if (img.complete && img.naturalWidth > 0) {
+      // Fresh snapshots only: a stale img (decoder died) must not repaint.
+      if (img.complete && img.naturalWidth > 0 && performance.now() - lastLoad < 1500) {
         ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
         texL.needsUpdate = true; texR.needsUpdate = true;
         fed = true;
