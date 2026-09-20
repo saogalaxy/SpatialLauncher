@@ -246,11 +246,25 @@
   // immersive sessions, killing persistent multipart decodes. Stateless
   // per-frame GETs recover on the next poll instead of freezing forever.
   var lastLoad = 0;
+  // Chained polling: never start a load while one is in flight. Reassigning
+  // src aborts the previous load, so on a loaded headset rapid-fire polling
+  // starves every load and onload never fires (permanent "waiting").
+  var loading = false, loadStarted = 0;
   setInterval(function () {
-    img.src = '/frame.jpg?t=' + Date.now();
+    var now = performance.now();
+    if (loading && now - loadStarted > 5000) loading = false; // hung watchdog
+    if (!loading) {
+      loading = true; loadStarted = now;
+      img.src = '/frame.jpg?t=' + now;
+    }
   }, 150);
-  img.onload = function () { dot.className = 'dot live'; lastLoad = performance.now(); };
-  img.onerror = function () { /* stale frame stays; NO-SIGNAL logic below covers */ };
+  img.onload = function () {
+    loading = false;
+    dot.className = 'dot live'; lastLoad = performance.now();
+  };
+  img.onerror = function () {
+    loading = false; /* stale frame stays; NO-SIGNAL logic below covers */
+  };
   var frames = 0, lastT = performance.now(), lastFrameT = 0;
   img.onload = function () { dot.className = 'dot live'; };
   renderer.setAnimationLoop(function () {
