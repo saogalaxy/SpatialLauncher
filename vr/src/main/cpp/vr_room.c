@@ -158,6 +158,10 @@ static int initEgl(VrApp* app) {
 }
 
 static int initXr(VrApp* app) {
+    if (app->activityRef == NULL) {
+        LOGE("no activity context; aborting before loader init");
+        return 0;
+    }
     // Loader init is mandatory on Android before xrCreateInstance.
     LOGI("loader init: vm=%p ctx=%p", (void*)app->vm, (void*)app->activityRef);
     {
@@ -474,10 +478,23 @@ void android_main(struct android_app* app) {
         // android_main already runs attached; just retain the VM pointer.
         state.vm = app->activity->vm;
         JNIEnv* env = NULL;
-        if (state.vm != NULL
-                && (*state.vm)->GetEnv(state.vm, (void**)&env, JNI_VERSION_1_6) == JNI_OK
-                && env != NULL && app->activity->clazz != NULL) {
-            state.activityRef = (*env)->NewGlobalRef(env, app->activity->clazz);
+        if (state.vm != NULL) {
+            if ((*state.vm)->GetEnv(state.vm, (void**)&env, JNI_VERSION_1_6) != JNI_OK) {
+                // Glue thread starts detached: attach once for the process
+                // lifetime (never detached; the glue needs it attached).
+                if ((*state.vm)->AttachCurrentThread(state.vm, &env, NULL) != JNI_OK) {
+                    LOGE("AttachCurrentThread(main) failed");
+                    env = NULL;
+                } else {
+                    LOGI("attached main thread for global refs");
+                }
+            }
+            if (env != NULL && app->activity->clazz != NULL) {
+                state.activityRef = (*env)->NewGlobalRef(env, app->activity->clazz);
+            }
+        }
+        if (state.activityRef == NULL) {
+            LOGE("activityRef is NULL; loader init cannot succeed");
         }
     } else {
         LOGE("no activity; cannot init loader");
