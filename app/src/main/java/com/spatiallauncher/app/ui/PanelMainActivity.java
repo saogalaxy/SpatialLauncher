@@ -5441,6 +5441,8 @@ public class PanelMainActivity extends AppCompatActivity {
         mirroringApp = app;
         // Fresh straight-ahead for 3D+ head parallax.
         recenterHeadParallax();
+        // Spike: WebXR theater prototype (Quest Browser viewing this mirror).
+        startTheater();
         hideDrmBrowser();
         emptyStateText.setVisibility(View.GONE);
         setStereoOutputVisible(true);
@@ -6268,6 +6270,8 @@ public class PanelMainActivity extends AppCompatActivity {
         if (stereoHandoff) {
             return;
         }
+        // Spike: WebXR theater prototype feeds on the composed stereo output.
+        TheaterFrames.offer(frame);
         if (useGlesZMesh) {
             glesZMeshView.submit(
                     frame,
@@ -6561,6 +6565,35 @@ public class PanelMainActivity extends AppCompatActivity {
         setHomeRowCompact(false);
         setCastTheme(false);
         persistSession();
+        // Spike: WebXR theater prototype serves only live mirrors.
+        stopTheater();
+    }
+
+    /** Spike-only: localhost theater for the WebXR prototype. */
+    private TheaterHttp theaterHttp;
+
+    private void startTheater() {
+        try {
+            if (theaterHttp == null) {
+                theaterHttp = new TheaterHttp(this);
+            }
+            if (!theaterHttp.isRunning()) {
+                theaterHttp.start();
+            }
+        } catch (Throwable t) {
+            Log.w(TAG, "theater start failed", t);
+        }
+    }
+
+    private void stopTheater() {
+        try {
+            if (theaterHttp != null) {
+                theaterHttp.stop();
+                theaterHttp = null;
+            }
+        } catch (Throwable ignored) {
+        }
+        TheaterFrames.clear();
     }
 
     /**

@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Spatial Theater (spike)</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #000; overflow: hidden;
+    font-family: sans-serif; }
+  #hud { position: fixed; left: 12px; top: 12px; z-index: 10; color: #fff;
+    background: rgba(0,0,0,.55); padding: 10px 14px; border-radius: 10px;
+    font-size: 14px; line-height: 1.5; }
+  #hud button { font-size: 16px; padding: 10px 18px; margin-top: 6px;
+    border-radius: 8px; border: 0; background: #e65c00; color: #fff; }
+  #hud .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%;
+    background: #555; margin-right: 6px; }
+  #hud .dot.live { background: #3f6; }
+  #frames { display: none; }
+</style>
+<script src="https://unpkg.com/three@0.149.0/build/three.min.js"></script>
+</head>
+<body>
+<div id="hud">
+  <div><span class="dot" id="livedot"></span><span id="status">waiting for stream…</span></div>
+  <div id="info">open <b>http://127.0.0.1:8768/theater</b> in Quest Browser,<br>cast something, then Enter VR</div>
+  <button id="enter">Enter VR</button>
+</div>
+<img id="frames" src="/theater.mjpg" alt="">
+<script>
+(function () {
+  var params = new URLSearchParams(location.search);
+  var bothEyes = params.get('eye') === 'both'; // fallback if layers misbehave
+  var renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setSize(innerWidth, innerHeight);
+  renderer.setPixelRatio(devicePixelRatio);
+  renderer.xr.enabled = true;
+  document.body.appendChild(renderer.domElement);
+
+  var scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x050507);
+  var camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.1, 60);
+
+  // Dim room: floor grid + back glow so scale reads in-headset.
+  var grid = new THREE.GridHelper(30, 30, 0x222228, 0x111114);
+  grid.position.y = -1.6;
+  scene.add(grid);
+  var glow = new THREE.Mesh(
+    new THREE.PlaneGeometry(30, 12),
+    new THREE.MeshBasicMaterial({ color: 0x0a0a12 }));
+  glow.position.set(0, 2, -12);
+  scene.add(glow);
+
+  // Mirror frames land here, 960px wide cap from the app.
+  var img = document.getElementById('frames');
+  var canvas = document.createElement('canvas');
+  canvas.width = 960; canvas.height = 540;
+  var ctx = canvas.getContext('2d');
+  function eyeTexture(xOffset) {
+    var tex = new THREE.CanvasTexture(canvas);
+    tex.repeat.x = 0.5; tex.offset.x = xOffset;
+    return tex;
+  }
+  var texL = eyeTexture(0), texR = eyeTexture(0.5);
+
+  // Curved screen ~5.5m out, ~65deg arc. One mesh per eye (layers 1/2);
+  // 'both' mode shows the full SBS picture to both eyes instead.
+  var R = 5.5, ARC = 1.15;
+  function screenMesh(tex, layer) {
+    var geo = new THREE.CylinderGeometry(
+      R, R, 3.1, 48, 1, true, Math.PI - ARC / 2, ARC);
+    var mat = new THREE.MeshBasicMaterial({ map: tex, side: THREE.DoubleSide });
+    var mesh = new THREE.Mesh(geo, mat);
+    if (!bothEyes) mesh.layers.set(layer);
+    scene.add(mesh);
+    return mesh;
+  }
+  if (bothEyes) {
+    var both = eyeTexture(0); both.repeat.x = 1;
+    var m = new THREE.Mesh(
+      new THREE.CylinderGeometry(R, R, 3.1, 48, 1, true, Math.PI - ARC / 2, ARC),
+      new THREE.MeshBasicMaterial({ map: both, side: THREE.DoubleSide }));
+    scene.add(m);
+  } else {
+    screenMesh(texL, 1);
+    screenMesh(texR, 2);
+  }
+
+  var dot = document.getElementById('livedot');
+  var status = document.getElementById('status');
+  var frames = 0, lastT = performance.now();
+  img.onload = function () { dot.className = 'dot live'; };
+  renderer.setAnimationLoop(function () {
+    try {
+      if (img.complete && img.naturalWidth > 0) {
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        texL.needsUpdate = true; texR.needsUpdate = true;
+        frames++;
+        var now = performance.now();
+        if (now - lastT > 2000) {
+          status.textContent = 'LIVE ~' + Math.round(frames * 1000 / (now - lastT)) + ' fps';
+          frames = 0; lastT = now;
+        }
+      }
+    } catch (e) { /* transient decode races */ }
+    renderer.render(scene, camera);
+  });
+
+  document.getElementById('enter').addEventListener('click', function () {
+    if (!navigator.xr) { status.textContent = 'no navigator.xr here'; return; }
+    navigator.xr.isSessionSupported('immersive-vr').then(function (ok) {
+      if (!ok) { status.textContent = 'immersive-vr not supported'; return; }
+      navigator.xr.requestSession('immersive-vr', { optionalFeatures: ['local-floor'] })
+        .then(function (s) { renderer.xr.setSession(s); })
+        .catch(function (e) { status.textContent = 'session failed: ' + e; });
+    });
+  });
+  addEventListener('resize', function () {
+    camera.aspect = innerWidth / innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(innerWidth, innerHeight);
+  });
+})();
+</script>
+</body>
+</html>
