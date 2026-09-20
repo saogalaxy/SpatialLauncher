@@ -704,15 +704,11 @@ public class PanelMainActivity extends AppCompatActivity {
                 settingsStore.setForceStereo(isChecked);
             }
             if (!isChecked && headParallaxEnabled) {
-                // 3D off implies 3D+ off — the chips must never contradict.
+                // 3D off kills the dormant 3D+ path too.
                 headParallaxEnabled = false;
                 settingsStore.setHeadParallax(false);
                 headNormYaw = 0f;
                 headShiftScale = 0f;
-                ToggleButton plus = findViewById(R.id.toggle_head_parallax);
-                if (plus != null && plus.isChecked()) {
-                    plus.setChecked(false);
-                }
             }
             updateStereoToggleLook(toggleStereo3d, isChecked);
             if (mirroringApp != null) {
@@ -731,43 +727,31 @@ public class PanelMainActivity extends AppCompatActivity {
             } else if (videoPlaying) {
                 setVideoDisplayMode();
             }
-            updateHeadParallaxChip();
         });
 
-        // "3D+" chip: stereo plus rotational head parallax. Independent switch —
-        // today's 3D mode is untouched with this off (head term stays 0).
-        headParallaxEnabled = settingsStore.getHeadParallax();
-        if (!forceStereoEnabled && headParallaxEnabled) {
-            // Persisted contradiction (3D was turned off last run): 3D+ starts off.
-            headParallaxEnabled = false;
-            settingsStore.setHeadParallax(false);
-        }
-        ToggleButton headParallaxToggle = findViewById(R.id.toggle_head_parallax);
-        headParallaxToggle.setChecked(headParallaxEnabled);
-        updateHeadParallaxChip();
-        headParallaxToggle.setOnCheckedChangeListener((buttonView, isChecked) -> {
-            headParallaxEnabled = isChecked;
-            settingsStore.setHeadParallax(isChecked);
-            Log.i(TAG, "3D+ head parallax " + (isChecked ? "ON" : "OFF"));
-            if (isChecked) {
-                if (!forceStereoEnabled) {
-                    // One tap to the new experience: bring 3D up too.
-                    if (toggleStereo3d != null) {
-                        toggleStereo3d.setChecked(true);
-                    } else {
-                        forceStereoEnabled = true;
-                        settingsStore.setForceStereo(true);
-                    }
-                }
-                recenterHeadParallax();
-                PanelAlerts.show(this, R.string.head_parallax_on);
-            } else {
-                headNormYaw = 0f;
-                headShiftScale = 0f;
-                PanelAlerts.show(this, R.string.head_parallax_off);
+        // "VR" dock button (beta lane only): enters the immersive room from the
+        // retired 3D+ slot. Visible only when the VrActivity exists; release
+        // builds never see it.
+        headParallaxEnabled = false;
+        Button enterVrDock = findViewById(R.id.enter_vr_dock_button);
+        boolean vrDockPresent = getPackageName() != null
+                && getPackageName().endsWith(".beta");
+        if (!vrDockPresent) {
+            try {
+                Intent vrProbe = new Intent()
+                        .setClassName(getPackageName(), "com.spatiallauncher.vr.VrActivity");
+                vrDockPresent = getPackageManager().resolveActivity(vrProbe, 0) != null;
+            } catch (Throwable ignored) {
             }
-            updateHeadParallaxChip();
-        });
+        }
+        if (enterVrDock != null) {
+            if (!vrDockPresent) {
+                enterVrDock.setVisibility(View.GONE);
+            } else {
+                enterVrDock.setVisibility(View.VISIBLE);
+                enterVrDock.setOnClickListener(v -> launchVrActivity());
+            }
+        }
 
         // Settings gear opens/closes a slide-out drawer (top-end corner) holding the
         // depth strength + convergence sliders, instead of those sliders permanently
@@ -2824,7 +2808,6 @@ public class PanelMainActivity extends AppCompatActivity {
         suppressStereoPersist = true;
         toggle.setChecked(on);
         suppressStereoPersist = false;
-        updateHeadParallaxChip();
     }
 
     private boolean isStereoSessionActive() {
@@ -2931,21 +2914,17 @@ public class PanelMainActivity extends AppCompatActivity {
         headShiftScale = headNormYaw * HEAD_PARALLAX_FRACTION;
     }
 
-    /** 3D+ chip look: bright white "3D+" when live, dim gray otherwise. */
-    private void updateHeadParallaxChip() {
-        ToggleButton chip = findViewById(R.id.toggle_head_parallax);
-        if (chip == null) {
-            return;
+    /** Beta lane only: enter the immersive room. No-op target in release. */
+    private void launchVrActivity() {
+        try {
+            Intent vr = new Intent(Intent.ACTION_MAIN)
+                    .setClassName(getPackageName(), "com.spatiallauncher.vr.VrActivity")
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            startActivity(vr);
+        } catch (Throwable t) {
+            Log.w(TAG, "enter VR failed", t);
+            PanelAlerts.show(this, R.string.enter_vr_failed);
         }
-        boolean live = headParallaxEnabled && forceStereoEnabled;
-        String label = getString(R.string.toggle_3d_plus_label);
-        chip.setTextOn(label);
-        chip.setTextOff(label);
-        chip.setText(label);
-        int color = getResources().getColor(
-                live ? R.color.text_primary : R.color.text_secondary, getTheme());
-        chip.setTextColor(color);
-        chip.setAlpha(forceStereoEnabled ? 1f : 0.45f);
     }
 
     private void syncListenEngine(boolean notifyIfNoSource) {
@@ -4980,7 +4959,6 @@ public class PanelMainActivity extends AppCompatActivity {
         // A pinned app may have been uninstalled while we were in the background;
         // re-resolving on every resume keeps the dock honest without extra bookkeeping.
         refreshDock();
-        updateHeadParallaxChip();
         registerHeadTracking();
         // Book import is user-started only (EPUB long-press). Do not auto-start on resume.
     }
@@ -6121,18 +6099,8 @@ public class PanelMainActivity extends AppCompatActivity {
             if (!vrPresent) {
                 enterVr.setVisibility(View.GONE);
             } else {
-                enterVr.setOnClickListener(v -> {
-                    try {
-                        Intent vr = new Intent(Intent.ACTION_MAIN)
-                                .setClassName(getPackageName(),
-                                        "com.spatiallauncher.vr.VrActivity")
-                                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-                        startActivity(vr);
-                    } catch (Throwable t) {
-                        Log.w(TAG, "enter VR failed", t);
-                        PanelAlerts.show(this, R.string.enter_vr_failed);
-                    }
-                });
+                enterVr.setVisibility(View.VISIBLE);
+                enterVr.setOnClickListener(v -> launchVrActivity());
             }
         }
 
@@ -6674,7 +6642,7 @@ public class PanelMainActivity extends AppCompatActivity {
         }
         resizeSquareView(stopMirrorButton, buttonSize, buttonPad);
         resizeSquareView(findViewById(R.id.toggle_stereo_3d), buttonSize, 0);
-        resizeSquareView(findViewById(R.id.toggle_head_parallax), buttonSize, 0);
+        resizeSquareView(findViewById(R.id.enter_vr_dock_button), buttonSize, 0);
         resizeSquareView(findViewById(R.id.browser_button), buttonSize, buttonPad);
         resizeSquareView(findViewById(R.id.epub_button), buttonSize, buttonPad);
         resizeSquareView(findViewById(R.id.video_button), buttonSize, buttonPad);
