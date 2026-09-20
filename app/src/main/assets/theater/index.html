@@ -69,10 +69,16 @@
   // Measured live from the stream (mirror aspect varies); scaleX corrects it.
   var R = 5.5, ARC = 1.15, SCREEN_H = 2.6, SCREEN_Y = 1.55;
   var screenMeshes = [];
+  // ?tint=1 diagnostics: left mesh RED, right mesh CYAN. Close one eye at a
+  // time in VR: left-only-red + right-only-cyan = mapping correct (then any
+  // doubling is content/aspect, not layers). Both colors in one eye = layers
+  // ignored on this runtime.
+  var tinted = params.get('tint') === '1';
   function screenMesh(tex, layer) {
     var geo = new THREE.CylinderGeometry(
       R, R, SCREEN_H, 48, 1, true, Math.PI - ARC / 2, ARC);
     var mat = new THREE.MeshBasicMaterial({ map: tex, side: THREE.DoubleSide });
+    if (tinted) mat.color.setHex(layer === 1 ? 0xff4040 : 0x40ffff);
     var mesh = new THREE.Mesh(geo, mat);
     mesh.position.y = SCREEN_Y;
     if (!bothEyes) mesh.layers.set(layer);
