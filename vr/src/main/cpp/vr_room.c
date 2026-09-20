@@ -33,6 +33,15 @@
         }                                                                     \
     } while (0)
 
+// The framework loads ANativeActivity_onCreate out of libvr.so via dlsym, so
+// nothing references it and section GC would discard the glue object that
+// defines it (the -u link flag alone did not survive this toolchain).
+// A used-anchor keeps it linked unconditionally.
+extern void ANativeActivity_onCreate(ANativeActivity* activity,
+    void* savedState, size_t savedStateSize);
+__attribute__((used)) static void* vr_keep_glue_ref =
+    (void*)ANativeActivity_onCreate;
+
 // ---- FB_passthrough extension entry points (loaded per instance) ----
 static PFN_xrCreatePassthroughFB pfnCreatePassthrough = NULL;
 static PFN_xrDestroyPassthroughFB pfnDestroyPassthrough = NULL;

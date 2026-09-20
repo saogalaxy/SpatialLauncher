@@ -17,6 +17,10 @@ set_target_properties(openxr_loader PROPERTIES
     ${CMAKE_CURRENT_SOURCE_DIR}/../jniLibs/${ANDROID_ABI}/libopenxr_loader.so)
 
 add_library(vr SHARED vr_room.c)
+# The framework loads ANativeActivity_onCreate out of this .so via dlsym, so
+# nothing references it at link time and the static glue object would be
+# discarded. Force it undefined to pull the object in (hello_xr pattern).
+target_link_options(vr PRIVATE "-u ANativeActivity_onCreate")
 target_include_directories(vr PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/thirdparty/openxr/include)
 target_link_libraries(vr
