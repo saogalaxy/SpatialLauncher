@@ -52,5 +52,9 @@ every change must prove it adds no bugs.
   runtime grant guard + documented `@SuppressLint`.
 - Release signing falls back to debug signing without `keystore.properties` —
   never upload such an APK to the Meta Store (see `docs/RELEASE_SIGNING.md`).
+- Experimental work (VR theater etc.) ships ONLY via the `beta` build type
+  (`:app:assembleBeta` → `com.spatiallauncher.app.beta`, co-installs, own data).
+  Never upload beta APKs to any Store channel; never merge experimental code to
+  `main` until it passes the full verification below on-headset.
 - SenseVoice prompts/downloads only on first Listen-icon tap, never at startup.
 - `CHANGELOG.md` gets an entry with every notable fix/feature.

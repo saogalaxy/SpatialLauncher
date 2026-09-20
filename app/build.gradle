@@ -97,6 +97,15 @@ android {
         debug {
             debuggable true
         }
+        // Experimental lane (VR theater etc.): separate package so it
+        // co-installs alongside debug/release without touching their data or
+        // signatures. NEVER upload a beta APK to any Meta Store channel.
+        beta {
+            initWith debug
+            applicationIdSuffix ".beta"
+            versionNameSuffix "-beta"
+            debuggable true
+        }
         release {
             debuggable false
             minifyEnabled false
