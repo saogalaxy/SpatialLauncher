@@ -108,10 +108,6 @@ final class TheaterHttp {
                 return;
             }
             if ("/frame.jpg".equals(path)) {
-                streamMjpeg(rawOut);
-                return;
-            }
-            if ("/frame.jpg".equals(path)) {
                 // Stateless snapshot for fragile viewers: each GET is independent,
                 // so a killed renderer/decoder recovers on the next poll instead
                 // of hanging on a dead multipart socket. 503 = no frame yet.
