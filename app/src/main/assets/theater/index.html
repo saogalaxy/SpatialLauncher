@@ -28,6 +28,10 @@
 <img id="frames" src="/theater.mjpg" alt="">
 <script>
 (function () {
+  var statusEl = document.getElementById('status');
+  window.onerror = function (msg, src, line) {
+    statusEl.textContent = 'PAGE ERROR: ' + msg + ' @' + line;
+  };
   var params = new URLSearchParams(location.search);
   var bothEyes = params.get('eye') === 'both'; // fallback if layers misbehave
   var renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -139,15 +143,36 @@
     status.textContent = 'back in browser';
   });
 
+  // NO-SIGNAL sprite: distinguishes "no feed" (sprite visible) from a dead
+  // page (nothing renders at all). Hidden once frames flow.
+  var nosignal = (function () {
+    var c = document.createElement('canvas');
+    c.width = 1024; c.height = 128;
+    var g = c.getContext('2d');
+    g.fillStyle = '#fff';
+    g.font = '44px sans-serif';
+    g.textAlign = 'center';
+    g.fillText('NO SIGNAL - cast in the beta app first', 512, 80);
+    var tex = new THREE.CanvasTexture(c);
+    var sprite = new THREE.Sprite(
+      new THREE.SpriteMaterial({ map: tex, transparent: true }));
+    sprite.scale.set(4.4, 0.55, 1);
+    sprite.position.set(0, SCREEN_Y, -5);
+    scene.add(sprite);
+    return sprite;
+  })();
+
   var dot = document.getElementById('livedot');
   var status = document.getElementById('status');
-  var frames = 0, lastT = performance.now();
+  var frames = 0, lastT = performance.now(), lastFrameT = 0;
   img.onload = function () { dot.className = 'dot live'; };
   renderer.setAnimationLoop(function () {
+    var fed = false;
     try {
       if (img.complete && img.naturalWidth > 0) {
         ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
         texL.needsUpdate = true; texR.needsUpdate = true;
+        fed = true;
         frames++;
         var now = performance.now();
         if (now - lastT > 2000) {
@@ -156,6 +181,12 @@
         }
       }
     } catch (e) { /* transient decode races */ }
+    if (fed) {
+      lastFrameT = performance.now();
+      nosignal.visible = false;
+    } else if (performance.now() - lastFrameT > 3000) {
+      nosignal.visible = true;
+    }
     renderer.render(scene, camera);
   });
 
