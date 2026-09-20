@@ -730,12 +730,18 @@ public class PanelMainActivity extends AppCompatActivity {
             }
         });
 
-        // "VR" dock button (beta lane only): enters the immersive room from the
-        // retired 3D+ slot. Visibility is driven by refreshVrButtons().
+        // "VR" dock button (beta lane only): two-way toggle — enter when idle,
+        // exit back to the Home panel when a VR session is active.
         headParallaxEnabled = false;
         Button enterVrDock = findViewById(R.id.enter_vr_dock_button);
         if (enterVrDock != null) {
-            enterVrDock.setOnClickListener(v -> launchVrActivity());
+            enterVrDock.setOnClickListener(v -> {
+                if (vrSessionLaunched) {
+                    exitVrActivity();
+                } else {
+                    launchVrActivity();
+                }
+            });
         }
         refreshVrButtons();
 
@@ -2950,10 +2956,10 @@ public class PanelMainActivity extends AppCompatActivity {
             exitVr.setVisibility(
                     (vrSessionLaunched && isVrPresent()) ? View.VISIBLE : View.GONE);
         }
+        // Dock VR is a two-way toggle: enter when idle, exit when in VR.
         Button enterVrDock = findViewById(R.id.enter_vr_dock_button);
         if (enterVrDock != null) {
-            enterVrDock.setVisibility(!vrSessionLaunched && isVrPresent()
-                    ? View.VISIBLE : View.GONE);
+            enterVrDock.setVisibility(isVrPresent() ? View.VISIBLE : View.GONE);
         }
     }
 
