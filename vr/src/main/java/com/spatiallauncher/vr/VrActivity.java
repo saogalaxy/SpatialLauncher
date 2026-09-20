@@ -14,11 +14,15 @@ import android.view.WindowManager;
  */
 public class VrActivity extends NativeActivity {
     private static final String PANEL_CLASS = "com.spatiallauncher.app.ui.PanelMainActivity";
+    static final String EXTRA_EXIT_VR = "com.spatiallauncher.vr.EXIT";
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        handleIntent(getIntent());
+        // Bring our panel up as an overlay shortly after the XR session comes
+        // up (plain startActivity, no finish — the room stays underneath).
         new Handler(Looper.getMainLooper()).postDelayed(() -> {
             try {
                 Intent panel = new Intent(Intent.ACTION_MAIN);
@@ -28,5 +32,19 @@ public class VrActivity extends NativeActivity {
             } catch (Throwable ignored) {
             }
         }, 1500);
+    }
+
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        handleIntent(intent);
+    }
+
+    /** The panel asks us to quit via an EXIT extra: finish ends the session. */
+    private void handleIntent(Intent intent) {
+        if (intent != null && intent.getBooleanExtra(EXTRA_EXIT_VR, false)) {
+            finish();
+        }
     }
 }

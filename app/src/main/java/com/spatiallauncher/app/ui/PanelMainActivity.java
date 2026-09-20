@@ -3,7 +3,6 @@ package com.spatiallauncher.app.ui;
 import android.Manifest;
 import android.app.Activity;
 import android.app.AlertDialog;
-import android.app.PendingIntent;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
@@ -2921,22 +2920,19 @@ public class PanelMainActivity extends AppCompatActivity {
         }
     }
 
-    /** Beta lane only: leave immersive VR back to the panel in Home. */
+    /** Beta lane only: leave immersive VR by finishing VrActivity itself.
+     * Going Home from the overlay panel does NOT end the immersive session
+     * (it just closes the panel and strands the user in the void) — the exit
+     * request must be delivered to the activity that owns the session. */
     private void exitVrActivity() {
         vrSessionLaunched = false;
         refreshVrButtons();
         try {
-            Intent panel = new Intent(Intent.ACTION_MAIN)
-                    .setClassName(getPackageName(),
-                            "com.spatiallauncher.app.ui.PanelMainActivity")
-                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-            PendingIntent pending = PendingIntent.getActivity(this, 0, panel,
-                    PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
-            Intent home = new Intent(Intent.ACTION_MAIN)
-                    .addCategory(Intent.CATEGORY_HOME)
+            Intent exit = new Intent(Intent.ACTION_MAIN)
+                    .setClassName(getPackageName(), "com.spatiallauncher.vr.VrActivity")
                     .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                    .putExtra("extra_launch_in_home_pending_intent", pending);
-            startActivity(home);
+                    .putExtra("com.spatiallauncher.vr.EXIT", true);
+            startActivity(exit);
         } catch (Throwable t) {
             Log.w(TAG, "exit VR failed", t);
         }
