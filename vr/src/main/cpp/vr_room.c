@@ -159,10 +159,12 @@ static int initEgl(VrApp* app) {
 
 static int initXr(VrApp* app) {
     // Loader init is mandatory on Android before xrCreateInstance.
+    LOGI("loader init: vm=%p ctx=%p", (void*)app->vm, (void*)app->activityRef);
     {
         PFN_xrInitializeLoaderKHR pfnInitLoader = NULL;
         XrResult lr = xrGetInstanceProcAddr(XR_NULL_HANDLE, "xrInitializeLoaderKHR",
                 (PFN_xrVoidFunction*)&pfnInitLoader);
+        LOGI("getInitLoader: lr=%d fn=%p", (int)lr, (void*)pfnInitLoader);
         if (lr == XR_SUCCESS && pfnInitLoader != NULL) {
             XrLoaderInitInfoAndroidKHR initInfo;
             memset(&initInfo, 0, sizeof(initInfo));
@@ -377,11 +379,13 @@ static void* xrThread(void* arg) {
     JavaVM* vm = app->vm;
     JNIEnv* env = NULL;
     int attached = 0;
-    if ((*vm)->GetEnv(vm, (void**)&env, JNI_VERSION_1_6) != JNI_OK) {
+    XrResult genv = (*vm)->GetEnv(vm, (void**)&env, JNI_VERSION_1_6);
+    if (genv != JNI_OK) {
         if ((*vm)->AttachCurrentThread(vm, &env, NULL) == JNI_OK) {
             attached = 1;
         }
     }
+    LOGI("xr thread: GetEnv=%d attached=%d env=%p", (int)genv, attached, (void*)env);
     if (!initXr(app)) {
         LOGE("initXr failed; room unavailable");
         if (attached) {
