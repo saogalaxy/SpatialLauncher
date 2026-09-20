@@ -62,26 +62,30 @@
   }
   var texL = eyeTexture(0.5), texR = eyeTexture(0);
 
-  // Curved screen at eye height (~1.4 center). Eye halves were swapped on
-  // Quest (layers are fine) — texL samples the RIGHT half and vice versa.
-  var R = 5.5, ARC = 1.15, SCREEN_Y = 1.4;
+  // Curved screen at eye height. Per-eye halves are pre-squeezed 2x (SBS), so
+  // the arc is sized for the UNSQUEEZED aspect: width = height * fullAspect.
+  // Measured live from the stream (mirror aspect varies); scaleX corrects it.
+  var R = 5.5, ARC = 1.15, SCREEN_H = 2.6, SCREEN_Y = 1.55;
+  var screenMeshes = [];
   function screenMesh(tex, layer) {
     var geo = new THREE.CylinderGeometry(
-      R, R, 2.6, 48, 1, true, Math.PI - ARC / 2, ARC);
+      R, R, SCREEN_H, 48, 1, true, Math.PI - ARC / 2, ARC);
     var mat = new THREE.MeshBasicMaterial({ map: tex, side: THREE.DoubleSide });
     var mesh = new THREE.Mesh(geo, mat);
     mesh.position.y = SCREEN_Y;
     if (!bothEyes) mesh.layers.set(layer);
     scene.add(mesh);
+    screenMeshes.push(mesh);
     return mesh;
   }
   if (bothEyes) {
     var both = eyeTexture(0); both.repeat.x = 1;
     var m = new THREE.Mesh(
-      new THREE.CylinderGeometry(R, R, 2.6, 48, 1, true, Math.PI - ARC / 2, ARC),
+      new THREE.CylinderGeometry(R, R, SCREEN_H, 48, 1, true, Math.PI - ARC / 2, ARC),
       new THREE.MeshBasicMaterial({ map: both, side: THREE.DoubleSide }));
     m.position.y = SCREEN_Y;
     scene.add(m);
+    screenMeshes.push(m);
   } else {
     screenMesh(texL, 1);
     screenMesh(texR, 2);
@@ -102,9 +106,29 @@
     var sprite = new THREE.Sprite(
       new THREE.SpriteMaterial({ map: tex, transparent: true }));
     sprite.scale.set(3.2, 0.4, 1);
-    sprite.position.set(0, 0.35, -5);
+    sprite.position.set(0, 0.5, -5);
     scene.add(sprite);
   })();
+
+  // Unsqueeze: fit arc width to the live stream aspect (checked 1/sec).
+  var lastAspect = 0;
+  setInterval(function () {
+    if (!img.naturalWidth || !img.naturalHeight) return;
+    var aspect = img.naturalWidth / img.naturalHeight;
+    if (Math.abs(aspect - lastAspect) / Math.max(0.01, lastAspect) < 0.02) return;
+    lastAspect = aspect;
+    var s = (SCREEN_H * aspect) / (R * ARC);
+    for (var i = 0; i < screenMeshes.length; i++) screenMeshes[i].scale.x = s;
+  }, 1000);
+
+  // Session state in-page: proves whether you are really in the headset.
+  renderer.xr.addEventListener('sessionstart', function () {
+    status.textContent = 'IN VR — look around, Quest button exits';
+    dot.className = 'dot live';
+  });
+  renderer.xr.addEventListener('sessionend', function () {
+    status.textContent = 'back in browser';
+  });
 
   var dot = document.getElementById('livedot');
   var status = document.getElementById('status');
