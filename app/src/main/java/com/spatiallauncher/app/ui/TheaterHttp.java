@@ -52,6 +52,12 @@ final class TheaterHttp {
                 Log.i(TAG, "Theater on http://127.0.0.1:" + PORT + "/theater");
                 while (running.get()) {
                     Socket client = serverSocket.accept();
+                    // Dead browser tabs (killed renderers, wedged sockets) must not
+                    // pile handler threads forever: reads and writes time out.
+                    try {
+                        client.setSoTimeout(15000);
+                    } catch (Throwable ignored) {
+                    }
                     workerPool.execute(() -> handleClient(client));
                 }
             } catch (IOException e) {
