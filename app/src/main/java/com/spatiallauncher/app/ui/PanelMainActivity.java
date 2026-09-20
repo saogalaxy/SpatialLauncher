@@ -748,6 +748,7 @@ public class PanelMainActivity extends AppCompatActivity {
         headParallaxToggle.setOnCheckedChangeListener((buttonView, isChecked) -> {
             headParallaxEnabled = isChecked;
             settingsStore.setHeadParallax(isChecked);
+            Log.i(TAG, "3D+ head parallax " + (isChecked ? "ON" : "OFF"));
             if (isChecked) {
                 if (!forceStereoEnabled) {
                     // One tap to the new experience: bring 3D up too.
@@ -759,9 +760,11 @@ public class PanelMainActivity extends AppCompatActivity {
                     }
                 }
                 recenterHeadParallax();
+                PanelAlerts.show(this, R.string.head_parallax_on);
             } else {
                 headNormYaw = 0f;
                 headShiftScale = 0f;
+                PanelAlerts.show(this, R.string.head_parallax_off);
             }
             updateHeadParallaxChip();
         });
@@ -2918,6 +2921,7 @@ public class PanelMainActivity extends AppCompatActivity {
             headHasRef = true;
             headNormYaw = 0f;
             headShiftScale = 0f;
+            Log.i(TAG, "head tracking live (rotation vector delivering)");
             return;
         }
         float target = clampFloat(wrapPi(yaw - headRefYaw) / MAX_HEAD_YAW_RAD, -1f, 1f);
@@ -2927,7 +2931,7 @@ public class PanelMainActivity extends AppCompatActivity {
         headShiftScale = headNormYaw * HEAD_PARALLAX_FRACTION;
     }
 
-    /** 3D+ chip look: accent "3D+" when live, dim gray when off or 3D is off. */
+    /** 3D+ chip look: bright white "3D+" when live, dim gray otherwise. */
     private void updateHeadParallaxChip() {
         ToggleButton chip = findViewById(R.id.toggle_head_parallax);
         if (chip == null) {
@@ -2939,7 +2943,7 @@ public class PanelMainActivity extends AppCompatActivity {
         chip.setTextOff(label);
         chip.setText(label);
         int color = getResources().getColor(
-                live ? R.color.accent : R.color.text_secondary, getTheme());
+                live ? R.color.text_primary : R.color.text_secondary, getTheme());
         chip.setTextColor(color);
         chip.setAlpha(forceStereoEnabled ? 1f : 0.45f);
     }
