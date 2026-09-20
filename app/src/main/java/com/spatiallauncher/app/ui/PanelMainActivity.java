@@ -703,6 +703,17 @@ public class PanelMainActivity extends AppCompatActivity {
             if (!suppressStereoPersist) {
                 settingsStore.setForceStereo(isChecked);
             }
+            if (!isChecked && headParallaxEnabled) {
+                // 3D off implies 3D+ off — the chips must never contradict.
+                headParallaxEnabled = false;
+                settingsStore.setHeadParallax(false);
+                headNormYaw = 0f;
+                headShiftScale = 0f;
+                ToggleButton plus = findViewById(R.id.toggle_head_parallax);
+                if (plus != null && plus.isChecked()) {
+                    plus.setChecked(false);
+                }
+            }
             updateStereoToggleLook(toggleStereo3d, isChecked);
             if (mirroringApp != null) {
                 setStereoComposition(forceStereoEnabled);
@@ -726,6 +737,11 @@ public class PanelMainActivity extends AppCompatActivity {
         // "3D+" chip: stereo plus rotational head parallax. Independent switch —
         // today's 3D mode is untouched with this off (head term stays 0).
         headParallaxEnabled = settingsStore.getHeadParallax();
+        if (!forceStereoEnabled && headParallaxEnabled) {
+            // Persisted contradiction (3D was turned off last run): 3D+ starts off.
+            headParallaxEnabled = false;
+            settingsStore.setHeadParallax(false);
+        }
         ToggleButton headParallaxToggle = findViewById(R.id.toggle_head_parallax);
         headParallaxToggle.setChecked(headParallaxEnabled);
         updateHeadParallaxChip();
@@ -2911,12 +2927,20 @@ public class PanelMainActivity extends AppCompatActivity {
         headShiftScale = headNormYaw * HEAD_PARALLAX_FRACTION;
     }
 
-    /** Dims the 3D+ chip while 3D is off (tap still enables both). */
+    /** 3D+ chip look: accent "3D+" when live, dim gray when off or 3D is off. */
     private void updateHeadParallaxChip() {
         ToggleButton chip = findViewById(R.id.toggle_head_parallax);
         if (chip == null) {
             return;
         }
+        boolean live = headParallaxEnabled && forceStereoEnabled;
+        String label = getString(R.string.toggle_3d_plus_label);
+        chip.setTextOn(label);
+        chip.setTextOff(label);
+        chip.setText(label);
+        int color = getResources().getColor(
+                live ? R.color.accent : R.color.text_secondary, getTheme());
+        chip.setTextColor(color);
         chip.setAlpha(forceStereoEnabled ? 1f : 0.45f);
     }
 
