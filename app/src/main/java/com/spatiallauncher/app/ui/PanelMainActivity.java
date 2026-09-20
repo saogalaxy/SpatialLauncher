@@ -1920,6 +1920,8 @@ public class PanelMainActivity extends AppCompatActivity {
         videoStereoSurfaceShown = true;
         // Fresh straight-ahead for 3D+ head parallax.
         recenterHeadParallax();
+        // Spike: theater serves any stereo output, no share sheet required.
+        startTheater();
         setStereoOutputVisible(true);
         setStereoComposition(true);
         gameRenderSurface.setClickable(false);
@@ -2436,6 +2438,8 @@ public class PanelMainActivity extends AppCompatActivity {
         }
         persistSession();
         refreshDock();
+        // Spike: keep serving while another stereo source is live.
+        stopTheaterIfIdle();
     }
 
     private void showDrmBrowserHostOnly() {
@@ -4032,6 +4036,8 @@ public class PanelMainActivity extends AppCompatActivity {
             browserStereoHandler.removeCallbacks(browserStereoTick);
             browserStereoHandler.post(browserStereoTick);
         }
+        // Spike: theater serves any stereo output, no share sheet required.
+        startTheater();
     }
 
     /**
@@ -4378,6 +4384,8 @@ public class PanelMainActivity extends AppCompatActivity {
             browserHost.setAlpha(1f);
             browserHost.bringToFront();
         }
+        // Spike: keep serving while another stereo source is live.
+        stopTheaterIfIdle();
     }
 
     private void captureBrowserStereoFrame() {
@@ -6565,8 +6573,8 @@ public class PanelMainActivity extends AppCompatActivity {
         setHomeRowCompact(false);
         setCastTheme(false);
         persistSession();
-        // Spike: WebXR theater prototype serves only live mirrors.
-        stopTheater();
+        // Spike: WebXR theater prototype serves only live stereo output.
+        stopTheaterIfIdle();
     }
 
     /** Spike-only: localhost theater for the WebXR prototype. */
@@ -6594,6 +6602,13 @@ public class PanelMainActivity extends AppCompatActivity {
         } catch (Throwable ignored) {
         }
         TheaterFrames.clear();
+    }
+
+    /** Spike: stop the theater server only when no stereo source is live. */
+    private void stopTheaterIfIdle() {
+        if (!isStereoSessionActive()) {
+            stopTheater();
+        }
     }
 
     /**
