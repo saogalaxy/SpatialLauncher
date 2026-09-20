@@ -6102,16 +6102,21 @@ public class PanelMainActivity extends AppCompatActivity {
         findViewById(R.id.reset_depth_defaults).setOnClickListener(v -> resetCurrentDepthDefaults());
 
         // Enter VR (beta lane only): visible only when the VrActivity exists.
-        // Release builds have no :vr module, so the button stays gone there —
-        // zero behavior change outside beta.
+        // Gate is the beta package id first (deterministic per variant) with
+        // PackageManager resolution as backup — resolveActivity has proven
+        // unreliable for this lookup on-device. Release stays GONE either way.
         Button enterVr = findViewById(R.id.enter_vr_button);
-        boolean vrPresent = false;
-        try {
-            Intent vrProbe = new Intent()
-                    .setClassName(getPackageName(), "com.spatiallauncher.vr.VrActivity");
-            vrPresent = getPackageManager().resolveActivity(vrProbe, 0) != null;
-        } catch (Throwable ignored) {
+        boolean vrPresent = getPackageName() != null
+                && getPackageName().endsWith(".beta");
+        if (!vrPresent) {
+            try {
+                Intent vrProbe = new Intent()
+                        .setClassName(getPackageName(), "com.spatiallauncher.vr.VrActivity");
+                vrPresent = getPackageManager().resolveActivity(vrProbe, 0) != null;
+            } catch (Throwable ignored) {
+            }
         }
+        Log.i(TAG, "Enter VR present=" + vrPresent);
         if (enterVr != null) {
             if (!vrPresent) {
                 enterVr.setVisibility(View.GONE);
