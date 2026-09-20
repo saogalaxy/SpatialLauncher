@@ -11,6 +11,7 @@ public class UserSettingsStore {
 
     private static final String PREFS_NAME = "spatial_launcher_settings";
     private static final String KEY_FORCE_STEREO = "force_stereo";
+    private static final String KEY_HEAD_PARALLAX = "head_parallax";
     private static final String KEY_DEPTH_STRENGTH_PERCENT = "depth_strength_percent";
     private static final String KEY_CONVERGENCE_PROGRESS = "convergence_progress";
     private static final String KEY_DEPTH_CONTRAST = "depth_contrast_percent";
@@ -73,6 +74,17 @@ public class UserSettingsStore {
 
     public void setForceStereo(boolean enabled) {
         prefs.edit().putBoolean(KEY_FORCE_STEREO, enabled).apply();
+    }
+
+    /** 3D+ head parallax. Default off until verified eyes-on. */
+    static final boolean DEFAULT_HEAD_PARALLAX = false;
+
+    public boolean getHeadParallax() {
+        return prefs.getBoolean(KEY_HEAD_PARALLAX, DEFAULT_HEAD_PARALLAX);
+    }
+
+    public void setHeadParallax(boolean enabled) {
+        prefs.edit().putBoolean(KEY_HEAD_PARALLAX, enabled).apply();
     }
 
     public int getDepthStrengthPercent(boolean stills) {

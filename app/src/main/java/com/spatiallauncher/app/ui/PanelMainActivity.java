@@ -23,6 +23,10 @@ import android.content.ComponentName;
 import android.content.ServiceConnection;
 import android.hardware.display.DisplayManager;
 import android.hardware.display.VirtualDisplay;
+import android.hardware.Sensor;
+import android.hardware.SensorEvent;
+import android.hardware.SensorEventListener;
+import android.hardware.SensorManager;
 import android.media.Image;
 import android.media.ImageReader;
 import android.media.projection.MediaProjection;
@@ -216,6 +220,7 @@ public class PanelMainActivity extends AppCompatActivity {
     private EditText browserAddress;
     private ImageButton browserButton;
     private ImageButton stopMirrorButton;
+    private ToggleButton toggleStereo3d;
     private OcrRegionStore ocrRegionStore;
     private final ScreenFrameCapture screenFrameCapture = new ScreenFrameCapture();
     private DialogueTextExtractor dialogueTextExtractor;
@@ -264,6 +269,46 @@ public class PanelMainActivity extends AppCompatActivity {
 
     // Live setting, wired up to the switch in the settings panel.
     private boolean forceStereoEnabled = true;
+
+    // 3D+ head parallax: rotational look-around on top of stereo. Independent
+    // switch — 3D off forces it inert (headShiftScale stays 0), so today's 3D
+    // mode is byte-identical with 3D+ off.
+    private boolean headParallaxEnabled = false;
+    /** Pre-scaled head term consumed by both renderers (0 when 3D+ inert). */
+    private volatile float headShiftScale = 0f;
+    private volatile float headNormYaw = 0f;
+    private float headRefYaw = 0f;
+    private boolean headHasRef = false;
+    private SensorManager headSensorManager;
+    private Sensor headRotationSensor;
+    private final float[] headRotMatrix = new float[9];
+    private final float[] headOrientation = new float[3];
+    private final float[] headVector = new float[4];
+
+    /** Full-scale head turn mapped to headNormYaw = ±1. Yaw only (no vertical mesh shift). */
+    private static final float MAX_HEAD_YAW_RAD = 0.0873f; // ~5 degrees
+    /** Fraction of local stereo parallax added per unit head turn, both eyes. */
+    private static final float HEAD_PARALLAX_FRACTION = 0.35f;
+    private static final float HEAD_SMOOTHING = 0.25f;
+    private static final float HEAD_MAX_SLEW_PER_EVENT = 0.03f;
+
+    private final SensorEventListener headParallaxListener = new SensorEventListener() {
+        @Override
+        public void onSensorChanged(SensorEvent event) {
+            if (event == null || event.values == null || event.values.length < 3) {
+                return;
+            }
+            int n = Math.min(event.values.length, 4);
+            for (int i = 0; i < n; i++) {
+                headVector[i] = event.values[i];
+            }
+            updateHeadShiftFromVector();
+        }
+
+        @Override
+        public void onAccuracyChanged(Sensor sensor, int accuracy) {
+        }
+    };
 
     private DepthEstimator depthEstimator;
     private DepthEstimator depthStaticEstimator;
@@ -647,7 +692,7 @@ public class PanelMainActivity extends AppCompatActivity {
         // "3D" toggle: when ON, draw SBS + parallax and ask Horizon for SIDE_BY_SIDE
         // composition. When OFF, draw one full-bleed frame (no mesh/depth) — same idea
         // as browser mode, which swaps back to the live WebView.
-        ToggleButton toggleStereo3d = findViewById(R.id.toggle_stereo_3d);
+        toggleStereo3d = findViewById(R.id.toggle_stereo_3d);
         toggleStereo3d.setChecked(forceStereoEnabled);
         // Same round-button color as power/settings for a consistent palette; the "on"
         // state is shown with full opacity + accent-tinted text vs. a slightly dimmed
@@ -675,6 +720,34 @@ public class PanelMainActivity extends AppCompatActivity {
             } else if (videoPlaying) {
                 setVideoDisplayMode();
             }
+            updateHeadParallaxChip();
+        });
+
+        // "3D+" chip: stereo plus rotational head parallax. Independent switch —
+        // today's 3D mode is untouched with this off (head term stays 0).
+        headParallaxEnabled = settingsStore.getHeadParallax();
+        ToggleButton headParallaxToggle = findViewById(R.id.toggle_head_parallax);
+        headParallaxToggle.setChecked(headParallaxEnabled);
+        updateHeadParallaxChip();
+        headParallaxToggle.setOnCheckedChangeListener((buttonView, isChecked) -> {
+            headParallaxEnabled = isChecked;
+            settingsStore.setHeadParallax(isChecked);
+            if (isChecked) {
+                if (!forceStereoEnabled) {
+                    // One tap to the new experience: bring 3D up too.
+                    if (toggleStereo3d != null) {
+                        toggleStereo3d.setChecked(true);
+                    } else {
+                        forceStereoEnabled = true;
+                        settingsStore.setForceStereo(true);
+                    }
+                }
+                recenterHeadParallax();
+            } else {
+                headNormYaw = 0f;
+                headShiftScale = 0f;
+            }
+            updateHeadParallaxChip();
         });
 
         // Settings gear opens/closes a slide-out drawer (top-end corner) holding the
@@ -1826,6 +1899,8 @@ public class PanelMainActivity extends AppCompatActivity {
             return;
         }
         videoStereoSurfaceShown = true;
+        // Fresh straight-ahead for 3D+ head parallax.
+        recenterHeadParallax();
         setStereoOutputVisible(true);
         setStereoComposition(true);
         gameRenderSurface.setClickable(false);
@@ -2730,6 +2805,119 @@ public class PanelMainActivity extends AppCompatActivity {
         suppressStereoPersist = true;
         toggle.setChecked(on);
         suppressStereoPersist = false;
+        updateHeadParallaxChip();
+    }
+
+    private boolean isStereoSessionActive() {
+        return mirroringApp != null || browserStereoRunning || (videoPlaying && forceStereoEnabled);
+    }
+
+    /** Straight-ahead for 3D+. The next sensor event becomes the reference. */
+    private void recenterHeadParallax() {
+        headHasRef = false;
+        headNormYaw = 0f;
+        headShiftScale = 0f;
+    }
+
+    private void registerHeadTracking() {
+        if (headSensorManager == null) {
+            try {
+                headSensorManager = (SensorManager) getSystemService(Context.SENSOR_SERVICE);
+            } catch (Throwable t) {
+                Log.w(TAG, "no sensor service", t);
+                return;
+            }
+        }
+        if (headSensorManager == null) {
+            return;
+        }
+        if (headRotationSensor == null) {
+            try {
+                headRotationSensor =
+                        headSensorManager.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR);
+            } catch (Throwable t) {
+                Log.w(TAG, "no rotation vector sensor", t);
+                return;
+            }
+        }
+        if (headRotationSensor == null) {
+            return; // Feature silently off; plain 3D is unaffected.
+        }
+        try {
+            headSensorManager.registerListener(
+                    headParallaxListener, headRotationSensor, SensorManager.SENSOR_DELAY_GAME);
+        } catch (Throwable t) {
+            Log.w(TAG, "register head tracking failed", t);
+        }
+    }
+
+    private void unregisterHeadTracking() {
+        if (headSensorManager != null) {
+            try {
+                headSensorManager.unregisterListener(headParallaxListener);
+            } catch (Throwable ignored) {
+            }
+        }
+        headNormYaw = 0f;
+        headShiftScale = 0f;
+    }
+
+    private static float wrapPi(float a) {
+        while (a > Math.PI) {
+            a -= 2f * (float) Math.PI;
+        }
+        while (a < -Math.PI) {
+            a += 2f * (float) Math.PI;
+        }
+        return a;
+    }
+
+    private static float clampFloat(float v, float lo, float hi) {
+        return Math.max(lo, Math.min(hi, v));
+    }
+
+    /**
+     * Runs on the sensor (main-looper) thread; render threads consume the
+     * volatile headShiftScale. SIGN TBD EYES-ON: if the world swims WITH the
+     * head instead of counter-shifting, negate headShiftScale below.
+     */
+    private void updateHeadShiftFromVector() {
+        if (!headParallaxEnabled || !forceStereoEnabled || !isStereoSessionActive()) {
+            headShiftScale = 0f;
+            return;
+        }
+        float[] m = headRotMatrix;
+        float[] o = headOrientation;
+        try {
+            SensorManager.getRotationMatrixFromVector(m, headVector);
+            SensorManager.getOrientation(m, o);
+        } catch (Throwable t) {
+            Log.w(TAG, "head orientation failed", t);
+            headShiftScale = 0f;
+            return;
+        }
+        float yaw = o[0];
+        if (!headHasRef) {
+            headRefYaw = yaw;
+            headHasRef = true;
+            headNormYaw = 0f;
+            headShiftScale = 0f;
+            return;
+        }
+        float target = clampFloat(wrapPi(yaw - headRefYaw) / MAX_HEAD_YAW_RAD, -1f, 1f);
+        float stepped = headNormYaw
+                + clampFloat(target - headNormYaw, -HEAD_MAX_SLEW_PER_EVENT, HEAD_MAX_SLEW_PER_EVENT);
+        headNormYaw = headNormYaw + (stepped - headNormYaw) * HEAD_SMOOTHING;
+        headShiftScale = headNormYaw * HEAD_PARALLAX_FRACTION;
+    }
+
+    /** Dims the 3D+ chip while 3D is off (tap still enables both). */
+    private void updateHeadParallaxChip() {
+        ToggleButton chip = findViewById(R.id.toggle_head_parallax);
+        if (chip == null) {
+            return;
+        }
+        chip.setAlpha(forceStereoEnabled ? 1f : 0.45f);
     }
 
     private void syncListenEngine(boolean notifyIfNoSource) {
@@ -3795,6 +3983,8 @@ public class PanelMainActivity extends AppCompatActivity {
         browserStereoLiveHidden = false;
         browserProtectedVideo = false;
         browserVideoBlockedTicks = 0;
+        // Fresh straight-ahead for 3D+ head parallax.
+        recenterHeadParallax();
         setBrowserStereoCaptureMode(true);
         setStereoOutputVisible(true);
         gameRenderSurface.setClickable(false);
@@ -4037,7 +4227,11 @@ public class PanelMainActivity extends AppCompatActivity {
         for (int i = 0; i < 8; i++) {
             float col = u * meshCols;
             float edgeFade = edgeFadeForColumn(col, meshCols);
-            float shift = direction * (sampleParallaxGrid(parallaxGrid, u, v) + convergenceOffsetPx) * edgeFade;
+            float sample = sampleParallaxGrid(parallaxGrid, u, v);
+            // Mirror the render warp (including the 3D+ head term) so taps land
+            // where the shifted pixels are.
+            float shift = (direction * (sample + convergenceOffsetPx)
+                    + headShiftScale * sample) * edgeFade;
             u = clamp01((destX - eyeBounds.left - shift) / eyeW);
         }
         return new float[] { u, v };
@@ -4675,6 +4869,7 @@ public class PanelMainActivity extends AppCompatActivity {
         persistSession();
         // Drop LAN import before a game takes focus — never fight VR for process/focus.
         stopBookImportServerQuiet();
+        unregisterHeadTracking();
         glesZMeshView.onPause();
         super.onPause();
     }
@@ -4757,6 +4952,8 @@ public class PanelMainActivity extends AppCompatActivity {
         // A pinned app may have been uninstalled while we were in the background;
         // re-resolving on every resume keeps the dock honest without extra bookkeeping.
         refreshDock();
+        updateHeadParallaxChip();
+        registerHeadTracking();
         // Book import is user-started only (EPUB long-press). Do not auto-start on resume.
     }
 
@@ -5214,6 +5411,8 @@ public class PanelMainActivity extends AppCompatActivity {
 
     private void onMirrorSessionStarted(InstalledAppInfo app) {
         mirroringApp = app;
+        // Fresh straight-ahead for 3D+ head parallax.
+        recenterHeadParallax();
         hideDrmBrowser();
         emptyStateText.setVisibility(View.GONE);
         setStereoOutputVisible(true);
@@ -6049,7 +6248,8 @@ public class PanelMainActivity extends AppCompatActivity {
                     depthStrengthMultiplier,
                     convergenceOffsetPx,
                     edgeFadeFraction,
-                    !depthModeStatic);
+                    !depthModeStatic,
+                    headShiftScale);
             return;
         }
         if (glesZMeshView.ownsSurface()) {
@@ -6266,7 +6466,10 @@ public class PanelMainActivity extends AppCompatActivity {
             for (int col = 0; col <= meshCols; col++) {
                 float u = col / (float) meshCols;
                 float edgeFade = edgeFadeForColumn(col, meshCols);
-                float shift = direction * (parallaxGrid[row][col] + convergenceOffsetPx) * edgeFade;
+                // 3D+ head term: same direction both eyes, scales with local depth
+                // (headShiftScale is 0 unless 3D+ is live, so plain 3D is untouched).
+                float shift = (direction * (parallaxGrid[row][col] + convergenceOffsetPx)
+                        + headShiftScale * parallaxGrid[row][col]) * edgeFade;
                 float xDst = eyeBounds.left + u * eyeBounds.width() + shift;
                 verts[k++] = xDst;
                 verts[k++] = yDst;
@@ -6395,6 +6598,7 @@ public class PanelMainActivity extends AppCompatActivity {
         }
         resizeSquareView(stopMirrorButton, buttonSize, buttonPad);
         resizeSquareView(findViewById(R.id.toggle_stereo_3d), buttonSize, 0);
+        resizeSquareView(findViewById(R.id.toggle_head_parallax), buttonSize, 0);
         resizeSquareView(findViewById(R.id.browser_button), buttonSize, buttonPad);
         resizeSquareView(findViewById(R.id.epub_button), buttonSize, buttonPad);
         resizeSquareView(findViewById(R.id.video_button), buttonSize, buttonPad);

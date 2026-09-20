@@ -1229,6 +1229,23 @@
                     android:minWidth="0dp"
                     android:minHeight="0dp" />
 
+                <!-- 3D+ head parallax — stereo plus rotational look-around. -->
+                <ToggleButton
+                    android:id="@+id/toggle_head_parallax"
+                    android:layout_width="48dp"
+                    android:layout_height="48dp"
+                    android:layout_marginStart="8dp"
+                    android:background="@drawable/bg_circle_button"
+                    android:contentDescription="@string/head_parallax_description"
+                    android:textOn="@string/toggle_3d_plus_label"
+                    android:textOff="@string/toggle_3d_plus_label"
+                    android:textColor="@color/text_primary"
+                    android:textSize="12sp"
+                    android:textStyle="bold"
+                    android:padding="0dp"
+                    android:minWidth="0dp"
+                    android:minHeight="0dp" />
+
                 <!-- Built-in Widevine WebView browser. -->
                 <ImageButton
                     android:id="@+id/browser_button"

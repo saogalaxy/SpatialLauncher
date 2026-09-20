@@ -122,8 +122,9 @@ public class GlesZMeshView {
             float strength,
             float convergencePx,
             float edgeFade,
-            boolean smoothLiveDepth) {
-        renderer.queueFrame(frame, depth01, stereo, strength, convergencePx, edgeFade, smoothLiveDepth);
+            boolean smoothLiveDepth,
+            float headScale) {
+        renderer.queueFrame(frame, depth01, stereo, strength, convergencePx, edgeFade, smoothLiveDepth, headScale);
         synchronized (lock) {
             renderRequested = true;
             lock.notifyAll();
@@ -353,6 +354,8 @@ public class GlesZMeshView {
         private float pendingConverge;
         private float pendingFade = 0.12f;
         private boolean pendingSmooth;
+        /** 3D+ head term, pre-scaled pixels-equivalent (0 when 3D+ off). */
+        private float pendingHead;
         private int program;
         private int aPos;
         private int aUv;
@@ -376,7 +379,8 @@ public class GlesZMeshView {
                 float strength,
                 float convergencePx,
                 float edgeFade,
-                boolean smoothLiveDepth) {
+                boolean smoothLiveDepth,
+                float headScale) {
             synchronized (frameLock) {
                 if (pendingFrame != null && pendingFrame != frame) {
                     pendingFrame.recycle();
@@ -388,6 +392,7 @@ public class GlesZMeshView {
                 pendingConverge = convergencePx;
                 pendingFade = edgeFade;
                 pendingSmooth = smoothLiveDepth;
+                pendingHead = headScale;
             }
         }
 
@@ -431,6 +436,7 @@ public class GlesZMeshView {
             float converge;
             float fade;
             boolean smooth;
+            float head;
             synchronized (frameLock) {
                 frame = pendingFrame;
                 pendingFrame = null;
@@ -440,6 +446,7 @@ public class GlesZMeshView {
                 converge = pendingConverge;
                 fade = pendingFade;
                 smooth = pendingSmooth;
+                head = pendingHead;
                 liveMesh = smooth;
             }
             GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT);
@@ -460,7 +467,7 @@ public class GlesZMeshView {
             GLES20.glActiveTexture(GLES20.GL_TEXTURE0);
             GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, texId);
             if (!stereo) {
-                rebuildMesh(used, aspect, strength, fade, converge, 0f);
+                rebuildMesh(used, aspect, strength, fade, converge, 0f, 0f);
                 bindMeshAttrs();
                 GLES20.glViewport(0, 0, viewportW, viewportH);
                 drawEye(viewportW / (float) viewportH);
@@ -471,11 +478,11 @@ public class GlesZMeshView {
                 // Identical eye rects — using (viewportW - half) on the right made that eye
                 // one pixel wider while FOV still used `half`, so L looked thin / R wide.
                 float eyeA = half / (float) viewportH;
-                rebuildMesh(used, aspect, strength, fade, converge, +1f);
+                rebuildMesh(used, aspect, strength, fade, converge, +1f, stereo ? head : 0f);
                 bindMeshAttrs();
                 GLES20.glViewport(0, 0, half, viewportH);
                 drawEye(eyeA);
-                rebuildMesh(used, aspect, strength, fade, converge, -1f);
+                rebuildMesh(used, aspect, strength, fade, converge, -1f, stereo ? head : 0f);
                 bindMeshAttrs();
                 GLES20.glViewport(half, 0, half, viewportH);
                 drawEye(eyeA);
@@ -536,7 +543,8 @@ public class GlesZMeshView {
                 float strength,
                 float fade,
                 float convergePx,
-                float eyeSign) {
+                float eyeSign,
+                float headScale) {
             int rows = 12;
             int cols = 16;
             if (depth != null && depth.length >= 2 && depth[0].length >= 2) {
@@ -562,7 +570,10 @@ public class GlesZMeshView {
                     }
                     float borderPin = outerRingPin(r, rows, c, cols, fade);
                     float delta = (d - ref) * borderPin;
-                    float xShift = eyeSign * (delta * parallax + converge);
+                    // 3D+ head term: same-direction both eyes, scales with local
+                    // depth like real yaw parallax (flips sign past fixation).
+                    float xShift = eyeSign * (delta * parallax + converge)
+                            + headScale * delta * parallax;
                     pos[i++] = (u - 0.5f) * planeW + xShift;
                     pos[i++] = (0.5f - vv);
                     pos[i++] = -1f;
