@@ -39,15 +39,15 @@
   var scene = new THREE.Scene();
   scene.background = new THREE.Color(0x050507);
   var camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.1, 60);
+  camera.position.y = 1.6; // flat preview matches local-floor eye height
 
   // Dim room: floor grid + back glow so scale reads in-headset.
   var grid = new THREE.GridHelper(30, 30, 0x222228, 0x111114);
-  grid.position.y = -1.6;
   scene.add(grid);
   var glow = new THREE.Mesh(
     new THREE.PlaneGeometry(30, 12),
     new THREE.MeshBasicMaterial({ color: 0x0a0a12 }));
-  glow.position.set(0, 2, -12);
+  glow.position.set(0, 3, -12);
   scene.add(glow);
 
   // Mirror frames land here, 960px wide cap from the app.
@@ -60,16 +60,17 @@
     tex.repeat.x = 0.5; tex.offset.x = xOffset;
     return tex;
   }
-  var texL = eyeTexture(0), texR = eyeTexture(0.5);
+  var texL = eyeTexture(0.5), texR = eyeTexture(0);
 
-  // Curved screen ~5.5m out, ~65deg arc. One mesh per eye (layers 1/2);
-  // 'both' mode shows the full SBS picture to both eyes instead.
-  var R = 5.5, ARC = 1.15;
+  // Curved screen at eye height (~1.4 center). Eye halves were swapped on
+  // Quest (layers are fine) — texL samples the RIGHT half and vice versa.
+  var R = 5.5, ARC = 1.15, SCREEN_Y = 1.4;
   function screenMesh(tex, layer) {
     var geo = new THREE.CylinderGeometry(
-      R, R, 3.1, 48, 1, true, Math.PI - ARC / 2, ARC);
+      R, R, 2.6, 48, 1, true, Math.PI - ARC / 2, ARC);
     var mat = new THREE.MeshBasicMaterial({ map: tex, side: THREE.DoubleSide });
     var mesh = new THREE.Mesh(geo, mat);
+    mesh.position.y = SCREEN_Y;
     if (!bothEyes) mesh.layers.set(layer);
     scene.add(mesh);
     return mesh;
@@ -77,13 +78,33 @@
   if (bothEyes) {
     var both = eyeTexture(0); both.repeat.x = 1;
     var m = new THREE.Mesh(
-      new THREE.CylinderGeometry(R, R, 3.1, 48, 1, true, Math.PI - ARC / 2, ARC),
+      new THREE.CylinderGeometry(R, R, 2.6, 48, 1, true, Math.PI - ARC / 2, ARC),
       new THREE.MeshBasicMaterial({ map: both, side: THREE.DoubleSide }));
+    m.position.y = SCREEN_Y;
     scene.add(m);
   } else {
     screenMesh(texL, 1);
     screenMesh(texR, 2);
   }
+
+  // In-scene hint: DOM HUD never renders inside the headset.
+  (function () {
+    var c = document.createElement('canvas');
+    c.width = 1024; c.height = 128;
+    var g = c.getContext('2d');
+    g.fillStyle = 'rgba(0,0,0,0.0)';
+    g.fillRect(0, 0, 1024, 128);
+    g.fillStyle = '#fff';
+    g.font = '44px sans-serif';
+    g.textAlign = 'center';
+    g.fillText('Look around. Quest button to exit.', 512, 80);
+    var tex = new THREE.CanvasTexture(c);
+    var sprite = new THREE.Sprite(
+      new THREE.SpriteMaterial({ map: tex, transparent: true }));
+    sprite.scale.set(3.2, 0.4, 1);
+    sprite.position.set(0, 0.35, -5);
+    scene.add(sprite);
+  })();
 
   var dot = document.getElementById('livedot');
   var status = document.getElementById('status');
