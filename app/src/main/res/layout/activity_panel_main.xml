@@ -775,6 +775,14 @@
                                 android:text="@string/enter_vr_beta_label"
                                 android:visibility="gone" />
 
+                            <Button
+                                android:id="@+id/exit_vr_button"
+                                android:layout_width="match_parent"
+                                android:layout_height="40dp"
+                                android:layout_marginTop="8dp"
+                                android:text="@string/exit_vr_beta_label"
+                                android:visibility="gone" />
+
                             <Switch
                                 android:id="@+id/toggle_3d_off_page_translate"
                                 android:layout_width="match_parent"

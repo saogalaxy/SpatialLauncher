@@ -351,6 +351,7 @@
     <string name="toggle_3d_label">3D</string>
     <string name="vr_dock_label">VR</string>
     <string name="enter_vr_beta_label">Enter VR (beta)</string>
+    <string name="exit_vr_beta_label">Exit VR (beta)</string>
     <string name="enter_vr_failed">Couldn\'t enter VR</string>
     <string name="empty_state_message">No app running.\nAdd an app from the dock below to get started.</string>
     <string name="add_game_dock_label">Add App</string>

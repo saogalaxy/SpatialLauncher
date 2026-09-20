@@ -3,6 +3,7 @@ package com.spatiallauncher.app.ui;
 import android.Manifest;
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.app.PendingIntent;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
@@ -730,28 +731,13 @@ public class PanelMainActivity extends AppCompatActivity {
         });
 
         // "VR" dock button (beta lane only): enters the immersive room from the
-        // retired 3D+ slot. Visible only when the VrActivity exists; release
-        // builds never see it.
+        // retired 3D+ slot. Visibility is driven by refreshVrButtons().
         headParallaxEnabled = false;
         Button enterVrDock = findViewById(R.id.enter_vr_dock_button);
-        boolean vrDockPresent = getPackageName() != null
-                && getPackageName().endsWith(".beta");
-        if (!vrDockPresent) {
-            try {
-                Intent vrProbe = new Intent()
-                        .setClassName(getPackageName(), "com.spatiallauncher.vr.VrActivity");
-                vrDockPresent = getPackageManager().resolveActivity(vrProbe, 0) != null;
-            } catch (Throwable ignored) {
-            }
-        }
         if (enterVrDock != null) {
-            if (!vrDockPresent) {
-                enterVrDock.setVisibility(View.GONE);
-            } else {
-                enterVrDock.setVisibility(View.VISIBLE);
-                enterVrDock.setOnClickListener(v -> launchVrActivity());
-            }
+            enterVrDock.setOnClickListener(v -> launchVrActivity());
         }
+        refreshVrButtons();
 
         // Settings gear opens/closes a slide-out drawer (top-end corner) holding the
         // depth strength + convergence sliders, instead of those sliders permanently
@@ -2921,9 +2907,66 @@ public class PanelMainActivity extends AppCompatActivity {
                     .setClassName(getPackageName(), "com.spatiallauncher.vr.VrActivity")
                     .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
             startActivity(vr);
+            vrSessionLaunched = true;
+            refreshVrButtons();
         } catch (Throwable t) {
             Log.w(TAG, "enter VR failed", t);
             PanelAlerts.show(this, R.string.enter_vr_failed);
+        }
+    }
+
+    /** Beta lane only: leave immersive VR back to the panel in Home. */
+    private void exitVrActivity() {
+        vrSessionLaunched = false;
+        refreshVrButtons();
+        try {
+            Intent panel = new Intent(Intent.ACTION_MAIN)
+                    .setClassName(getPackageName(),
+                            "com.spatiallauncher.app.ui.PanelMainActivity")
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            PendingIntent pending = PendingIntent.getActivity(this, 0, panel,
+                    PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+            Intent home = new Intent(Intent.ACTION_MAIN)
+                    .addCategory(Intent.CATEGORY_HOME)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    .putExtra("extra_launch_in_home_pending_intent", pending);
+            startActivity(home);
+        } catch (Throwable t) {
+            Log.w(TAG, "exit VR failed", t);
+        }
+    }
+
+    private boolean vrSessionLaunched = false;
+
+    /** Enter shows unless a VR session is active; Exit shows only then. Beta only. */
+    private void refreshVrButtons() {
+        Button enterVr = findViewById(R.id.enter_vr_button);
+        if (enterVr != null) {
+            enterVr.setVisibility(
+                    (!vrSessionLaunched && isVrPresent()) ? View.VISIBLE : View.GONE);
+        }
+        Button exitVr = findViewById(R.id.exit_vr_button);
+        if (exitVr != null) {
+            exitVr.setVisibility(
+                    (vrSessionLaunched && isVrPresent()) ? View.VISIBLE : View.GONE);
+        }
+        Button enterVrDock = findViewById(R.id.enter_vr_dock_button);
+        if (enterVrDock != null) {
+            enterVrDock.setVisibility(!vrSessionLaunched && isVrPresent()
+                    ? View.VISIBLE : View.GONE);
+        }
+    }
+
+    private boolean isVrPresent() {
+        if (getPackageName() != null && getPackageName().endsWith(".beta")) {
+            return true;
+        }
+        try {
+            Intent vrProbe = new Intent()
+                    .setClassName(getPackageName(), "com.spatiallauncher.vr.VrActivity");
+            return getPackageManager().resolveActivity(vrProbe, 0) != null;
+        } catch (Throwable ignored) {
+            return false;
         }
     }
 
@@ -4960,6 +5003,9 @@ public class PanelMainActivity extends AppCompatActivity {
         // re-resolving on every resume keeps the dock honest without extra bookkeeping.
         refreshDock();
         registerHeadTracking();
+        // Back from VR (or anywhere else): the immersive session is over.
+        vrSessionLaunched = false;
+        refreshVrButtons();
         // Book import is user-started only (EPUB long-press). Do not auto-start on resume.
     }
 
@@ -6079,30 +6125,19 @@ public class PanelMainActivity extends AppCompatActivity {
 
         findViewById(R.id.reset_depth_defaults).setOnClickListener(v -> resetCurrentDepthDefaults());
 
-        // Enter VR (beta lane only): visible only when the VrActivity exists.
-        // Gate is the beta package id first (deterministic per variant) with
-        // PackageManager resolution as backup — resolveActivity has proven
-        // unreliable for this lookup on-device. Release stays GONE either way.
+        // Enter/Exit VR (beta lane only): visibility is driven by
+        // refreshVrButtons() (beta package + session state). Release stays
+        // GONE either way.
         Button enterVr = findViewById(R.id.enter_vr_button);
-        boolean vrPresent = getPackageName() != null
-                && getPackageName().endsWith(".beta");
-        if (!vrPresent) {
-            try {
-                Intent vrProbe = new Intent()
-                        .setClassName(getPackageName(), "com.spatiallauncher.vr.VrActivity");
-                vrPresent = getPackageManager().resolveActivity(vrProbe, 0) != null;
-            } catch (Throwable ignored) {
-            }
-        }
-        Log.i(TAG, "Enter VR present=" + vrPresent);
         if (enterVr != null) {
-            if (!vrPresent) {
-                enterVr.setVisibility(View.GONE);
-            } else {
-                enterVr.setVisibility(View.VISIBLE);
-                enterVr.setOnClickListener(v -> launchVrActivity());
-            }
+            enterVr.setOnClickListener(v -> launchVrActivity());
         }
+        Button exitVr = findViewById(R.id.exit_vr_button);
+        if (exitVr != null) {
+            exitVr.setOnClickListener(v -> exitVrActivity());
+        }
+        Log.i(TAG, "Enter VR present=" + isVrPresent());
+        refreshVrButtons();
 
         applyDepthProfileToUi();
     }
