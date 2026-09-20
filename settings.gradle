@@ -17,3 +17,6 @@ dependencyResolutionManagement {
 
 rootProject.name = "SpatialLauncher"
 include ":app"
+// Experimental VR module. Only ever referenced via betaImplementation so the
+// release/debug artifacts cannot see it (see app/build.gradle).
+include ":vr"

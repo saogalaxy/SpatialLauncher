@@ -1,0 +1,45 @@
+// Experimental VR container (beta lane ONLY - referenced via betaImplementation
+// from :app, so release/debug artifacts never see this module).
+apply plugin: 'com.android.library'
+
+android {
+    namespace "com.spatiallauncher.vr"
+    compileSdk 34
+
+    defaultConfig {
+        minSdk 29
+        ndk {
+            // Quest-only: matches :app and the vendored loader .so.
+            abiFilters "arm64-v8a"
+        }
+    }
+
+    // Mirror :app's lanes so betaImplementation resolves (beta content only).
+    buildTypes {
+        debug {
+        }
+        release {
+        }
+        beta {
+            initWith debug
+        }
+    }
+
+    buildFeatures {
+        prefab true
+    }
+
+    externalNativeBuild {
+        cmake {
+            path "src/main/cpp/CMakeLists.txt"
+            version "3.22.1"
+        }
+    }
+
+    ndkVersion "27.0.12077973"
+}
+
+dependencies {
+    // Loader vendored under src/main/{cpp/thirdparty,jniLibs} (see CMakeLists):
+    // AGP 8.1 cannot consume this AAR's prefab metadata, so no Maven dep here.
+}

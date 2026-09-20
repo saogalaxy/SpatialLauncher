@@ -5703,6 +5703,9 @@ public class PanelMainActivity extends AppCompatActivity {
         }
         try {
             Bitmap frame = imageToBitmap(image);
+            if (frame == null || frame.isRecycled()) {
+                return; // Stale image (see imageToBitmap): drop, next frame fills in.
+            }
             requestWindowBoundsUpdate(frame);
             Bitmap windowOnly = cropToCapturedWindow(frame);
             int w = windowOnly.getWidth();
@@ -5725,6 +5728,10 @@ public class PanelMainActivity extends AppCompatActivity {
             if (wantScreenOcr()) {
                 screenFrameCapture.offerFromScreenBuffer(windowOnly);
             }
+        } catch (RuntimeException e) {
+            // A single bad frame (stale image, OOM on a huge capture, crop
+            // race) must never kill the mirror: drop it, keep capturing.
+            Log.w(TAG, "mirror frame dropped", e);
         } finally {
             image.close();
         }
@@ -5854,17 +5861,23 @@ public class PanelMainActivity extends AppCompatActivity {
                 && Math.abs(b - pb) <= PAD_COLOR_DELTA;
     }
 
+    /** Null when the image went stale mid-read (framework race): caller drops it. */
     private Bitmap imageToBitmap(Image image) {
-        Image.Plane plane = image.getPlanes()[0];
-        int pixelStride = plane.getPixelStride();
-        int rowStride = plane.getRowStride();
-        int rowPadding = rowStride - pixelStride * image.getWidth();
+        try {
+            Image.Plane plane = image.getPlanes()[0];
+            int pixelStride = plane.getPixelStride();
+            int rowStride = plane.getRowStride();
+            int rowPadding = rowStride - pixelStride * image.getWidth();
 
-        ByteBuffer buffer = plane.getBuffer();
-        Bitmap bitmap = Bitmap.createBitmap(
-                image.getWidth() + rowPadding / pixelStride, image.getHeight(), Bitmap.Config.ARGB_8888);
-        bitmap.copyPixelsFromBuffer(buffer);
-        return Bitmap.createBitmap(bitmap, 0, 0, image.getWidth(), image.getHeight());
+            ByteBuffer buffer = plane.getBuffer();
+            Bitmap bitmap = Bitmap.createBitmap(
+                    image.getWidth() + rowPadding / pixelStride, image.getHeight(), Bitmap.Config.ARGB_8888);
+            bitmap.copyPixelsFromBuffer(buffer);
+            return Bitmap.createBitmap(bitmap, 0, 0, image.getWidth(), image.getHeight());
+        } catch (IllegalStateException | IllegalArgumentException | UnsupportedOperationException e) {
+            Log.w(TAG, "imageToBitmap: stale image, dropping frame", e);
+            return null;
+        }
     }
 
     // Mesh grid for the parallax warp — a real 2D grid now (not just rows), since actual
@@ -6087,6 +6100,36 @@ public class PanelMainActivity extends AppCompatActivity {
         });
 
         findViewById(R.id.reset_depth_defaults).setOnClickListener(v -> resetCurrentDepthDefaults());
+
+        // Enter VR (beta lane only): visible only when the VrActivity exists.
+        // Release builds have no :vr module, so the button stays gone there —
+        // zero behavior change outside beta.
+        Button enterVr = findViewById(R.id.enter_vr_button);
+        boolean vrPresent = false;
+        try {
+            Intent vrProbe = new Intent()
+                    .setClassName(getPackageName(), "com.spatiallauncher.vr.VrActivity");
+            vrPresent = getPackageManager().resolveActivity(vrProbe, 0) != null;
+        } catch (Throwable ignored) {
+        }
+        if (enterVr != null) {
+            if (!vrPresent) {
+                enterVr.setVisibility(View.GONE);
+            } else {
+                enterVr.setOnClickListener(v -> {
+                    try {
+                        Intent vr = new Intent(Intent.ACTION_MAIN)
+                                .setClassName(getPackageName(),
+                                        "com.spatiallauncher.vr.VrActivity")
+                                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                        startActivity(vr);
+                    } catch (Throwable t) {
+                        Log.w(TAG, "enter VR failed", t);
+                        PanelAlerts.show(this, R.string.enter_vr_failed);
+                    }
+                });
+            }
+        }
 
         applyDepthProfileToUi();
     }

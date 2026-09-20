@@ -351,6 +351,8 @@
     <string name="toggle_3d_label">3D</string>
     <string name="toggle_3d_plus_label">3D+</string>
     <string name="head_parallax_description">Head parallax (3D plus)</string>
+    <string name="enter_vr_beta_label">Enter VR (beta)</string>
+    <string name="enter_vr_failed">Couldn\'t enter VR</string>
     <string name="head_parallax_on">3D+ on — turn your head to look around</string>
     <string name="head_parallax_off">3D+ off</string>
     <string name="empty_state_message">No app running.\nAdd an app from the dock below to get started.</string>

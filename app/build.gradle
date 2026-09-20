@@ -123,6 +123,9 @@ android {
 }
 
 dependencies {
+    // Experimental VR container. betaImplementation ONLY: release/debug never
+    // see this module (quarantine for all hybrid/VR work).
+    betaImplementation project(':vr')
     // Plain Android panel app UI — no native/OpenXR dependency anymore. This is a real
     // Horizon OS 2D panel Activity (see AndroidManifest's com.oculus.intent.category.2D),
     // so standard Views/Material widgets are all that's needed; the OS's own panel
