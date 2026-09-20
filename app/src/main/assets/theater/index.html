@@ -135,9 +135,48 @@
   }, 1000);
 
   // Session state in-page: proves whether you are really in the headset.
+  // In-VR refresh: any controller trigger pull re-arms the feed without
+  // leaving the headset (page reload would kill the session). Also wired to
+  // the 3D REFRESH slab below for discoverability.
+  function refreshFeed() {
+    lastAspect = 0;
+    lastLoad = 0;
+    nosignal.visible = false;
+    status.textContent = 'refreshing…';
+    img.src = '/frame.jpg?t=' + Date.now();
+  }
+  (function () {
+    var c = document.createElement('canvas');
+    c.width = 512; c.height = 128;
+    var g = c.getContext('2d');
+    g.fillStyle = 'rgba(230,92,0,0.92)';
+    g.beginPath();
+    g.roundRect ? g.roundRect(6, 14, 500, 100, 22) : g.rect(6, 14, 500, 100);
+    g.fill();
+    g.fillStyle = '#fff';
+    g.font = 'bold 44px sans-serif';
+    g.textAlign = 'center';
+    g.fillText('REFRESH (trigger)', 256, 80);
+    var tex = new THREE.CanvasTexture(c);
+    var slab = new THREE.Mesh(
+      new THREE.PlaneGeometry(1.7, 0.42),
+      new THREE.MeshBasicMaterial({ map: tex, transparent: true }));
+    slab.position.set(-2.9, 0.5, -5);
+    slab.lookAt(camera.position);
+    scene.add(slab);
+  })();
+  function armTriggerRefresh() {
+    try {
+      var session = renderer.xr.getSession();
+      if (!session) return false;
+      session.addEventListener('select', refreshFeed);
+      return true;
+    } catch (e) { return false; }
+  }
   renderer.xr.addEventListener('sessionstart', function () {
     status.textContent = 'IN VR — look around, Quest button exits';
     dot.className = 'dot live';
+    armTriggerRefresh();
   });
   renderer.xr.addEventListener('sessionend', function () {
     status.textContent = 'back in browser';
