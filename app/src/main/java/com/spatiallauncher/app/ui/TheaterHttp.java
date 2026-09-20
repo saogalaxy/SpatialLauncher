@@ -107,7 +107,7 @@ final class TheaterHttp {
                 rawOut.flush();
                 return;
             }
-            if ("/theater.mjpg".equals(path)) {
+            if ("/frame.jpg".equals(path)) {
                 streamMjpeg(rawOut);
                 return;
             }
@@ -229,6 +229,7 @@ final class TheaterHttp {
         String head = "HTTP/1.1 " + code + " " + status + "\r\n"
                 + "Content-Type: " + contentType + "\r\n"
                 + (length >= 0 ? "Content-Length: " + length + "\r\n" : "")
+                + "Cache-Control: no-cache, no-store\r\n"
                 + "Connection: close\r\n\r\n";
         out.write(head.getBytes(StandardCharsets.ISO_8859_1));
         out.flush();
