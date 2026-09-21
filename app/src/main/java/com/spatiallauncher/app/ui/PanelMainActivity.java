@@ -1056,12 +1056,6 @@ public class PanelMainActivity extends AppCompatActivity {
                 if (fromUser) {
                     settingsStore.setDepthStrengthPercent(depthModeStatic, percent);
                 }
-                // Slider must bite immediately: stills/static mode only re-runs
-                // inference when the frame fingerprint changes, and the cached
-                // grid has the OLD multiplier baked in — force a recompute on
-                // the next tick instead of waiting for content to change.
-                // (Live GLES path reads the multiplier per frame already.)
-                lastStaticDepthFingerprint = Integer.MIN_VALUE;
             }
 
             @Override

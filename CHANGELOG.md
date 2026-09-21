@@ -14,7 +14,6 @@ Release 1.0.2 packages the Cast crash + Browser 3D Share fixes below (release-si
 - **Browser per-site clear:** “Clear this site” forgets just the open host (visible cookies + origin storage) — other sites stay signed in. Best-effort: parent-domain cookies and IndexedDB may survive; the full clear covers those.
 - **Beta lane:** `:app:assembleBeta` builds `com.spatiallauncher.app.beta` (`1.0.2-beta`), co-installs alongside debug/release with separate data. All experimental (VR theater) work ships here; never to Store channels.
 - **Browser chrome buttons:** Home (house), Stop square, and address-clear X join back/forward in the browser bar.
-- **Depth slider bite:** strength changes now force a depth recompute — in stills/static mode the old grid (with the old multiplier baked in) used to linger until content changed, making the slider look dead.
 - **Browser protected-video fallback:** page video that refuses capture + black frames (secure-path signature) shows the live page flat with a banner instead of a black stereo box; exits automatically when watchable frames return.
 - **3D+ head parallax (new mode):** separate dock chip beside 3D — stereo plus rotational look-around from the headset sensor (±5°, smoothed, slew-limited). Plain 3D is untouched with it off. Sign convention needs eyes-on confirmation.
 
