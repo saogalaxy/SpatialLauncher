@@ -314,7 +314,8 @@ static int initXr(VrApp* app) {
         }
     }
 
-    // Blend mode: prefer OPAQUE for a passthrough room.
+    // Blend mode: games composite scene OVER passthrough with ALPHA_BLEND.
+    // Prefer it; fall back to whatever the runtime offers first.
     {
         uint32_t count = 0;
         xrEnumerateEnvironmentBlendModes(app->instance, app->systemId,
@@ -328,7 +329,7 @@ static int initXr(VrApp* app) {
                         == XR_SUCCESS) {
                 app->blendMode = modes[0];
                 for (uint32_t i = 0; i < count; i++) {
-                    if (modes[i] == XR_ENVIRONMENT_BLEND_MODE_OPAQUE) {
+                    if (modes[i] == XR_ENVIRONMENT_BLEND_MODE_ALPHA_BLEND) {
                         app->blendMode = modes[i];
                         break;
                     }
@@ -336,8 +337,9 @@ static int initXr(VrApp* app) {
             }
             free(modes);
         } else {
-            app->blendMode = XR_ENVIRONMENT_BLEND_MODE_OPAQUE;
+            app->blendMode = XR_ENVIRONMENT_BLEND_MODE_ALPHA_BLEND;
         }
+        LOGI("blendMode=%d", (int)app->blendMode);
     }
 
     LOGI("XR ready (passthrough=%d)", app->hasPassthrough);
@@ -400,7 +402,7 @@ static void drawFrame(VrApp* app) {
         memset(&ptLayer, 0, sizeof(ptLayer));
         ptLayer.type = XR_TYPE_COMPOSITION_LAYER_PASSTHROUGH_FB;
         ptLayer.layerHandle = app->passthroughLayer;
-        ptLayer.flags = XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;
+        ptLayer.flags = 0;
         layers[0] = (const XrCompositionLayerBaseHeader*)&ptLayer;
         layerCount = 1;
     }
@@ -411,7 +413,13 @@ static void drawFrame(VrApp* app) {
     endInfo.environmentBlendMode = app->blendMode;
     endInfo.layerCount = layerCount;
     endInfo.layers = layers;
-    XRCHECK(xrEndFrame(app->session, &endInfo));
+    {
+        static unsigned long frames = 0;
+        XrResult er = xrEndFrame(app->session, &endInfo);
+        if ((++frames % 300) == 1 || er != XR_SUCCESS) {
+            LOGI("endFrame #%lu: %d (layers=%u)", frames, (int)er, (unsigned)layerCount);
+        }
+    }
 }
 
 static void* xrThread(void* arg) {
