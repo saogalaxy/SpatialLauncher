@@ -6324,6 +6324,11 @@ public class PanelMainActivity extends AppCompatActivity {
         if (stereoHandoff) {
             return;
         }
+        // Theater feed first: every exit path below must feed (flat early
+        // return included). frame is always the MONO source — SBS exists only
+        // on the surface, so sbs=false (fullscreen both eyes) until a surface
+        // readback exists.
+        feedTheaterBridge(frame, false);
         if (useGlesZMesh) {
             glesZMeshView.submit(
                     frame,
@@ -6334,9 +6339,6 @@ public class PanelMainActivity extends AppCompatActivity {
                     edgeFadeFraction,
                     !depthModeStatic,
                     headShiftScale);
-            // GLES composes SBS on-GPU (no CPU readback in v1): theater gets
-            // the flat source frame. Canvas path below feeds true SBS.
-            feedTheaterBridge(frame, false);
             return;
         }
         if (glesZMeshView.ownsSurface()) {
@@ -6378,7 +6380,6 @@ public class PanelMainActivity extends AppCompatActivity {
         } finally {
             gameRenderSurface.getHolder().unlockCanvasAndPost(canvas);
         }
-        feedTheaterBridge(frame, forceStereoEnabled);
     }
 
     private static java.lang.reflect.Method theaterPush;
@@ -6389,6 +6390,7 @@ public class PanelMainActivity extends AppCompatActivity {
     private static boolean theaterBridgeChecked;
     private static boolean theaterBridgePresent;
     private static boolean theaterFeedLogged;
+    private static long theaterFeedCount;
 
     /**
      * Beta-only theater feed (theater screen in VrActivity). Fully inert when
@@ -6474,6 +6476,10 @@ public class PanelMainActivity extends AppCompatActivity {
             if (!theaterFeedLogged) {
                 theaterFeedLogged = true;
                 Log.i(TAG, "theater feed live " + w + "x" + h + " sbs=" + sbs);
+            }
+            theaterFeedCount++;
+            if (theaterFeedCount % 300 == 1) {
+                Log.i(TAG, "theater feed pushing " + w + "x" + h + " (#" + theaterFeedCount + ")");
             }
         } catch (Throwable t) {
             Log.w(TAG, "theater feed failed", t);
