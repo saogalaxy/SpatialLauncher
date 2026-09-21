@@ -5005,8 +5005,11 @@ public class PanelMainActivity extends AppCompatActivity {
         // re-resolving on every resume keeps the dock honest without extra bookkeeping.
         refreshDock();
         registerHeadTracking();
-        // Back from VR (or anywhere else): the immersive session is over.
-        vrSessionLaunched = false;
+        // NOTE: vrSessionLaunched is deliberately NOT cleared here. The panel
+        // overlay resumes inside VR, and clearing would make the next VR tap
+        // re-enter instead of exit. It clears in exitVrActivity(); a stale true
+        // (system-quit VR) self-heals: exit just launches VrActivity straight
+        // into its EXIT finish, which is a harmless blink.
         refreshVrButtons();
         // Book import is user-started only (EPUB long-press). Do not auto-start on resume.
     }
