@@ -936,7 +936,9 @@ static void drawFrame(VrApp* app) {
         static unsigned long frames = 0;
         XrResult er = xrEndFrame(app->session, &endInfo);
         if ((++frames % 300) == 1 || er != XR_SUCCESS) {
-            LOGI("endFrame #%lu: %d (layers=%u)", frames, (int)er, (unsigned)layerCount);
+            LOGI("endFrame #%lu: %d (layers=%u) swap=%d prog=%d tex=%dx%d",
+                frames, (int)er, (unsigned)layerCount,
+                app->swapReady, app->screenProg != 0, app->texW, app->texH);
         }
     }
 }

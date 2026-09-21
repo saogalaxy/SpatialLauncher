@@ -6388,6 +6388,7 @@ public class PanelMainActivity extends AppCompatActivity {
     private static long lastTheaterPushMs;
     private static boolean theaterBridgeChecked;
     private static boolean theaterBridgePresent;
+    private static boolean theaterFeedLogged;
 
     /**
      * Beta-only theater feed (theater screen in VrActivity). Fully inert when
@@ -6437,6 +6438,10 @@ public class PanelMainActivity extends AppCompatActivity {
             theaterPixels.flip();
             lastTheaterPushMs = now;
             theaterPush.invoke(null, theaterPixels, w, h, sbs);
+            if (!theaterFeedLogged) {
+                theaterFeedLogged = true;
+                Log.i(TAG, "theater feed live " + w + "x" + h + " sbs=" + sbs);
+            }
         } catch (Throwable t) {
             Log.w(TAG, "theater feed failed", t);
         }
