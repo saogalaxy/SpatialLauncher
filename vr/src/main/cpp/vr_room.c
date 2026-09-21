@@ -773,6 +773,9 @@ static int theaterRenderViews(VrApp* app,
                     perspectiveFromFov(pm, &views[i].fov, 0.1f, 60.0f);
                     memset(model, 0, sizeof(model));
                     model[0] = scaleX; model[5] = 1.0f; model[10] = 1.0f; model[15] = 1.0f;
+                    // Offset right of the panel overlay, which sits center-ahead
+                    // and would otherwise hide the screen completely.
+                    model[12] = 2.4f;
                     float tmp[16];
                     matMul44(tmp, vm, model);
                     matMul44(mvp, pm, tmp);
