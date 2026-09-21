@@ -11,6 +11,12 @@
     <uses-feature
         android:name="android.hardware.vr.headtracking"
         android:required="false" />
+    <!-- Hand tracking suffices for this room (no controllers required):
+         declares hands as capable input so the OS skips its controllers gate. -->
+    <uses-feature
+        android:name="oculus.software.handtracking"
+        android:required="false" />
+    <uses-permission android:name="com.oculus.permission.HAND_TRACKING" />
     <uses-feature
         android:name="com.oculus.feature.PASSTHROUGH"
         android:required="false" />
