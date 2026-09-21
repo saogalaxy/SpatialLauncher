@@ -264,8 +264,27 @@ static int initXr(VrApp* app) {
     sci.type = XR_TYPE_SESSION_CREATE_INFO;
     sci.next = &binding;
     sci.systemId = app->systemId;
-    if (xrCreateSession(app->instance, &sci, &app->session) != XR_SUCCESS) {
-        LOGE("xrCreateSession failed");
+    // Runtimes may refuse session creation until the app has queried the
+    // GLES requirements (hello_xr does this unconditionally).
+    {
+        PFN_xrGetOpenGLESGraphicsRequirementsKHR pfnReq = NULL;
+        XrResult gr = xrGetInstanceProcAddr(app->instance,
+                "xrGetOpenGLESGraphicsRequirementsKHR",
+                (PFN_xrVoidFunction*)&pfnReq);
+        LOGI("graphicsRequirements fn: lr=%d fn=%p", (int)gr, (void*)pfnReq);
+        if (gr == XR_SUCCESS && pfnReq != NULL) {
+            XrGraphicsRequirementsOpenGLESKHR req;
+            memset(&req, 0, sizeof(req));
+            req.type = XR_TYPE_GRAPHICS_REQUIREMENTS_OPENGL_ES_KHR;
+            XrResult rr = pfnReq(app->instance, app->systemId, &req);
+            LOGI("graphicsRequirements: lr=%d min=%08x max=%08x",
+                    (int)rr, (unsigned)req.minApiVersionSupported,
+                    (unsigned)req.maxApiVersionSupported);
+        }
+    }
+    XrResult scr = xrCreateSession(app->instance, &sci, &app->session);
+    if (scr != XR_SUCCESS) {
+        LOGE("xrCreateSession failed: %d", (int)scr);
         return 0;
     }
 
