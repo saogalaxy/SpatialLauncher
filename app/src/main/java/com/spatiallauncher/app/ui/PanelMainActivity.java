@@ -6408,7 +6408,8 @@ public class PanelMainActivity extends AppCompatActivity {
                     theaterPush = bridge.getMethod("pushFrame",
                             java.nio.ByteBuffer.class, int.class, int.class, boolean.class);
                     theaterBridgePresent = true;
-                } catch (Throwable ignored) {
+                } catch (Throwable t) {
+                    Log.w(TAG, "theater bridge absent", t);
                     theaterBridgePresent = false;
                 }
             }
@@ -6425,8 +6426,29 @@ public class PanelMainActivity extends AppCompatActivity {
             }
             int w = frame.getWidth();
             int h = frame.getHeight();
-            if (w <= 0 || h <= 0 || w > 2048 || h > 2048) {
+            if (w <= 0 || h <= 0) {
                 return;
+            }
+            // Native staging caps at 2048: downscale larger captures instead
+            // of silently skipping them (full-res mirror frames hit this).
+            Bitmap src = frame;
+            Bitmap scaled = null;
+            if (w > 2048 || h > 2048) {
+                float s = Math.min(2048f / w, 2048f / h);
+                int sw = Math.max(1, Math.round(w * s));
+                int sh = Math.max(1, Math.round(h * s));
+                try {
+                    scaled = Bitmap.createScaledBitmap(frame, sw, sh, true);
+                } catch (Throwable t) {
+                    Log.w(TAG, "theater downscale failed", t);
+                    return;
+                }
+                if (scaled == null) {
+                    return;
+                }
+                src = scaled;
+                w = sw;
+                h = sh;
             }
             int need = w * h * 4;
             if (theaterPixels == null || theaterPixelsCap < need) {
@@ -6434,7 +6456,18 @@ public class PanelMainActivity extends AppCompatActivity {
                 theaterPixelsCap = need;
             }
             theaterPixels.clear();
-            frame.copyPixelsToBuffer(theaterPixels);
+            try {
+                src.copyPixelsToBuffer(theaterPixels);
+            } catch (Throwable t) {
+                Log.w(TAG, "theater pixel copy failed", t);
+                if (scaled != null) {
+                    scaled.recycle();
+                }
+                return;
+            }
+            if (scaled != null) {
+                scaled.recycle();
+            }
             theaterPixels.flip();
             lastTheaterPushMs = now;
             theaterPush.invoke(null, theaterPixels, w, h, sbs);
