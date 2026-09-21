@@ -28,5 +28,6 @@ target_link_libraries(vr
     openxr_loader
     android
     log
+    m
     EGL
     GLESv3)

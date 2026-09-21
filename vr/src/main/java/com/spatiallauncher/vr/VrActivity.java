@@ -20,6 +20,7 @@ public class VrActivity extends NativeActivity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        VrBridge.setTheaterActive(true);
         handleIntent(getIntent());
         // Bring our panel up as an overlay shortly after the XR session comes
         // up (plain startActivity, no finish — the room stays underneath).
@@ -39,6 +40,12 @@ public class VrActivity extends NativeActivity {
         super.onNewIntent(intent);
         setIntent(intent);
         handleIntent(intent);
+    }
+
+    @Override
+    protected void onDestroy() {
+        VrBridge.setTheaterActive(false);
+        super.onDestroy();
     }
 
     /** The panel asks us to quit via an EXIT extra: finish ends the session. */

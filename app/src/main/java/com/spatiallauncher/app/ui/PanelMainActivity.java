@@ -6334,6 +6334,9 @@ public class PanelMainActivity extends AppCompatActivity {
                     edgeFadeFraction,
                     !depthModeStatic,
                     headShiftScale);
+            // GLES composes SBS on-GPU (no CPU readback in v1): theater gets
+            // the flat source frame. Canvas path below feeds true SBS.
+            feedTheaterBridge(frame, false);
             return;
         }
         if (glesZMeshView.ownsSurface()) {
@@ -6374,6 +6377,68 @@ public class PanelMainActivity extends AppCompatActivity {
             drawEyeWithParallaxMesh(canvas, frame, rightEye, parallaxGrid, -1);
         } finally {
             gameRenderSurface.getHolder().unlockCanvasAndPost(canvas);
+        }
+        feedTheaterBridge(frame, forceStereoEnabled);
+    }
+
+    private static java.lang.reflect.Method theaterPush;
+    private static java.lang.reflect.Method theaterIsActive;
+    private static java.nio.ByteBuffer theaterPixels;
+    private static int theaterPixelsCap;
+    private static long lastTheaterPushMs;
+    private static boolean theaterBridgeChecked;
+    private static boolean theaterBridgePresent;
+
+    /**
+     * Beta-only theater feed (theater screen in VrActivity). Fully inert when
+     * the :vr module is absent: reflection-only, throttled, all failures soft.
+     */
+    private void feedTheaterBridge(Bitmap frame, boolean sbs) {
+        try {
+            long now = android.os.SystemClock.elapsedRealtime();
+            if (now - lastTheaterPushMs < 100) {
+                return;
+            }
+            if (!theaterBridgeChecked) {
+                theaterBridgeChecked = true;
+                try {
+                    Class<?> bridge = Class.forName("com.spatiallauncher.vr.VrBridge");
+                    theaterIsActive = bridge.getMethod("isTheaterActive");
+                    theaterPush = bridge.getMethod("pushFrame",
+                            java.nio.ByteBuffer.class, int.class, int.class, boolean.class);
+                    theaterBridgePresent = true;
+                } catch (Throwable ignored) {
+                    theaterBridgePresent = false;
+                }
+            }
+            if (!theaterBridgePresent || theaterPush == null || theaterIsActive == null) {
+                return;
+            }
+            Object active = theaterIsActive.invoke(null);
+            if (!(active instanceof Boolean) || !((Boolean) active)) {
+                return;
+            }
+            if (frame == null || frame.isRecycled()
+                    || frame.getConfig() != Bitmap.Config.ARGB_8888) {
+                return;
+            }
+            int w = frame.getWidth();
+            int h = frame.getHeight();
+            if (w <= 0 || h <= 0 || w > 2048 || h > 2048) {
+                return;
+            }
+            int need = w * h * 4;
+            if (theaterPixels == null || theaterPixelsCap < need) {
+                theaterPixels = java.nio.ByteBuffer.allocateDirect(need);
+                theaterPixelsCap = need;
+            }
+            theaterPixels.clear();
+            frame.copyPixelsToBuffer(theaterPixels);
+            theaterPixels.flip();
+            lastTheaterPushMs = now;
+            theaterPush.invoke(null, theaterPixels, w, h, sbs);
+        } catch (Throwable t) {
+            Log.w(TAG, "theater feed failed", t);
         }
     }
 
