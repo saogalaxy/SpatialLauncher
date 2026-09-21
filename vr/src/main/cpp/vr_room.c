@@ -15,6 +15,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <dlfcn.h>
 
 #define XR_USE_PLATFORM_ANDROID
 #define XR_USE_GRAPHICS_API_OPENGL_ES
@@ -165,10 +166,27 @@ static int initXr(VrApp* app) {
     // Loader init is mandatory on Android before xrCreateInstance.
     LOGI("loader init: vm=%p ctx=%p", (void*)app->vm, (void*)app->activityRef);
     {
+        // Prefer the SYSTEM loader (version-matched to the runtime): the
+        // bundled 1.1.63 init rejects our params with -6 for unknown reasons.
+        // Fall back to the bundled loader's own entry point if absent.
         PFN_xrInitializeLoaderKHR pfnInitLoader = NULL;
-        XrResult lr = xrGetInstanceProcAddr(XR_NULL_HANDLE, "xrInitializeLoaderKHR",
-                (PFN_xrVoidFunction*)&pfnInitLoader);
-        LOGI("getInitLoader: lr=%d fn=%p", (int)lr, (void*)pfnInitLoader);
+        XrResult lr = XR_ERROR_INITIALIZATION_FAILED;
+        void* sysLoader = dlopen("libopenxr_loader.so", RTLD_NOW | RTLD_LOCAL);
+        if (sysLoader != NULL) {
+            pfnInitLoader = (PFN_xrInitializeLoaderKHR)dlsym(
+                    sysLoader, "xrInitializeLoaderKHR");
+            LOGI("system loader: handle=%p initFn=%p", sysLoader, (void*)pfnInitLoader);
+            // Intentionally leaked: needed for the process lifetime.
+            (void)sysLoader;
+            if (pfnInitLoader != NULL) {
+                lr = XR_SUCCESS;
+            }
+        }
+        if (pfnInitLoader == NULL) {
+            lr = xrGetInstanceProcAddr(XR_NULL_HANDLE, "xrInitializeLoaderKHR",
+                    (PFN_xrVoidFunction*)&pfnInitLoader);
+            LOGI("bundled getInitLoader: lr=%d fn=%p", (int)lr, (void*)pfnInitLoader);
+        }
         if (lr == XR_SUCCESS && pfnInitLoader != NULL) {
             XrLoaderInitInfoAndroidKHR initInfo;
             memset(&initInfo, 0, sizeof(initInfo));
