@@ -8,6 +8,17 @@ import java.nio.ByteBuffer;
  * release/debug builds compile and run with no trace of it.
  */
 public final class VrBridge {
+    static {
+        // The panel reaches pushFrame() via reflection and may run before any
+        // VrActivity ever started in this process (so the NativeActivity load
+        // hasn't happened). Load explicitly; absent in release/debug builds,
+        // where the reflection probe already gates everything off.
+        try {
+            System.loadLibrary("vr");
+        } catch (UnsatisfiedLinkError ignored) {
+        }
+    }
+
     private static volatile boolean theaterActive = false;
 
     public static void setTheaterActive(boolean active) {
