@@ -2957,6 +2957,69 @@ public class PanelMainActivity extends AppCompatActivity {
         if (enterVrDock != null) {
             enterVrDock.setVisibility(isVrPresent() ? View.VISIBLE : View.GONE);
         }
+        // Room environment picker lives with the VR buttons (beta only).
+        int roomVis = isVrPresent() ? View.VISIBLE : View.GONE;
+        View roomLabel = findViewById(R.id.room_env_label);
+        if (roomLabel != null) {
+            roomLabel.setVisibility(roomVis);
+        }
+        View roomRow = findViewById(R.id.room_env_row);
+        if (roomRow != null) {
+            roomRow.setVisibility(roomVis);
+        }
+    }
+
+    private static java.lang.reflect.Method vrEnvMethod;
+    private static boolean vrEnvChecked;
+
+    /** Room picker: persists + pushes to VrBridge (reflection-only, beta inert). */
+    private void bindRoomEnvPicker() {
+        int[] ids = {R.id.room_env_0, R.id.room_env_1, R.id.room_env_2, R.id.room_env_3};
+        for (int i = 0; i < ids.length; i++) {
+            final int index = i;
+            View b = findViewById(ids[i]);
+            if (b != null) {
+                b.setOnClickListener(v -> setRoomEnvironment(index));
+            }
+        }
+        refreshRoomEnvPicker();
+    }
+
+    private void setRoomEnvironment(int index) {
+        settingsStore.setVrEnvironment(index);
+        applyVrEnvironment(index);
+        refreshRoomEnvPicker();
+    }
+
+    private void refreshRoomEnvPicker() {
+        int selected = settingsStore.getVrEnvironment();
+        int[] ids = {R.id.room_env_0, R.id.room_env_1, R.id.room_env_2, R.id.room_env_3};
+        for (int i = 0; i < ids.length; i++) {
+            View b = findViewById(ids[i]);
+            if (b != null) {
+                b.setAlpha(i == selected ? 1f : 0.45f);
+            }
+        }
+    }
+
+    private void applyVrEnvironment(int index) {
+        try {
+            if (!vrEnvChecked) {
+                vrEnvChecked = true;
+                try {
+                    Class<?> bridge = Class.forName("com.spatiallauncher.vr.VrBridge");
+                    vrEnvMethod = bridge.getMethod("setEnvironment", int.class);
+                } catch (Throwable t) {
+                    Log.w(TAG, "VR env bridge absent", t);
+                    vrEnvMethod = null;
+                }
+            }
+            if (vrEnvMethod != null) {
+                vrEnvMethod.invoke(null, index);
+            }
+        } catch (Throwable t) {
+            Log.w(TAG, "VR env apply failed", t);
+        }
     }
 
     private boolean isVrPresent() {
@@ -6143,6 +6206,7 @@ public class PanelMainActivity extends AppCompatActivity {
         }
         Log.i(TAG, "Enter VR present=" + isVrPresent());
         refreshVrButtons();
+        bindRoomEnvPicker();
 
         applyDepthProfileToUi();
     }
@@ -6298,6 +6362,70 @@ public class PanelMainActivity extends AppCompatActivity {
     }
 
     /**
+     * Render-mesh decoupling: the inference grid is coarse (8–24 cols), and past
+     * ~170% strength the per-cell shear kinks into visible waviness. Draw from a
+     * 2x bilinear upsample with per-cell slope capped so amplified noise can't
+     * fold triangles. Inference cost unchanged; tap mapping keeps sampling the
+     * raw grid (already bilinear there).
+     */
+    private static final int RENDER_UPSAMPLE = 2;
+    private static final float RENDER_MAX_SLOPE_PX = 8f;
+
+    private static float[][] upsample2x(float[][] src) {
+        if (src == null || src.length < 2 || src[0].length < 2) {
+            return src;
+        }
+        int rows = src.length - 1;
+        int cols = src[0].length - 1;
+        int r2 = rows * RENDER_UPSAMPLE;
+        int c2 = cols * RENDER_UPSAMPLE;
+        float[][] out = new float[r2 + 1][c2 + 1];
+        for (int r = 0; r <= r2; r++) {
+            float fy = r / (float) RENDER_UPSAMPLE;
+            int r0 = Math.min(rows - 1, (int) fy);
+            float ty = Math.min(1f, fy - r0);
+            for (int c = 0; c <= c2; c++) {
+                float fx = c / (float) RENDER_UPSAMPLE;
+                int c0 = Math.min(cols - 1, (int) fx);
+                float tx = Math.min(1f, fx - c0);
+                float a = src[r0][c0];
+                float b = src[r0][c0 + 1];
+                float d = src[r0 + 1][c0];
+                float e = src[r0 + 1][c0 + 1];
+                out[r][c] = a * (1f - tx) * (1f - ty)
+                        + b * tx * (1f - ty)
+                        + d * (1f - tx) * ty
+                        + e * tx * ty;
+            }
+        }
+        return out;
+    }
+
+    private static float[][] renderParallaxGrid(float[][] src) {
+        float[][] out = upsample2x(src);
+        if (out == null || out.length < 2 || out[0].length < 2) {
+            return out;
+        }
+        // Two relaxation passes (rows, then cols) so sharp silhouettes survive
+        // while single-cell noise spikes get planed off.
+        for (int r = 0; r < out.length; r++) {
+            for (int c = 1; c < out[r].length; c++) {
+                float prev = out[r][c - 1];
+                out[r][c] = Math.max(prev - RENDER_MAX_SLOPE_PX,
+                        Math.min(prev + RENDER_MAX_SLOPE_PX, out[r][c]));
+            }
+        }
+        for (int c = 0; c < out[0].length; c++) {
+            for (int r = 1; r < out.length; r++) {
+                float prev = out[r - 1][c];
+                out[r][c] = Math.max(prev - RENDER_MAX_SLOPE_PX,
+                        Math.min(prev + RENDER_MAX_SLOPE_PX, out[r][c]));
+            }
+        }
+        return out;
+    }
+
+    /**
      * Renders {@code frame} into the mirror surface. With 3D on: side-by-side eyes +
      * parallax mesh. With 3D off: one full-bleed image (no mesh, no half-width stretch).
      * Stretch-fill mode fills each destination rect edge-to-edge; fit mode contain-fits
@@ -6324,15 +6452,14 @@ public class PanelMainActivity extends AppCompatActivity {
         if (stereoHandoff) {
             return;
         }
-        // Theater feed first: every exit path below must feed (flat early
-        // return included). frame is always the MONO source — SBS exists only
-        // on the surface, so sbs=false (fullscreen both eyes) until a surface
-        // readback exists.
+        // Theater feed first: every exit path below must feed. frame is the MONO
+        // source; the SBS surface readback (when stereo is on) happens inside
+        // feedTheaterBridge via PixelCopy.
         feedTheaterBridge(frame, false);
         if (useGlesZMesh) {
             glesZMeshView.submit(
                     frame,
-                    cachedDepth01,
+                    upsample2x(cachedDepth01),
                     forceStereoEnabled,
                     depthStrengthMultiplier,
                     convergenceOffsetPx,
@@ -6367,7 +6494,7 @@ public class PanelMainActivity extends AppCompatActivity {
                 return;
             }
             int halfWidth = cw / 2;
-            float[][] parallaxGrid = cachedParallaxGrid;
+            float[][] parallaxGrid = renderParallaxGrid(cachedParallaxGrid);
             Rect leftEye = fillEyes
                     ? new Rect(0, 0, halfWidth, ch)
                     : containRect(halfWidth, ch, fw, fh);
@@ -6391,6 +6518,10 @@ public class PanelMainActivity extends AppCompatActivity {
     private static boolean theaterBridgePresent;
     private static boolean theaterFeedLogged;
     private static long theaterFeedCount;
+    private static final int THEATER_SBS_MAX_W = 2048;
+    private final Handler theaterCopyHandler = new Handler(Looper.getMainLooper());
+    private Bitmap theaterSbsBitmap;
+    private volatile boolean theaterCopyInflight;
 
     /**
      * Beta-only theater feed (theater screen in VrActivity). Fully inert when
@@ -6422,10 +6553,83 @@ public class PanelMainActivity extends AppCompatActivity {
             if (!(active instanceof Boolean) || !((Boolean) active)) {
                 return;
             }
+            // Stereo on: push the composed SBS surface (both renderers draw
+            // onto it) so pop-out survives into theater. Falls through to the
+            // mono frame when the surface isn't capturable yet.
+            if (forceStereoEnabled && feedTheaterSbs()) {
+                return;
+            }
             if (frame == null || frame.isRecycled()
                     || frame.getConfig() != Bitmap.Config.ARGB_8888) {
                 return;
             }
+            pushTheaterBitmap(frame, sbs, now);
+        } catch (Throwable t) {
+            Log.w(TAG, "theater feed failed", t);
+        }
+    }
+
+    /**
+     * Captures the composed stereo surface and pushes it with sbs=true so the
+     * native theater splits it per eye. Returns true when a copy was issued or
+     * is already inflight (caller must not also push mono that tick).
+     */
+    private boolean feedTheaterSbs() {
+        try {
+            if (theaterCopyInflight) {
+                return true;
+            }
+            SurfaceView surfaceView = activeStereoSurface();
+            if (surfaceView == null) {
+                return false;
+            }
+            android.view.Surface surface = surfaceView.getHolder().getSurface();
+            int sw = surfaceView.getWidth();
+            int sh = surfaceView.getHeight();
+            if (surface == null || !surface.isValid() || sw <= 0 || sh <= 0) {
+                return false;
+            }
+            float s = Math.min(1f, Math.min(
+                    THEATER_SBS_MAX_W / (float) sw, THEATER_SBS_MAX_W / (float) sh));
+            int bw = Math.max(2, Math.round(sw * s));
+            int bh = Math.max(2, Math.round(sh * s));
+            if (theaterSbsBitmap == null
+                    || theaterSbsBitmap.getWidth() != bw
+                    || theaterSbsBitmap.getHeight() != bh) {
+                if (theaterSbsBitmap != null) {
+                    try {
+                        theaterSbsBitmap.recycle();
+                    } catch (Throwable ignored) {
+                    }
+                    theaterSbsBitmap = null;
+                }
+                theaterSbsBitmap = Bitmap.createBitmap(bw, bh, Bitmap.Config.ARGB_8888);
+            }
+            if (theaterSbsBitmap == null) {
+                return false;
+            }
+            theaterCopyInflight = true;
+            lastTheaterPushMs = android.os.SystemClock.elapsedRealtime();
+            final Bitmap target = theaterSbsBitmap;
+            android.view.PixelCopy.request(surface, target, copyResult -> {
+                theaterCopyInflight = false;
+                if (copyResult != android.view.PixelCopy.SUCCESS) {
+                    Log.w(TAG, "theater SBS copy failed: " + copyResult);
+                    return;
+                }
+                pushTheaterBitmap(target, true, android.os.SystemClock.elapsedRealtime());
+            }, theaterCopyHandler);
+            return true;
+        } catch (Throwable t) {
+            Log.w(TAG, "theater SBS feed failed", t);
+            theaterCopyInflight = false;
+            return false;
+        }
+    }
+
+    /** Downscales past the native 2048 staging cap, then pushes to VrBridge. */
+    private void pushTheaterBitmap(Bitmap frame, boolean sbs, long now) {
+        try {
             int w = frame.getWidth();
             int h = frame.getHeight();
             if (w <= 0 || h <= 0) {
@@ -6482,7 +6686,7 @@ public class PanelMainActivity extends AppCompatActivity {
                 Log.i(TAG, "theater feed pushing " + w + "x" + h + " (#" + theaterFeedCount + ")");
             }
         } catch (Throwable t) {
-            Log.w(TAG, "theater feed failed", t);
+            Log.w(TAG, "theater push failed", t);
         }
     }
 

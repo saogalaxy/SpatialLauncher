@@ -22,7 +22,8 @@ add_library(vr SHARED vr_room.c)
 # discarded. Force it undefined to pull the object in (hello_xr pattern).
 target_link_options(vr PRIVATE "-u ANativeActivity_onCreate")
 target_include_directories(vr PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/thirdparty/openxr/include)
+    ${CMAKE_CURRENT_SOURCE_DIR}/thirdparty/openxr/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/thirdparty)
 target_link_libraries(vr
     native_app_glue
     openxr_loader

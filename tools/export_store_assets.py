@@ -109,10 +109,18 @@ paste_center(icon, art, 256, 256, int(512 * 0.78))
 save(icon.convert("RGB"), "icon-512.png")
 
 # Spatialized tile set: solid navy bg + transparent fg with padding.
+# VRC.Quest.Asset.2: fg must carry the exact app title as the most prominent
+# text (the icon source's baked-in "TTS"/"EN" counts as extraneous otherwise).
 bg = Image.new("RGB", (180, 180), (10, 16, 48))
 save(bg, "spatialized-bg-180.png")
 fg = Image.new("RGBA", (180, 180), (0, 0, 0, 0))
-paste_center(fg, art, 90, 90, int(180 * 0.72))
+paste_center(fg, art, 90, 66, 92)
+d = ImageDraw.Draw(fg)
+f = title_font(23)
+d.text((90, 126), "Spatial", font=f, fill=WHITE, anchor="mm",
+       stroke_width=2, stroke_fill=(4, 6, 26, 255))
+d.text((90, 150), "Launcher", font=f, fill=WHITE, anchor="mm",
+       stroke_width=2, stroke_fill=(4, 6, 26, 255))
 fg.save(OUT / "spatialized-fg-180.png")
 print("spatialized-fg-180.png", fg.size)
 

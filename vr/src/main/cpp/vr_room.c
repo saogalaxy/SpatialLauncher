@@ -2,10 +2,16 @@
 // No scene, no swapchains, no input. The panel (2D overlay) provides all UI.
 // Errors are logged and degraded gracefully; nothing here may crash the app.
 
+#include <android/asset_manager.h>
 #include <android/log.h>
 #include <android/native_activity.h>
 #include <android_native_app_glue.h>
 #include <jni.h>
+
+// Single-header GLB decoder (vendored like the OpenXR headers). Flat colors
+// only: no image textures, so no stb dependency and no decode stalls.
+#define CGLTF_IMPLEMENTATION
+#include "cgltf.h"
 
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
@@ -438,10 +444,14 @@ static void viewMatrixFromPose(float out[16], const XrPosef* pose) {
     float r00 = 1.0f - 2.0f * (yy + zz), r01 = 2.0f * (xy - wz), r02 = 2.0f * (xz + wy);
     float r10 = 2.0f * (xy + wz), r11 = 1.0f - 2.0f * (xx + zz), r12 = 2.0f * (yz - wx);
     float r20 = 2.0f * (xz - wy), r21 = 2.0f * (yz + wx), r22 = 1.0f - 2.0f * (xx + yy);
+    // View = inverse of the camera world transform. Rotation is transposed
+    // (raw values mirror head tracking: the room swims opposite the look).
+    // Translation stays dotted with the matrix COLUMNS (that part was already
+    // the correct -R^T*t; transposing it too makes head moves zoom/dip).
     float tx = pose->position.x, ty = pose->position.y, tz = pose->position.z;
-    out[0] = r00; out[1] = r10; out[2] = r20; out[3] = 0.0f;
-    out[4] = r01; out[5] = r11; out[6] = r21; out[7] = 0.0f;
-    out[8] = r02; out[9] = r12; out[10] = r22; out[11] = 0.0f;
+    out[0] = r00; out[1] = r01; out[2] = r02; out[3] = 0.0f;
+    out[4] = r10; out[5] = r11; out[6] = r12; out[7] = 0.0f;
+    out[8] = r20; out[9] = r21; out[10] = r22; out[11] = 0.0f;
     out[12] = -(r00 * tx + r10 * ty + r20 * tz);
     out[13] = -(r01 * tx + r11 * ty + r21 * tz);
     out[14] = -(r02 * tx + r12 * ty + r22 * tz);
@@ -595,6 +605,335 @@ static void theaterGlInit(VrApp* app) {
     LOGI("theater GL ready");
 }
 
+/* ---------------- Blender room (room/theater.glb, one prop per primitive) ----
+ * Minimal flat-color loader: positions + normals baked to XR world space at
+ * load (model matrix stays identity), tint from baseColorFactor, emissive
+ * from emissive_factor luminance. No textures, no indices (DrawArrays only).
+ * Every skipped primitive logs its reason.
+ * A Y-180 spin maps the authored facing (+Z) onto OpenXR forward (-Z).
+ */
+typedef struct {
+    GLuint vbo;
+    int vertCount;
+    float tint[3];
+    float emissive;
+} RoomProp;
+
+// Room lighting mood, written from Java (VrBridge.setEnvironment).
+static volatile int g_env = 0;
+
+static GLuint roomProg = 0;
+static int roomAttrPos, roomAttrNorm;
+static int roomUniMvp, roomUniTint;
+static int roomUniEmissive, roomUniAmbient, roomUniFogColor, roomUniCamPos;
+static RoomProp* roomProps = NULL;
+static int roomPropCount = 0;
+static GLuint roomDepth[2] = {0, 0};
+static uint32_t roomDepthW = 0, roomDepthH = 0;
+static EGLContext roomCtx = EGL_NO_CONTEXT;
+static GLuint testVbo = 0; // Procedural fallback room (floor + 3 walls).
+
+static const char* ROOM_VS =
+    "attribute vec3 aPos;\n"
+    "attribute vec3 aNorm;\n"
+    "uniform mat4 uMvp;\n"
+    "uniform vec3 uCamPos;\n"
+    "varying vec3 vN;\n"
+    "varying float vDist;\n"
+    "void main() {\n"
+    "  vN = aNorm;\n"
+    "  vDist = distance(aPos, uCamPos);\n"
+    "  gl_Position = uMvp * vec4(aPos, 1.0);\n"
+    "}\n";
+static const char* ROOM_FS =
+    "precision mediump float;\n"
+    "varying vec3 vN;\n"
+    "varying float vDist;\n"
+    "uniform vec3 uTint;\n"
+    "uniform float uEmissive;\n"
+    "uniform float uAmbient;\n"
+    "uniform vec3 uFogColor;\n"
+    "void main() {\n"
+    "  vec3 N = normalize(vN);\n"
+    "  vec3 L = normalize(vec3(0.35, 0.8, 0.25));\n"
+    "  float diff = max(dot(N, L), 0.0);\n"
+    "  vec3 col = uTint * (uAmbient + 0.85 * diff) + uTint * uEmissive;\n"
+    "  float fog = smoothstep(9.0, 26.0, vDist);\n"
+    "  col = mix(col, uFogColor, fog);\n"
+    "  gl_FragColor = vec4(col, 1.0);\n"
+    "}\n";
+
+static void roomNodeWorld(const cgltf_node* node, float out[16]) {
+    // Our export is a flat scene (no parents), so local == world.
+    cgltf_node_transform_local(node, out);
+    static const float ry[16] =
+        {-1, 0, 0, 0, 0, 1, 0, 0, 0, 0, -1, 0, 0, 0, 0, 1};
+    float tmp[16];
+    matMul44(tmp, ry, out);
+    memcpy(out, tmp, sizeof(tmp));
+}
+
+static int roomLoadTheater(VrApp* app) {
+    AAssetManager* mgr = app->activity ? app->activity->assetManager : NULL;
+    if (mgr == NULL) {
+        LOGW("room: no asset manager");
+        return 0;
+    }
+    AAsset* a = AAssetManager_open(mgr, "room/theater.glb", AASSET_MODE_BUFFER);
+    if (a == NULL) {
+        LOGW("room: missing room/theater.glb");
+        return 0;
+    }
+    size_t len = (size_t)AAsset_getLength(a);
+    const void* buf = AAsset_getBuffer(a);
+    if (buf == NULL || len < 20) {
+        AAsset_close(a);
+        return 0;
+    }
+    cgltf_options opt;
+    memset(&opt, 0, sizeof(opt));
+    cgltf_data* data = NULL;
+    if (cgltf_parse(&opt, buf, len, &data) != cgltf_result_success) {
+        LOGW("room: parse failed");
+        AAsset_close(a);
+        return 0;
+    }
+    // GLB bin chunk lives inside buf: keep the asset open until cgltf_free.
+    int cap = 64, n = 0;
+    int skipNoTri = 0, skipNoPos = 0, skipNoMem = 0;
+    float bmn[3] = {1e30f, 1e30f, 1e30f}, bmx[3] = {-1e30f, -1e30f, -1e30f};
+    RoomProp* props = (RoomProp*)calloc((size_t)cap, sizeof(RoomProp));
+    if (props == NULL) {
+        cgltf_free(data);
+        AAsset_close(a);
+        return 0;
+    }
+    for (size_t s = 0; s < data->scenes_count; s++) {
+        cgltf_scene* scene = &data->scenes[s];
+        for (size_t ni = 0; ni < scene->nodes_count; ni++) {
+            cgltf_node* node = scene->nodes[ni];
+            if (node->mesh == NULL) {
+                continue;
+            }
+            float M[16];
+            roomNodeWorld(node, M);
+            cgltf_mesh* mesh = node->mesh;
+            for (size_t pi = 0; pi < mesh->primitives_count; pi++) {
+                cgltf_primitive* prim = &mesh->primitives[pi];
+                if (prim->type != cgltf_primitive_type_triangles) {
+                    skipNoTri++;
+                    continue;
+                }
+                cgltf_accessor* pos = NULL, *nrm = NULL;
+                for (size_t k = 0; k < prim->attributes_count; k++) {
+                    const char* an = prim->attributes[k].name;
+                    if (strcmp(an, "POSITION") == 0) {
+                        pos = prim->attributes[k].data;
+                    } else if (strcmp(an, "NORMAL") == 0) {
+                        nrm = prim->attributes[k].data;
+                    }
+                }
+                if (pos == NULL || pos->type != cgltf_type_vec3
+                        || pos->component_type != cgltf_component_type_r_32f
+                        || pos->count == 0 || pos->count > 300000) {
+                    skipNoPos++;
+                    continue;
+                }
+                size_t vc = pos->count;
+                float* verts = (float*)malloc(sizeof(float) * vc * 6);
+                if (verts == NULL) {
+                    skipNoMem++;
+                    continue;
+                }
+                for (size_t v = 0; v < vc; v++) {
+                    float p[3], nr[3] = {0.0f, 1.0f, 0.0f};
+                    cgltf_accessor_read_float(pos, v, p, 3);
+                    if (nrm != NULL) {
+                        cgltf_accessor_read_float(nrm, v, nr, 3);
+                    }
+                    // Bake node transform; rotation-only normals (uniform
+                    // scales in our export) + normalize for safety.
+                    float wp[3] = {
+                        M[0] * p[0] + M[4] * p[1] + M[8] * p[2] + M[12],
+                        M[1] * p[0] + M[5] * p[1] + M[9] * p[2] + M[13],
+                        M[2] * p[0] + M[6] * p[1] + M[10] * p[2] + M[14],
+                    };
+                    float wn[3] = {
+                        M[0] * nr[0] + M[4] * nr[1] + M[8] * nr[2],
+                        M[1] * nr[0] + M[5] * nr[1] + M[9] * nr[2],
+                        M[2] * nr[0] + M[6] * nr[1] + M[10] * nr[2],
+                    };
+                    float il = 1.0f / (sqrtf(wn[0] * wn[0] + wn[1] * wn[1] + wn[2] * wn[2]) + 1e-9f);
+                    verts[v * 6 + 0] = wp[0];
+                    verts[v * 6 + 1] = wp[1];
+                    verts[v * 6 + 2] = wp[2];
+                    verts[v * 6 + 3] = wn[0] * il;
+                    verts[v * 6 + 4] = wn[1] * il;
+                    verts[v * 6 + 5] = wn[2] * il;
+                    for (int q = 0; q < 3; q++) {
+                        if (wp[q] < bmn[q]) {
+                            bmn[q] = wp[q];
+                        }
+                        if (wp[q] > bmx[q]) {
+                            bmx[q] = wp[q];
+                        }
+                    }
+                }
+                float tint[3] = {1.0f, 1.0f, 1.0f};
+                float emissive = 0.0f;
+                if (prim->material != NULL) {
+                    float* bf = prim->material->pbr_metallic_roughness.base_color_factor;
+                    tint[0] = bf[0];
+                    tint[1] = bf[1];
+                    tint[2] = bf[2];
+                    float* ef = prim->material->emissive_factor;
+                    emissive = 0.299f * ef[0] + 0.587f * ef[1] + 0.114f * ef[2];
+                }
+                if (n >= cap) {
+                    int ncap = cap * 2;
+                    RoomProp* np = (RoomProp*)realloc(props, sizeof(RoomProp) * (size_t)ncap);
+                    if (np == NULL) {
+                        free(verts);
+                        skipNoMem++;
+                        continue;
+                    }
+                    props = np;
+                    cap = ncap;
+                }
+                RoomProp* out = &props[n];
+                memset(out, 0, sizeof(*out));
+                glGenBuffers(1, &out->vbo);
+                glBindBuffer(GL_ARRAY_BUFFER, out->vbo);
+                glBufferData(GL_ARRAY_BUFFER, sizeof(float) * vc * 6, verts, GL_STATIC_DRAW);
+                glBindBuffer(GL_ARRAY_BUFFER, 0);
+                out->vertCount = (int)vc;
+                out->tint[0] = tint[0];
+                out->tint[1] = tint[1];
+                out->tint[2] = tint[2];
+                out->emissive = emissive;
+                n++;
+                free(verts);
+            }
+        }
+    }
+    cgltf_free(data);
+    AAsset_close(a);
+    roomProps = props;
+    roomPropCount = n;
+    LOGI("room: theater.glb props=%d skip(tri=%d,pos=%d,mem=%d) baked x=[%.2f,%.2f] y=[%.2f,%.2f] z=[%.2f,%.2f]",
+        n, skipNoTri, skipNoPos, skipNoMem,
+        bmn[0], bmx[0], bmn[1], bmx[1], bmn[2], bmx[2]);
+    return n > 0;
+}
+
+static void roomGlInit(VrApp* app) {
+    // EGL contexts die with the activity while statics survive in-process.
+    EGLContext cur = eglGetCurrentContext();
+    if (cur != roomCtx) {
+        if (roomProps != NULL) {
+            free(roomProps);
+            roomProps = NULL;
+        }
+        roomProg = 0;
+        roomPropCount = 0;
+        testVbo = 0;
+        roomDepth[0] = roomDepth[1] = 0;
+        roomDepthW = roomDepthH = 0;
+        roomCtx = cur;
+        LOGI("room: GL context changed; state reset");
+    }
+    if (roomProg != 0) {
+        return;
+    }
+    GLuint vs = theaterCompileShader(GL_VERTEX_SHADER, ROOM_VS);
+    GLuint fs = theaterCompileShader(GL_FRAGMENT_SHADER, ROOM_FS);
+    if (vs == 0 || fs == 0) {
+        LOGE("room shaders failed");
+        return;
+    }
+    GLuint prog = glCreateProgram();
+    glAttachShader(prog, vs);
+    glAttachShader(prog, fs);
+    glLinkProgram(prog);
+    GLint ok = 0;
+    glGetProgramiv(prog, GL_LINK_STATUS, &ok);
+    glDeleteShader(vs);
+    glDeleteShader(fs);
+    if (!ok) {
+        LOGE("room link failed");
+        glDeleteProgram(prog);
+        return;
+    }
+    roomProg = prog;
+    // Procedural fallback room: floor + 3 walls, same interleaved layout
+    // and draw path as GLB props (pos+norm stride 24, DrawArrays).
+    {
+        static const float q[] = {
+            // floor y=0, x/z +/-5, normal +Y
+            -5,0,-5, 0,1,0,  5,0,-5, 0,1,0,  5,0,5, 0,1,0,
+            -5,0,-5, 0,1,0,  5,0,5, 0,1,0,  -5,0,5, 0,1,0,
+            // back wall z=+5 facing -Z, x +/-5, y 0..2.5
+            -5,0,5, 0,0,-1,  5,0,5, 0,0,-1,  5,2.5f,5, 0,0,-1,
+            -5,0,5, 0,0,-1,  5,2.5f,5, 0,0,-1,  -5,2.5f,5, 0,0,-1,
+            // left wall x=-5 facing +X
+            -5,0,-5, 1,0,0,  -5,0,5, 1,0,0,  -5,2.5f,5, 1,0,0,
+            -5,0,-5, 1,0,0,  -5,2.5f,5, 1,0,0,  -5,2.5f,-5, 1,0,0,
+            // right wall x=+5 facing -X
+            5,0,-5, -1,0,0,  5,0,5, -1,0,0,  5,2.5f,5, -1,0,0,
+            5,0,-5, -1,0,0,  5,2.5f,5, -1,0,0,  5,2.5f,-5, -1,0,0,
+        };
+        glGenBuffers(1, &testVbo);
+        glBindBuffer(GL_ARRAY_BUFFER, testVbo);
+        glBufferData(GL_ARRAY_BUFFER, sizeof(q), q, GL_STATIC_DRAW);
+        glBindBuffer(GL_ARRAY_BUFFER, 0);
+    }
+    roomAttrPos = glGetAttribLocation(prog, "aPos");
+    roomAttrNorm = glGetAttribLocation(prog, "aNorm");
+    roomUniMvp = glGetUniformLocation(prog, "uMvp");
+    roomUniTint = glGetUniformLocation(prog, "uTint");
+    roomUniEmissive = glGetUniformLocation(prog, "uEmissive");
+    roomUniAmbient = glGetUniformLocation(prog, "uAmbient");
+    roomUniFogColor = glGetUniformLocation(prog, "uFogColor");
+    roomUniCamPos = glGetUniformLocation(prog, "uCamPos");
+    LOGI("room: loc pos=%d norm=%d mvp=%d tint=%d emis=%d amb=%d fog=%d cam=%d",
+        roomAttrPos, roomAttrNorm, roomUniMvp, roomUniTint,
+        roomUniEmissive, roomUniAmbient, roomUniFogColor, roomUniCamPos);
+    roomLoadTheater(app);
+    LOGI("room GL ready props=%d", roomPropCount);
+}
+
+static void roomDrawProp(const RoomProp* p, const float pm[16],
+        const float vm[16], const float eye[3]) {
+    float mvp[16];
+    matMul44(mvp, pm, vm); // model = identity (baked at load)
+    glUniformMatrix4fv(roomUniMvp, 1, GL_FALSE, mvp);
+    glUniform3f(roomUniCamPos, eye[0], eye[1], eye[2]);
+    glUniform3f(roomUniTint, p->tint[0], p->tint[1], p->tint[2]);
+    glUniform1f(roomUniEmissive, p->emissive);
+    glBindBuffer(GL_ARRAY_BUFFER, p->vbo);
+    glVertexAttribPointer(roomAttrPos, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float),
+        (const void*)0);
+    glEnableVertexAttribArray(roomAttrPos);
+    glVertexAttribPointer(roomAttrNorm, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float),
+        (const void*)(3 * sizeof(float)));
+    glEnableVertexAttribArray(roomAttrNorm);
+    glDrawArrays(GL_TRIANGLES, 0, p->vertCount);
+    glDisableVertexAttribArray(roomAttrPos);
+    glDisableVertexAttribArray(roomAttrNorm);
+}
+
+JNIEXPORT void JNICALL
+Java_com_spatiallauncher_vr_VrBridge_nativeSetEnvironment(JNIEnv* env,
+        jclass clazz, jint index) {
+    (void)env;
+    (void)clazz;
+    int clamped = index < 0 ? 0 : (index > 3 ? 3 : index);
+    if (clamped != g_env) {
+        g_env = clamped;
+        LOGI("room env=%d", clamped);
+    }
+}
+
 /** Creates the LOCAL_FLOOR space + one swapchain per view. Needs session. */
 static void theaterEnsureSession(VrApp* app) {
     if (app->localSpace == XR_NULL_HANDLE && app->session != XR_NULL_HANDLE) {
@@ -702,7 +1041,11 @@ static int theaterPushTexture(VrApp* app) {
 static int theaterRenderViews(VrApp* app,
         XrCompositionLayerProjection* projLayer,
         XrCompositionLayerProjectionView* projViews) {
-    if (!app->swapReady || app->screenProg == 0 || app->texW <= 0) {
+    // The room submits on its own; the video quad still waits for a frame.
+    if (!app->swapReady) {
+        return 0;
+    }
+    if (roomProg == 0 && (app->screenProg == 0 || app->texW <= 0)) {
         return 0;
     }
     XrViewLocateInfo locate;
@@ -724,9 +1067,9 @@ static int theaterRenderViews(VrApp* app,
             || viewCount != 2) {
         return 0;
     }
-    if (!theaterPushTexture(app)) {
-        return 0;
-    }
+    int showScreen = (app->screenProg != 0) && theaterPushTexture(app);
+    // Pass (env 0) is passthrough only: no shell drawn.
+    int showRoom = (roomProg != 0) && (roomPropCount > 0) && (g_env > 0);
     float aspect = g_stageAspect > 0.01f ? g_stageAspect : 1.7778f;
     float scaleX = (THEATER_H * aspect) / (THEATER_R * THEATER_ARC);
     for (uint32_t i = 0; i < 2; i++) {
@@ -759,9 +1102,102 @@ static int theaterRenderViews(VrApp* app,
                     glBindFramebuffer(GL_FRAMEBUFFER, app->screenFbo[i]);
                     glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
                         GL_TEXTURE_2D, imgs[imgIndex].image, 0);
+                    if (showRoom
+                            && (roomDepthW != app->swapW || roomDepthH != app->swapH)) {
+                        for (int d = 0; d < 2; d++) {
+                            if (roomDepth[d] == 0) {
+                                glGenRenderbuffers(1, &roomDepth[d]);
+                            }
+                            glBindRenderbuffer(GL_RENDERBUFFER, roomDepth[d]);
+                            glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT16,
+                                app->swapW, app->swapH);
+                        }
+                        glBindRenderbuffer(GL_RENDERBUFFER, 0);
+                        roomDepthW = app->swapW;
+                        roomDepthH = app->swapH;
+                    }
+                    if (showRoom) {
+                        glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT,
+                            GL_RENDERBUFFER, roomDepth[i]);
+                        // Framebuffer completeness, logged once per process.
+                        static int fboLogged = 0;
+                        if (!fboLogged) {
+                            fboLogged = 1;
+                            GLenum st = glCheckFramebufferStatus(GL_FRAMEBUFFER);
+                            LOGW("room: fbo status 0x%x eye %u", st, i);
+                        }
+                    }
                     glViewport(0, 0, app->swapW, app->swapH);
                     glClearColor(0.02f, 0.02f, 0.03f, 1.0f);
-                    glClear(GL_COLOR_BUFFER_BIT);
+                    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+                    float vm[16], pm[16], tv[16], mvp[16], model[16];
+                    viewMatrixFromPose(vm, &views[i].pose);
+                    perspectiveFromFov(pm, &views[i].fov, 0.1f, 60.0f);
+                    // Raw tracked poses are correct here; a transposed view
+                    // puts the whole room behind the camera (seen in testing).
+                    memcpy(tv, vm, sizeof(tv));
+                    if (showRoom) {
+                        glEnable(GL_DEPTH_TEST);
+                        glDepthMask(GL_TRUE);
+                        glUseProgram(roomProg);
+                        // Room lighting moods follow the panel Room picker
+                        // (0 Pass neutral, 1 Dusk, 2 Night, 3 Day).
+                        {
+                            float ambient = 0.45f;
+                            float fogc[3] = {0.015f, 0.015f, 0.025f};
+                            if (g_env == 1) {
+                                ambient = 0.35f;
+                                fogc[0] = 0.05f; fogc[1] = 0.02f; fogc[2] = 0.03f;
+                            } else if (g_env == 2) {
+                                ambient = 0.20f;
+                                fogc[0] = 0.005f; fogc[1] = 0.005f; fogc[2] = 0.01f;
+                            } else if (g_env >= 3) {
+                                ambient = 0.65f;
+                                fogc[0] = 0.10f; fogc[1] = 0.12f; fogc[2] = 0.15f;
+                            }
+                            glUniform1f(roomUniAmbient, ambient);
+                            glUniform3f(roomUniFogColor, fogc[0], fogc[1], fogc[2]);
+                        }
+                        matMul44(mvp, pm, tv);
+                        glUniformMatrix4fv(roomUniMvp, 1, GL_FALSE, mvp);
+                        if (testVbo != 0) {
+                            glBindBuffer(GL_ARRAY_BUFFER, testVbo);
+                            glVertexAttribPointer(roomAttrPos, 3, GL_FLOAT,
+                                GL_FALSE, 6 * sizeof(float), (const void*)0);
+                            glEnableVertexAttribArray(roomAttrPos);
+                            glVertexAttribPointer(roomAttrNorm, 3, GL_FLOAT,
+                                GL_FALSE, 6 * sizeof(float),
+                                (const void*)(3 * sizeof(float)));
+                            glEnableVertexAttribArray(roomAttrNorm);
+                            glUniform3f(roomUniCamPos,
+                                views[i].pose.position.x,
+                                views[i].pose.position.y,
+                                views[i].pose.position.z);
+                            glUniform1f(roomUniEmissive, 0.0f);
+                            glUniform3f(roomUniTint, 0.32f, 0.27f, 0.23f);
+                            glDrawArrays(GL_TRIANGLES, 0, 6); // floor
+                            glUniform3f(roomUniTint, 0.45f, 0.28f, 0.15f);
+                            glDrawArrays(GL_TRIANGLES, 6, 18); // walls
+                            glDisableVertexAttribArray(roomAttrPos);
+                            glDisableVertexAttribArray(roomAttrNorm);
+                        }
+                        for (int k = 0; k < roomPropCount; k++) {
+                            roomDrawProp(&roomProps[k], pm, tv,
+                                &views[i].pose.position.x);
+                        }
+                        glBindBuffer(GL_ARRAY_BUFFER, 0);
+                        glDisable(GL_DEPTH_TEST);
+                        {
+                            static int errLogged = 0;
+                            if (!errLogged) {
+                                errLogged = 1;
+                                LOGW("room: first-frame glGetError=0x%x",
+                                    glGetError());
+                            }
+                        }
+                        rendered = 1;
+                    }
+                    if (showScreen) {
                     glUseProgram(app->screenProg);
                     glActiveTexture(GL_TEXTURE0);
                     glBindTexture(GL_TEXTURE_2D, app->screenTex);
@@ -773,9 +1209,10 @@ static int theaterRenderViews(VrApp* app,
                     perspectiveFromFov(pm, &views[i].fov, 0.1f, 60.0f);
                     memset(model, 0, sizeof(model));
                     model[0] = scaleX; model[5] = 1.0f; model[10] = 1.0f; model[15] = 1.0f;
-                    // Offset right of the panel overlay, which sits center-ahead
-                    // and would otherwise hide the screen completely.
-                    model[12] = 2.4f;
+                    // Centered straight ahead (was offset +2.4 to dodge the
+                    // panel overlay; the panel is user-movable, the offset
+                    // just read as a misplaced, foreshortened window).
+                    model[12] = 0.0f;
                     float tmp[16];
                     matMul44(tmp, vm, model);
                     matMul44(mvp, pm, tmp);
@@ -788,10 +1225,11 @@ static int theaterRenderViews(VrApp* app,
                     glEnableVertexAttribArray(app->attrUv);
                     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, app->meshIbo);
                     glDrawElements(GL_TRIANGLES, app->meshIndexCount, GL_UNSIGNED_SHORT, 0);
-                    glDisableVertexAttribArray(app->attrPos);
-                    glDisableVertexAttribArray(app->attrUv);
+                        glDisableVertexAttribArray(app->attrPos);
+                        glDisableVertexAttribArray(app->attrUv);
+                        rendered = 1;
+                    } // showScreen
                     glBindFramebuffer(GL_FRAMEBUFFER, 0);
-                    rendered = 1;
                 }
                 free(imgs);
             }
@@ -822,6 +1260,27 @@ static int theaterRenderViews(VrApp* app,
 }
 
 static void theaterShutdown(VrApp* app) {
+    if (roomProg != 0) {
+        glDeleteProgram(roomProg);
+        roomProg = 0;
+    }
+    for (int k = 0; k < roomPropCount; k++) {
+        if (roomProps[k].vbo != 0) {
+            glDeleteBuffers(1, &roomProps[k].vbo);
+        }
+    }
+    free(roomProps);
+    roomProps = NULL;
+    roomPropCount = 0;
+    if (testVbo != 0) {
+        glDeleteBuffers(1, &testVbo);
+        testVbo = 0;
+    }
+    if (roomDepth[0] != 0 || roomDepth[1] != 0) {
+        glDeleteRenderbuffers(2, roomDepth);
+        roomDepth[0] = roomDepth[1] = 0;
+    }
+    roomDepthW = roomDepthH = 0;
     if (app->screenProg != 0) {
         glDeleteProgram(app->screenProg);
         app->screenProg = 0;
@@ -877,6 +1336,7 @@ static void pumpSessionEvents(VrApp* app) {
                     app->sessionRunning = 1;
                     LOGI("session begun");
                     theaterGlInit(app);
+                    roomGlInit(app);
                     theaterEnsureSession(app);
                 }
             } else if (sc->state == XR_SESSION_STATE_STOPPING) {
@@ -938,10 +1398,13 @@ static void drawFrame(VrApp* app) {
     {
         static unsigned long frames = 0;
         XrResult er = xrEndFrame(app->session, &endInfo);
-        if ((++frames % 300) == 1 || er != XR_SUCCESS) {
-            LOGI("endFrame #%lu: %d (layers=%u) swap=%d prog=%d tex=%dx%d",
+        // Quiet heartbeat (was every ~4s, evicting one-shot init lines from
+        // the on-device tag buffer before anyone could read them).
+        if ((++frames % 3600) == 1 || er != XR_SUCCESS) {
+            LOGI("endFrame #%lu: %d (layers=%u) swap=%d prog=%d tex=%dx%d room=%d env=%d",
                 frames, (int)er, (unsigned)layerCount,
-                app->swapReady, app->screenProg != 0, app->texW, app->texH);
+                app->swapReady, app->screenProg != 0, app->texW, app->texH,
+                roomPropCount, g_env);
         }
     }
 }

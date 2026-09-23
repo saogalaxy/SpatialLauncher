@@ -5,6 +5,11 @@
       "type": "local",
       "command": ["npx", "-y", "metavr@latest", "mcp", "server"],
       "enabled": true
+    },
+    "blender": {
+      "type": "local",
+      "command": ["C:/Users/usbma/AppData/Local/Programs/blender-mcp/venv/Scripts/blender-mcp.exe"],
+      "enabled": true
     }
   }
 }

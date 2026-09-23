@@ -353,6 +353,11 @@
     <string name="enter_vr_beta_label">Enter VR (beta)</string>
     <string name="exit_vr_beta_label">Exit VR (beta)</string>
     <string name="enter_vr_failed">Couldn\'t enter VR</string>
+    <string name="vr_env_label">Room</string>
+    <string name="vr_env_pass">Pass</string>
+    <string name="vr_env_dusk">Dusk</string>
+    <string name="vr_env_night">Night</string>
+    <string name="vr_env_day">Day</string>
     <string name="empty_state_message">No app running.\nAdd an app from the dock below to get started.</string>
     <string name="add_game_dock_label">Add App</string>
     <string name="add_game_dialog_title">Add an app to the dock</string>

@@ -76,6 +76,18 @@ public class UserSettingsStore {
         prefs.edit().putBoolean(KEY_FORCE_STEREO, enabled).apply();
     }
 
+    /** VR room environment: 0 = passthrough, 1 = Dusk, 2 = Night, 3 = Day. */
+    private static final String KEY_VR_ENVIRONMENT = "vr_environment";
+    static final int DEFAULT_VR_ENVIRONMENT = 0;
+
+    public int getVrEnvironment() {
+        return Math.max(0, Math.min(3, prefs.getInt(KEY_VR_ENVIRONMENT, DEFAULT_VR_ENVIRONMENT)));
+    }
+
+    public void setVrEnvironment(int index) {
+        prefs.edit().putInt(KEY_VR_ENVIRONMENT, Math.max(0, Math.min(3, index))).apply();
+    }
+
     /** 3D+ head parallax. Default off until verified eyes-on. */
     static final boolean DEFAULT_HEAD_PARALLAX = false;
 

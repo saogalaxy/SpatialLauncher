@@ -783,6 +783,60 @@
                                 android:text="@string/exit_vr_beta_label"
                                 android:visibility="gone" />
 
+                            <TextView
+                                android:id="@+id/room_env_label"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:layout_marginTop="12dp"
+                                android:text="@string/vr_env_label"
+                                android:textColor="@color/text_primary"
+                                android:textSize="13sp"
+                                android:visibility="gone" />
+
+                            <LinearLayout
+                                android:id="@+id/room_env_row"
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:layout_marginTop="4dp"
+                                android:orientation="horizontal"
+                                android:visibility="gone">
+
+                                <Button
+                                    android:id="@+id/room_env_0"
+                                    android:layout_width="0dp"
+                                    android:layout_height="36dp"
+                                    android:layout_weight="1"
+                                    android:text="@string/vr_env_pass"
+                                    android:textSize="12sp" />
+
+                                <Button
+                                    android:id="@+id/room_env_1"
+                                    android:layout_width="0dp"
+                                    android:layout_height="36dp"
+                                    android:layout_marginStart="4dp"
+                                    android:layout_weight="1"
+                                    android:text="@string/vr_env_dusk"
+                                    android:textSize="12sp" />
+
+                                <Button
+                                    android:id="@+id/room_env_2"
+                                    android:layout_width="0dp"
+                                    android:layout_height="36dp"
+                                    android:layout_marginStart="4dp"
+                                    android:layout_weight="1"
+                                    android:text="@string/vr_env_night"
+                                    android:textSize="12sp" />
+
+                                <Button
+                                    android:id="@+id/room_env_3"
+                                    android:layout_width="0dp"
+                                    android:layout_height="36dp"
+                                    android:layout_marginStart="4dp"
+                                    android:layout_weight="1"
+                                    android:text="@string/vr_env_day"
+                                    android:textSize="12sp" />
+                            </LinearLayout>
+
                             <Switch
                                 android:id="@+id/toggle_3d_off_page_translate"
                                 android:layout_width="match_parent"

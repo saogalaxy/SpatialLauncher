@@ -34,6 +34,34 @@ public final class VrBridge {
     public static volatile int frameH;
 
     /**
+     * Room lighting mood: 0 = passthrough (neutral), 1 = Dusk warm-dim,
+     * 2 = Night dark, 3 = Day bright. Reached ONLY via reflection from the
+     * panel's Room picker (see PanelMainActivity): without the native lib
+     * the call below no-ops inside its try/catch.
+     */
+    public static final int ENV_PASSTHROUGH = 0;
+    public static final int ENV_DUSK = 1;
+    public static final int ENV_NIGHT = 2;
+    public static final int ENV_DAY = 3;
+
+    private static volatile int environment = ENV_PASSTHROUGH;
+
+    public static void setEnvironment(int index) {
+        int clamped = Math.max(ENV_PASSTHROUGH, Math.min(ENV_DAY, index));
+        environment = clamped;
+        try {
+            nativeSetEnvironment(clamped);
+        } catch (UnsatisfiedLinkError ignored) {
+        }
+    }
+
+    public static int getEnvironment() {
+        return environment;
+    }
+
+    private static native void nativeSetEnvironment(int index);
+
+    /**
      * Copies ARGB_8888 pixels out of {@code src} into the native staging
      * buffer. Called on the panel draw path, throttled by the caller.
      *
