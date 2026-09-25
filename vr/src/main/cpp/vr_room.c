@@ -856,7 +856,7 @@ static void roomAddNodePrims(RoomLoadCtx* ctx, cgltf_node* node, float M[16]) {
         glBindBuffer(GL_ARRAY_BUFFER, out->vbo);
         glBufferData(GL_ARRAY_BUFFER, sizeof(float) * vc * 6, verts, GL_STATIC_DRAW);
         glBindBuffer(GL_ARRAY_BUFFER, 0);
-        out->vertCount = (int)vc;
+                out->vertCount = (int)vc;
         // Indexed meshes: upload the authored index buffer so draws
         // follow GLB topology instead of sequential triples.
         if (prim->indices != NULL && prim->indices->count > 0
@@ -949,6 +949,15 @@ static int roomLoadTheater(VrApp* app) {
     cgltf_data* data = NULL;
     if (cgltf_parse(&opt, buf, len, &data) != cgltf_result_success) {
         LOGW("room: parse failed");
+        AAsset_close(a);
+        return 0;
+    }
+    // Bind the GLB BIN chunk (no copy; buf stays mapped until cgltf_free).
+    // Without this every accessor read fails: positions stay uninitialized
+    // (garbage baked bounds) and indices read as 0 (degenerate tris).
+    if (cgltf_load_buffers(&opt, data, NULL) != cgltf_result_success) {
+        LOGW("room: buffers missing");
+        cgltf_free(data);
         AAsset_close(a);
         return 0;
     }

@@ -73,3 +73,12 @@ Nothing here ships to the Store: beta lane only, per `AGENTS.md`.
   counter; non-indexed prims still `DrawArrays`. Bad indices fall back loudly.
 - Loader recurses child nodes with accumulated parent transforms (plus the
   Y-180 facing spin); Blender hierarchy no longer matters.
+- Loader binds the GLB BIN via `cgltf_load_buffers` (the flat-color rewrite
+  had dropped it: all vertex reads failed silently, garbage bounds, void).
+  Baked bounds now match an independent host computation exactly;
+  eyes-on 2026-09-25: room renders correctly (flat colors, textures pending).
+  Lesson: cgltf_parse without cgltf_load_buffers fails silently — accessor reads return garbage, no error.
+  Lifetime: zero-copy BIN points into the mapped asset; the asset is closed
+  in the same function right after the bake (`cgltf_free` then
+  `AAsset_close`), so the 120MB mapping is not pinned — only GL VBOs/IBOs
+  persist.
