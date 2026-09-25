@@ -45,7 +45,7 @@ Nothing here ships to the Store: beta lane only, per `AGENTS.md`.
    panel's control handlers. Do not start this until 1–4 are verified
    on-headset; a dead dock is worse than no dock.
 6. **Decide the overlay's fate.** `VrActivity` still re-fronts the 2D panel as
-   an overlay 1.5s after session start. Once the dock carries the controls,
+   an overlay 8s after session start. Once the dock carries the controls,
    that overlay likely goes away (or becomes content-only). Keep behavior
    deliberate — don't leave both.
 
@@ -61,3 +61,15 @@ Nothing here ships to the Store: beta lane only, per `AGENTS.md`.
 - This scaffold was authored off-device; the first local builds
   (`assembleRelease` + `assembleBeta` + `lintDebug`) are green with zero new
   lint findings. On-device pose tuning (item 2) still needs eyes-on confirmation.
+
+## Session log (2026-09-25, vr-split-scaffold)
+
+- Overlay re-front is 8s, not 1.5s (matches `VrActivity` 8000ms delay).
+- Deleted dead `theaterBarPush`/`pushBarStrip` probe in `PanelMainActivity`
+  (method never existed on `VrBridge`; dock probe `pushControlFrame` kept).
+- `VrActivity` panel auto-launch `catch` now `Log.w`s instead of swallowing.
+- Fallback gate kept: `testVbo` draws only when `roomPropCount == 0`.
+- Loader uses GLB index buffers (`DrawElements`, 16/32-bit) with `idx=` skip
+  counter; non-indexed prims still `DrawArrays`. Bad indices fall back loudly.
+- Loader recurses child nodes with accumulated parent transforms (plus the
+  Y-180 facing spin); Blender hierarchy no longer matters.

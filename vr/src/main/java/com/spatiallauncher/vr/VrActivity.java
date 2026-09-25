@@ -5,6 +5,7 @@ import android.content.Intent;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.util.Log;
 import android.view.WindowManager;
 
 /**
@@ -13,6 +14,7 @@ import android.view.WindowManager;
  * after the XR session comes up. Exit via the system button.
  */
 public class VrActivity extends NativeActivity {
+    private static final String TAG = "VrActivity";
     private static final String PANEL_CLASS = "com.spatiallauncher.app.ui.PanelMainActivity";
     static final String EXTRA_EXIT_VR = "com.spatiallauncher.vr.EXIT";
     /** Debug/remote handle: am start --ei com.spatiallauncher.vr.ENV <0-3>. */
@@ -47,7 +49,8 @@ public class VrActivity extends NativeActivity {
                 panel.setClassName(getPackageName(), PANEL_CLASS);
                 panel.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
                 startActivity(panel);
-            } catch (Throwable ignored) {
+            } catch (Throwable t) {
+                Log.w(TAG, "panel overlay launch failed", t);
             }
         }, 8000);
     }

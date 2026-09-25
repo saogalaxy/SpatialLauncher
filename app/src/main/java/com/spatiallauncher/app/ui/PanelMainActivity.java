@@ -6517,7 +6517,6 @@ public class PanelMainActivity extends AppCompatActivity {
     }
 
     private static java.lang.reflect.Method theaterPush;
-    private static java.lang.reflect.Method theaterBarPush;
     private static java.lang.reflect.Method theaterIsActive;
     private static java.nio.ByteBuffer theaterPixels;
     private static int theaterPixelsCap;
@@ -6587,8 +6586,6 @@ public class PanelMainActivity extends AppCompatActivity {
                             java.nio.ByteBuffer.class, int.class, int.class, boolean.class);
                     // SCAFFOLD (vr-split): probe dock bridge too
                     try {
-                        theaterBarPush = bridge.getMethod("pushBarStrip",
-                                java.nio.ByteBuffer.class, int.class, int.class);
                         dockPush = bridge.getMethod("pushControlFrame",
                                 java.nio.ByteBuffer.class, int.class, int.class);
                         dockIsActive = bridge.getMethod("isDockActive");

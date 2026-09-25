@@ -676,13 +676,17 @@ static void theaterGlInit(VrApp* app) {
 /* ---------------- Blender room (room/theater.glb, one prop per primitive) ----
  * Minimal flat-color loader: positions + normals baked to XR world space at
  * load (model matrix stays identity), tint from baseColorFactor, emissive
- * from emissive_factor luminance. No textures, no indices (DrawArrays only).
+ * from emissive_factor luminance. No textures; indexed primitives keep
+ * their index buffer (DrawElements), non-indexed fall back to DrawArrays.
  * Every skipped primitive logs its reason.
  * A Y-180 spin maps the authored facing (+Z) onto OpenXR forward (-Z).
  */
 typedef struct {
     GLuint vbo;
+    GLuint ibo;
     int vertCount;
+    int indexCount;
+    GLenum indexType;
     float tint[3];
     float emissive;
 } RoomProp;
@@ -731,14 +735,196 @@ static const char* ROOM_FS =
     "  gl_FragColor = vec4(col, 1.0);\n"
     "}\n";
 
-static void roomNodeWorld(const cgltf_node* node, float out[16]) {
-    // Our export is a flat scene (no parents), so local == world.
-    cgltf_node_transform_local(node, out);
+typedef struct {
+    RoomProp* props;
+    int cap;
+    int n;
+    int skipNoTri;
+    int skipNoPos;
+    int skipNoMem;
+    int skipNoIdx;
+    float bmn[3];
+    float bmx[3];
+} RoomLoadCtx;
+
+static void roomAddNodePrims(RoomLoadCtx* ctx, cgltf_node* node, float M[16]);
+static void roomVisitNode(RoomLoadCtx* ctx, cgltf_node* node, float parentM[16]) {
+    if (node == NULL) {
+        return;
+    }
+    float local[16], world[16], M[16];
+    cgltf_node_transform_local(node, local);
+    matMul44(world, parentM, local);
     static const float ry[16] =
         {-1, 0, 0, 0, 0, 1, 0, 0, 0, 0, -1, 0, 0, 0, 0, 1};
-    float tmp[16];
-    matMul44(tmp, ry, out);
-    memcpy(out, tmp, sizeof(tmp));
+    matMul44(M, ry, world);
+    if (node->mesh != NULL) {
+        roomAddNodePrims(ctx, node, M);
+    }
+    for (size_t ci = 0; ci < node->children_count; ci++) {
+        roomVisitNode(ctx, node->children[ci], world);
+    }
+}
+
+static void roomAddNodePrims(RoomLoadCtx* ctx, cgltf_node* node, float M[16]) {
+    cgltf_mesh* mesh = node->mesh;
+    for (size_t pi = 0; pi < mesh->primitives_count; pi++) {
+        cgltf_primitive* prim = &mesh->primitives[pi];
+        if (prim->type != cgltf_primitive_type_triangles) {
+            ctx->skipNoTri++;
+            continue;
+        }
+        cgltf_accessor* pos = NULL, *nrm = NULL;
+        for (size_t k = 0; k < prim->attributes_count; k++) {
+            const char* an = prim->attributes[k].name;
+            if (strcmp(an, "POSITION") == 0) {
+                pos = prim->attributes[k].data;
+            } else if (strcmp(an, "NORMAL") == 0) {
+                nrm = prim->attributes[k].data;
+            }
+        }
+        if (pos == NULL || pos->type != cgltf_type_vec3
+                || pos->component_type != cgltf_component_type_r_32f
+                || pos->count == 0 || pos->count > 300000) {
+            ctx->skipNoPos++;
+            continue;
+        }
+        size_t vc = pos->count;
+        float* verts = (float*)malloc(sizeof(float) * vc * 6);
+        if (verts == NULL) {
+            ctx->skipNoMem++;
+            continue;
+        }
+        for (size_t v = 0; v < vc; v++) {
+            float p[3], nr[3] = {0.0f, 1.0f, 0.0f};
+            cgltf_accessor_read_float(pos, v, p, 3);
+            if (nrm != NULL) {
+                cgltf_accessor_read_float(nrm, v, nr, 3);
+            }
+            // Bake node transform; rotation-only normals (uniform
+            // scales in our export) + normalize for safety.
+            float wp[3] = {
+                M[0] * p[0] + M[4] * p[1] + M[8] * p[2] + M[12],
+                M[1] * p[0] + M[5] * p[1] + M[9] * p[2] + M[13],
+                M[2] * p[0] + M[6] * p[1] + M[10] * p[2] + M[14],
+            };
+            float wn[3] = {
+                M[0] * nr[0] + M[4] * nr[1] + M[8] * nr[2],
+                M[1] * nr[0] + M[5] * nr[1] + M[9] * nr[2],
+                M[2] * nr[0] + M[6] * nr[1] + M[10] * nr[2],
+            };
+            float il = 1.0f / (sqrtf(wn[0] * wn[0] + wn[1] * wn[1] + wn[2] * wn[2]) + 1e-9f);
+            verts[v * 6 + 0] = wp[0];
+            verts[v * 6 + 1] = wp[1];
+            verts[v * 6 + 2] = wp[2];
+            verts[v * 6 + 3] = wn[0] * il;
+            verts[v * 6 + 4] = wn[1] * il;
+            verts[v * 6 + 5] = wn[2] * il;
+            for (int q = 0; q < 3; q++) {
+                if (wp[q] < ctx->bmn[q]) {
+                    ctx->bmn[q] = wp[q];
+                }
+                if (wp[q] > ctx->bmx[q]) {
+                    ctx->bmx[q] = wp[q];
+                }
+            }
+        }
+        float tint[3] = {1.0f, 1.0f, 1.0f};
+        float emissive = 0.0f;
+        if (prim->material != NULL) {
+            float* bf = prim->material->pbr_metallic_roughness.base_color_factor;
+            tint[0] = bf[0];
+            tint[1] = bf[1];
+            tint[2] = bf[2];
+            float* ef = prim->material->emissive_factor;
+            emissive = 0.299f * ef[0] + 0.587f * ef[1] + 0.114f * ef[2];
+        }
+        if (ctx->n >= ctx->cap) {
+            int ncap = ctx->cap * 2;
+            RoomProp* np = (RoomProp*)realloc(ctx->props, sizeof(RoomProp) * (size_t)ncap);
+            if (np == NULL) {
+                free(verts);
+                ctx->skipNoMem++;
+                continue;
+            }
+            ctx->props = np;
+            ctx->cap = ncap;
+        }
+        RoomProp* out = &ctx->props[ctx->n];
+        memset(out, 0, sizeof(*out));
+        glGenBuffers(1, &out->vbo);
+        glBindBuffer(GL_ARRAY_BUFFER, out->vbo);
+        glBufferData(GL_ARRAY_BUFFER, sizeof(float) * vc * 6, verts, GL_STATIC_DRAW);
+        glBindBuffer(GL_ARRAY_BUFFER, 0);
+        out->vertCount = (int)vc;
+        // Indexed meshes: upload the authored index buffer so draws
+        // follow GLB topology instead of sequential triples.
+        if (prim->indices != NULL && prim->indices->count > 0
+                && prim->indices->count <= 2000000) {
+            size_t ic = prim->indices->count;
+            size_t maxIdx = 0;
+            int badIdx = 0;
+            for (size_t ii = 0; ii < ic; ii++) {
+                size_t vi = cgltf_accessor_read_index(prim->indices, ii);
+                if (vi >= vc) {
+                    badIdx = 1;
+                    break;
+                }
+                if (vi > maxIdx) {
+                    maxIdx = vi;
+                }
+            }
+            if (!badIdx) {
+                if (maxIdx < 65536 && vc <= 65536) {
+                    unsigned short* ibuf = (unsigned short*)malloc(
+                        sizeof(unsigned short) * ic);
+                    if (ibuf != NULL) {
+                        for (size_t ii = 0; ii < ic; ii++) {
+                            ibuf[ii] = (unsigned short)cgltf_accessor_read_index(
+                                prim->indices, ii);
+                        }
+                        glGenBuffers(1, &out->ibo);
+                        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, out->ibo);
+                        glBufferData(GL_ELEMENT_ARRAY_BUFFER,
+                            sizeof(unsigned short) * ic, ibuf, GL_STATIC_DRAW);
+                        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
+                        out->indexCount = (int)ic;
+                        out->indexType = GL_UNSIGNED_SHORT;
+                        free(ibuf);
+                    } else {
+                        ctx->skipNoMem++;
+                    }
+                } else {
+                    unsigned int* ibuf = (unsigned int*)malloc(
+                        sizeof(unsigned int) * ic);
+                    if (ibuf != NULL) {
+                        for (size_t ii = 0; ii < ic; ii++) {
+                            ibuf[ii] = (unsigned int)cgltf_accessor_read_index(
+                                prim->indices, ii);
+                        }
+                        glGenBuffers(1, &out->ibo);
+                        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, out->ibo);
+                        glBufferData(GL_ELEMENT_ARRAY_BUFFER,
+                            sizeof(unsigned int) * ic, ibuf, GL_STATIC_DRAW);
+                        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
+                        out->indexCount = (int)ic;
+                        out->indexType = GL_UNSIGNED_INT;
+                        free(ibuf);
+                    } else {
+                        ctx->skipNoMem++;
+                    }
+                }
+            } else {
+                ctx->skipNoIdx++;
+            }
+        }
+        out->tint[0] = tint[0];
+        out->tint[1] = tint[1];
+        out->tint[2] = tint[2];
+        out->emissive = emissive;
+        ctx->n++;
+        free(verts);
+    }
 }
 
 static int roomLoadTheater(VrApp* app) {
@@ -767,131 +953,35 @@ static int roomLoadTheater(VrApp* app) {
         return 0;
     }
     // GLB bin chunk lives inside buf: keep the asset open until cgltf_free.
-    int cap = 64, n = 0;
-    int skipNoTri = 0, skipNoPos = 0, skipNoMem = 0;
-    float bmn[3] = {1e30f, 1e30f, 1e30f}, bmx[3] = {-1e30f, -1e30f, -1e30f};
-    RoomProp* props = (RoomProp*)calloc((size_t)cap, sizeof(RoomProp));
-    if (props == NULL) {
+    RoomLoadCtx ctx;
+    memset(&ctx, 0, sizeof(ctx));
+    ctx.cap = 64;
+    ctx.bmn[0] = ctx.bmn[1] = ctx.bmn[2] = 1e30f;
+    ctx.bmx[0] = ctx.bmx[1] = ctx.bmx[2] = -1e30f;
+    ctx.props = (RoomProp*)calloc((size_t)ctx.cap, sizeof(RoomProp));
+    if (ctx.props == NULL) {
         cgltf_free(data);
         AAsset_close(a);
         return 0;
     }
+    static const float ident[16] =
+        {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
     for (size_t s = 0; s < data->scenes_count; s++) {
         cgltf_scene* scene = &data->scenes[s];
         for (size_t ni = 0; ni < scene->nodes_count; ni++) {
-            cgltf_node* node = scene->nodes[ni];
-            if (node->mesh == NULL) {
-                continue;
-            }
-            float M[16];
-            roomNodeWorld(node, M);
-            cgltf_mesh* mesh = node->mesh;
-            for (size_t pi = 0; pi < mesh->primitives_count; pi++) {
-                cgltf_primitive* prim = &mesh->primitives[pi];
-                if (prim->type != cgltf_primitive_type_triangles) {
-                    skipNoTri++;
-                    continue;
-                }
-                cgltf_accessor* pos = NULL, *nrm = NULL;
-                for (size_t k = 0; k < prim->attributes_count; k++) {
-                    const char* an = prim->attributes[k].name;
-                    if (strcmp(an, "POSITION") == 0) {
-                        pos = prim->attributes[k].data;
-                    } else if (strcmp(an, "NORMAL") == 0) {
-                        nrm = prim->attributes[k].data;
-                    }
-                }
-                if (pos == NULL || pos->type != cgltf_type_vec3
-                        || pos->component_type != cgltf_component_type_r_32f
-                        || pos->count == 0 || pos->count > 300000) {
-                    skipNoPos++;
-                    continue;
-                }
-                size_t vc = pos->count;
-                float* verts = (float*)malloc(sizeof(float) * vc * 6);
-                if (verts == NULL) {
-                    skipNoMem++;
-                    continue;
-                }
-                for (size_t v = 0; v < vc; v++) {
-                    float p[3], nr[3] = {0.0f, 1.0f, 0.0f};
-                    cgltf_accessor_read_float(pos, v, p, 3);
-                    if (nrm != NULL) {
-                        cgltf_accessor_read_float(nrm, v, nr, 3);
-                    }
-                    // Bake node transform; rotation-only normals (uniform
-                    // scales in our export) + normalize for safety.
-                    float wp[3] = {
-                        M[0] * p[0] + M[4] * p[1] + M[8] * p[2] + M[12],
-                        M[1] * p[0] + M[5] * p[1] + M[9] * p[2] + M[13],
-                        M[2] * p[0] + M[6] * p[1] + M[10] * p[2] + M[14],
-                    };
-                    float wn[3] = {
-                        M[0] * nr[0] + M[4] * nr[1] + M[8] * nr[2],
-                        M[1] * nr[0] + M[5] * nr[1] + M[9] * nr[2],
-                        M[2] * nr[0] + M[6] * nr[1] + M[10] * nr[2],
-                    };
-                    float il = 1.0f / (sqrtf(wn[0] * wn[0] + wn[1] * wn[1] + wn[2] * wn[2]) + 1e-9f);
-                    verts[v * 6 + 0] = wp[0];
-                    verts[v * 6 + 1] = wp[1];
-                    verts[v * 6 + 2] = wp[2];
-                    verts[v * 6 + 3] = wn[0] * il;
-                    verts[v * 6 + 4] = wn[1] * il;
-                    verts[v * 6 + 5] = wn[2] * il;
-                    for (int q = 0; q < 3; q++) {
-                        if (wp[q] < bmn[q]) {
-                            bmn[q] = wp[q];
-                        }
-                        if (wp[q] > bmx[q]) {
-                            bmx[q] = wp[q];
-                        }
-                    }
-                }
-                float tint[3] = {1.0f, 1.0f, 1.0f};
-                float emissive = 0.0f;
-                if (prim->material != NULL) {
-                    float* bf = prim->material->pbr_metallic_roughness.base_color_factor;
-                    tint[0] = bf[0];
-                    tint[1] = bf[1];
-                    tint[2] = bf[2];
-                    float* ef = prim->material->emissive_factor;
-                    emissive = 0.299f * ef[0] + 0.587f * ef[1] + 0.114f * ef[2];
-                }
-                if (n >= cap) {
-                    int ncap = cap * 2;
-                    RoomProp* np = (RoomProp*)realloc(props, sizeof(RoomProp) * (size_t)ncap);
-                    if (np == NULL) {
-                        free(verts);
-                        skipNoMem++;
-                        continue;
-                    }
-                    props = np;
-                    cap = ncap;
-                }
-                RoomProp* out = &props[n];
-                memset(out, 0, sizeof(*out));
-                glGenBuffers(1, &out->vbo);
-                glBindBuffer(GL_ARRAY_BUFFER, out->vbo);
-                glBufferData(GL_ARRAY_BUFFER, sizeof(float) * vc * 6, verts, GL_STATIC_DRAW);
-                glBindBuffer(GL_ARRAY_BUFFER, 0);
-                out->vertCount = (int)vc;
-                out->tint[0] = tint[0];
-                out->tint[1] = tint[1];
-                out->tint[2] = tint[2];
-                out->emissive = emissive;
-                n++;
-                free(verts);
-            }
+            float root[16];
+            memcpy(root, ident, sizeof(root));
+            roomVisitNode(&ctx, scene->nodes[ni], root);
         }
     }
     cgltf_free(data);
     AAsset_close(a);
-    roomProps = props;
-    roomPropCount = n;
-    LOGI("room: theater.glb props=%d skip(tri=%d,pos=%d,mem=%d) baked x=[%.2f,%.2f] y=[%.2f,%.2f] z=[%.2f,%.2f]",
-        n, skipNoTri, skipNoPos, skipNoMem,
-        bmn[0], bmx[0], bmn[1], bmx[1], bmn[2], bmx[2]);
-    return n > 0;
+    roomProps = ctx.props;
+    roomPropCount = ctx.n;
+    LOGI("room: theater.glb props=%d skip(tri=%d,pos=%d,mem=%d,idx=%d) baked x=[%.2f,%.2f] y=[%.2f,%.2f] z=[%.2f,%.2f]",
+        ctx.n, ctx.skipNoTri, ctx.skipNoPos, ctx.skipNoMem, ctx.skipNoIdx,
+        ctx.bmn[0], ctx.bmx[0], ctx.bmn[1], ctx.bmx[1], ctx.bmn[2], ctx.bmx[2]);
+    return ctx.n > 0;
 }
 
 static void roomGlInit(VrApp* app) {
@@ -985,7 +1075,13 @@ static void roomDrawProp(const RoomProp* p, const float pm[16],
     glVertexAttribPointer(roomAttrNorm, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float),
         (const void*)(3 * sizeof(float)));
     glEnableVertexAttribArray(roomAttrNorm);
-    glDrawArrays(GL_TRIANGLES, 0, p->vertCount);
+    if (p->ibo != 0 && p->indexCount > 0) {
+        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, p->ibo);
+        glDrawElements(GL_TRIANGLES, p->indexCount, p->indexType, 0);
+        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
+    } else {
+        glDrawArrays(GL_TRIANGLES, 0, p->vertCount);
+    }
     glDisableVertexAttribArray(roomAttrPos);
     glDisableVertexAttribArray(roomAttrNorm);
 }
@@ -1305,7 +1401,10 @@ static int theaterRenderViews(VrApp* app,
                         }
                         matMul44(mvp, pm, tv);
                         glUniformMatrix4fv(roomUniMvp, 1, GL_FALSE, mvp);
-                        if (testVbo != 0) {
+                        // Fallback shell only when the GLB contributed nothing:
+                        // with a good load it would double-draw phantom walls
+                        // inside the authored room.
+                        if (testVbo != 0 && roomPropCount == 0) {
                             glBindBuffer(GL_ARRAY_BUFFER, testVbo);
                             glVertexAttribPointer(roomAttrPos, 3, GL_FLOAT,
                                 GL_FALSE, 6 * sizeof(float), (const void*)0);
@@ -1415,6 +1514,9 @@ static void theaterShutdown(VrApp* app) {
     for (int k = 0; k < roomPropCount; k++) {
         if (roomProps[k].vbo != 0) {
             glDeleteBuffers(1, &roomProps[k].vbo);
+        }
+        if (roomProps[k].ibo != 0) {
+            glDeleteBuffers(1, &roomProps[k].ibo);
         }
     }
     free(roomProps);
