@@ -371,4 +371,6 @@
     <string name="mirror_active_hint_fallback">Mirroring %1$s. In the share sheet, pick that app\'s window \u2014 not Entire view.</string>
     <string name="capture_pick_window_hint">Pick %1$s (Just this window). Entire view will crop and letterbox the stream.</string>
     <string name="mirror_notification_text">Mirroring a running game into the panel</string>
+    <!-- SCAFFOLD (vr-split): VR dock console readout: stereo state, transport, mode. -->
+    <string name="dock_state_text">%1$s  %2$s  %3$s</string>
 </resources>

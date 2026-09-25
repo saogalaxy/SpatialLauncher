@@ -27,6 +27,7 @@ public class VrActivity extends NativeActivity {
         super.onCreate(savedInstanceState);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         VrBridge.setTheaterActive(true);
+        VrBridge.setDockActive(true); // SCAFFOLD (vr-split)
         try {
             int env = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
                     .getInt(KEY_VR_ENVIRONMENT, VrBridge.ENV_PASSTHROUGH);
@@ -61,6 +62,7 @@ public class VrActivity extends NativeActivity {
     @Override
     protected void onDestroy() {
         VrBridge.setTheaterActive(false);
+        VrBridge.setDockActive(false); // SCAFFOLD (vr-split)
         super.onDestroy();
     }
 

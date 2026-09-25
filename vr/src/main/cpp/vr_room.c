@@ -104,6 +104,9 @@ typedef struct {
     GLuint screenProg;
     GLuint screenTex;
     int texW, texH;
+    // SCAFFOLD (vr-split): control-dock texture (flat, no SBS).
+    GLuint dockTex;
+    int dockTexW, dockTexH;
     GLuint screenFbo[2];
     GLuint meshVbo, meshUvbo, meshIbo;
     int meshIndexCount;
@@ -117,6 +120,23 @@ static size_t g_stageCap = 0;
 static int g_stageW, g_stageH, g_stageSbs;
 static int g_stageFresh;
 static float g_stageAspect = 1.7778f;
+
+// SCAFFOLD (vr-split): staging for VrBridge.pushControlFrame. Separate lock so
+// the dock feed never contends with the theater screen feed.
+static pthread_mutex_t g_dockLock = PTHREAD_MUTEX_INITIALIZER;
+static unsigned char* g_dockBuf = NULL;
+static size_t g_dockCap = 0;
+static int g_dockW, g_dockH;
+static int g_dockFresh;
+static float g_dockAspect = 1.7778f;
+
+// Dock geometry: a small console quad under the theater screen, in front of
+// the user but below the sightline to the screen. Tune on-device.
+#define DOCK_X 2.4f        /* same x as the theater screen: parked beneath it */
+#define DOCK_Y 0.72f       /* world y of the dock center (eye ~1.55) */
+#define DOCK_SCALE 0.42f   /* size relative to the theater screen */
+#define DOCK_Z_PULL 2.2f   /* toward the viewer from the screen plane (5.5m) */
+#define DOCK_TILT_DEG 0.0f /* TODO(vr-split): tilt up toward the user */
 
 // Theater geometry constants (match the WebXR prototype feel).
 #define THEATER_R 5.5f
@@ -422,6 +442,43 @@ Java_com_spatiallauncher_vr_VrBridge_pushFrame(JNIEnv* env, jclass clazz,
     pthread_mutex_unlock(&g_frameLock);
 }
 
+// SCAFFOLD (vr-split): JNI entry for VrBridge.pushControlFrame. Mirrors
+// pushFrame but feeds the dock staging buffer. Controls are small: cap 1024.
+JNIEXPORT void JNICALL
+Java_com_spatiallauncher_vr_VrBridge_pushControlFrame(JNIEnv* env, jclass clazz,
+        jobject buf, jint w, jint h) {
+    (void)clazz;
+    if (env == NULL || buf == NULL || w <= 0 || h <= 0 || w > 1024 || h > 1024) {
+        return;
+    }
+    void* src = (*env)->GetDirectBufferAddress(env, buf);
+    jlong cap = (*env)->GetDirectBufferCapacity(env, buf);
+    long need = (long)w * h * 4;
+    if (src == NULL || cap < need) {
+        return;
+    }
+    pthread_mutex_lock(&g_dockLock);
+    if ((size_t)need > g_dockCap) {
+        free(g_dockBuf);
+        g_dockBuf = NULL;
+        g_dockCap = 0;
+    }
+    if (g_dockBuf == NULL) {
+        g_dockBuf = (unsigned char*)malloc(need > 0 ? (size_t)need : 1);
+        if (g_dockBuf != NULL) {
+            g_dockCap = (size_t)need;
+        }
+    }
+    if (g_dockBuf != NULL) {
+        memcpy(g_dockBuf, src, (size_t)need);
+        g_dockW = w;
+        g_dockH = h;
+        g_dockAspect = (float)w / (float)h;
+        g_dockFresh = 1;
+    }
+    pthread_mutex_unlock(&g_dockLock);
+}
+
 // Column-major 4x4 helpers.
 static void matMul44(float out[16], const float a[16], const float b[16]) {
     float t[16];
@@ -548,6 +605,17 @@ static void theaterGlInit(VrApp* app) {
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     app->texW = 0;
     app->texH = 0;
+
+    // SCAFFOLD (vr-split): dock texture shares the program/mesh; created here
+    // so the dock draw path never has to lazy-init GL objects mid-frame.
+    glGenTextures(1, &app->dockTex);
+    glBindTexture(GL_TEXTURE_2D, app->dockTex);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    app->dockTexW = 0;
+    app->dockTexH = 0;
 
     const int SU = THEATER_SEG_U, SV = THEATER_SEG_V;
     const int vcount = (SU + 1) * (SV + 1);
@@ -1034,6 +1102,83 @@ static int theaterPushTexture(VrApp* app) {
     return uploaded;
 }
 
+// SCAFFOLD (vr-split): uploads the latest control-dock frame. Mirrors
+// theaterPushTexture against the dock staging buffer.
+static int dockPushTexture(VrApp* app) {
+    int uploaded = (app->dockTexW > 0);
+    pthread_mutex_lock(&g_dockLock);
+    if (g_dockFresh && g_dockBuf != NULL && g_dockW > 0 && g_dockH > 0) {
+        glBindTexture(GL_TEXTURE_2D, app->dockTex);
+        if (g_dockW != app->dockTexW || g_dockH != app->dockTexH) {
+            glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA,
+                g_dockW, g_dockH, 0, GL_RGBA, GL_UNSIGNED_BYTE, g_dockBuf);
+            app->dockTexW = g_dockW;
+            app->dockTexH = g_dockH;
+        } else {
+            glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0,
+                g_dockW, g_dockH, GL_RGBA, GL_UNSIGNED_BYTE, g_dockBuf);
+        }
+        g_dockFresh = 0;
+        uploaded = 1;
+    }
+    pthread_mutex_unlock(&g_dockLock);
+    return uploaded;
+}
+
+/**
+ * SCAFFOLD (vr-split): draws the control-dock quad for one eye, reusing the
+ * theater program and curved mesh. No-op until the first control frame lands.
+ *
+ * TODO(vr-split):
+ *  - Replace the curved theater mesh with a small flat quad (own VBO).
+ *  - Apply DOCK_TILT_DEG as an X-rotation so the console tips toward the user.
+ *  - Controller ray hit-test against this quad -> 2D touch on the controls
+ *    bitmap (input path; currently the dock is view-only like the screen).
+ */
+static void dockDrawQuad(VrApp* app, const float vm[16], const float pm[16],
+        int eye) {
+    if (app->dockTexW <= 0) {
+        return;
+    }
+    if (!dockPushTexture(app)) {
+        return;
+    }
+    float dockAspect = g_dockAspect > 0.01f ? g_dockAspect : 1.7778f;
+    float s = DOCK_SCALE;
+    // Mesh y is absolute (centered on THEATER_Y); recenter so the dock lands
+    // on DOCK_Y instead of scaling about the world origin.
+    float scaleX = (THEATER_H * dockAspect) / (THEATER_R * THEATER_ARC) * s;
+    float model[16], tmp[16], mvp[16];
+    memset(model, 0, sizeof(model));
+    model[0] = scaleX;
+    model[5] = s;
+    model[10] = 1.0f;
+    model[15] = 1.0f;
+    model[12] = DOCK_X;
+    model[13] = DOCK_Y - s * THEATER_Y;
+    model[14] = DOCK_Z_PULL;
+    matMul44(tmp, vm, model);
+    matMul44(mvp, pm, tmp);
+
+    glUseProgram(app->screenProg);
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, app->dockTex);
+    glUniform1i(app->uniTex, 0);
+    glUniform1f(app->uniEye, (float)eye);
+    glUniform1f(app->uniSbs, 0.0f); /* dock is always flat */
+    glUniformMatrix4fv(app->uniMvp, 1, GL_FALSE, mvp);
+    glBindBuffer(GL_ARRAY_BUFFER, app->meshVbo);
+    glVertexAttribPointer(app->attrPos, 3, GL_FLOAT, GL_FALSE, 0, 0);
+    glEnableVertexAttribArray(app->attrPos);
+    glBindBuffer(GL_ARRAY_BUFFER, app->meshUvbo);
+    glVertexAttribPointer(app->attrUv, 2, GL_FLOAT, GL_FALSE, 0, 0);
+    glEnableVertexAttribArray(app->attrUv);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, app->meshIbo);
+    glDrawElements(GL_TRIANGLES, app->meshIndexCount, GL_UNSIGNED_SHORT, 0);
+    glDisableVertexAttribArray(app->attrPos);
+    glDisableVertexAttribArray(app->attrUv);
+}
+
 /**
  * Locates both views, renders the screen into each swapchain, and fills the
  * projection layer. Returns 1 when the layer is submittable.
@@ -1227,6 +1372,9 @@ static int theaterRenderViews(VrApp* app,
                     glDrawElements(GL_TRIANGLES, app->meshIndexCount, GL_UNSIGNED_SHORT, 0);
                         glDisableVertexAttribArray(app->attrPos);
                         glDisableVertexAttribArray(app->attrUv);
+                    // SCAFFOLD (vr-split): control dock renders into the same
+                    // eye framebuffer, below the sightline to the screen.
+                    dockDrawQuad(app, vm, pm, i);
                         rendered = 1;
                     } // showScreen
                     glBindFramebuffer(GL_FRAMEBUFFER, 0);
@@ -1288,6 +1436,11 @@ static void theaterShutdown(VrApp* app) {
     if (app->screenTex != 0) {
         glDeleteTextures(1, &app->screenTex);
         app->screenTex = 0;
+    }
+    // SCAFFOLD (vr-split)
+    if (app->dockTex != 0) {
+        glDeleteTextures(1, &app->dockTex);
+        app->dockTex = 0;
     }
     if (app->meshVbo != 0) {
         glDeleteBuffers(1, &app->meshVbo);

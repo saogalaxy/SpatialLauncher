@@ -42,6 +42,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import android.util.Base64;
 import android.util.DisplayMetrics;
 import android.util.Log;
+import android.util.TypedValue;
+import android.view.Gravity;
 import android.view.LayoutInflater;
 import android.view.MotionEvent;
 import android.view.PixelCopy;
@@ -6456,6 +6458,11 @@ public class PanelMainActivity extends AppCompatActivity {
         // source; the SBS surface readback (when stereo is on) happens inside
         // feedTheaterBridge via PixelCopy.
         feedTheaterBridge(frame, false);
+        // SCAFFOLD (vr-split): feed the control dock, then yield the stage
+        feedDockBridge(renderControlsBitmap());
+        if (lastTheaterActive) {
+            return;
+        }
         if (useGlesZMesh) {
             glesZMeshView.submit(
                     frame,
@@ -6510,6 +6517,7 @@ public class PanelMainActivity extends AppCompatActivity {
     }
 
     private static java.lang.reflect.Method theaterPush;
+    private static java.lang.reflect.Method theaterBarPush;
     private static java.lang.reflect.Method theaterIsActive;
     private static java.nio.ByteBuffer theaterPixels;
     private static int theaterPixelsCap;
@@ -6518,6 +6526,40 @@ public class PanelMainActivity extends AppCompatActivity {
     private static boolean theaterBridgePresent;
     private static boolean theaterFeedLogged;
     private static long theaterFeedCount;
+    // SCAFFOLD (vr-split): last known theater state, set by feedTheaterBridge.
+    // While true the VR session owns the stage and local panel drawing is skipped.
+    private static boolean lastTheaterActive;
+
+    // SCAFFOLD (vr-split): control-dock feed. Same reflection-only pattern as
+    // the theater feed so release/debug builds stay clean when :vr is absent.
+    private static java.lang.reflect.Method dockPush;
+    private static java.lang.reflect.Method dockIsActive;
+    private static java.nio.ByteBuffer dockPixels;
+    private static int dockPixelsCap;
+    private static long lastDockPushMs;
+    private static boolean dockBridgeChecked;
+    private static boolean dockBridgePresent;
+    private static boolean dockFeedLogged;
+
+    // SCAFFOLD (vr-split): offscreen control-strip render. Detached views only
+    // (never the activity window: the panel is paused while the theater owns
+    // the display). Rendered on the UI thread, cached, served to any thread.
+    // Fully inert when the :vr module is absent (bridge probe gates everything,
+    // so release/debug builds never allocate views or bitmaps for the dock).
+    private static final int DOCK_STRIP_W = 1024;
+    private static final int DOCK_STRIP_H = 256;
+    private static final long DOCK_RENDER_MIN_MS = 500;
+    private static boolean controlsBridgeChecked;
+    private static boolean controlsBridgePresent;
+    private final Object controlsLock = new Object();
+    private Bitmap controlsBitmap; // guarded by controlsLock; stable instance
+    private boolean controlsRenderPosted; // UI-thread refresh coalescing
+    private long lastControlsRenderMs;
+    private LinearLayout controlsStrip; // UI thread only
+    private ImageView controlsPlayView; // UI thread only
+    private ProgressBar controlsSeekView; // UI thread only
+    private TextView controlsStateView; // UI thread only
+
     private static final int THEATER_SBS_MAX_W = 2048;
     private final Handler theaterCopyHandler = new Handler(Looper.getMainLooper());
     private Bitmap theaterSbsBitmap;
@@ -6529,6 +6571,9 @@ public class PanelMainActivity extends AppCompatActivity {
      */
     private void feedTheaterBridge(Bitmap frame, boolean sbs) {
         try {
+            // SCAFFOLD (vr-split): default to inactive; set true only once the
+            // bridge confirms the session is live (covers every early return).
+            lastTheaterActive = false;
             long now = android.os.SystemClock.elapsedRealtime();
             if (now - lastTheaterPushMs < 100) {
                 return;
@@ -6540,6 +6585,14 @@ public class PanelMainActivity extends AppCompatActivity {
                     theaterIsActive = bridge.getMethod("isTheaterActive");
                     theaterPush = bridge.getMethod("pushFrame",
                             java.nio.ByteBuffer.class, int.class, int.class, boolean.class);
+                    // SCAFFOLD (vr-split): probe dock bridge too
+                    try {
+                        theaterBarPush = bridge.getMethod("pushBarStrip",
+                                java.nio.ByteBuffer.class, int.class, int.class);
+                        dockPush = bridge.getMethod("pushControlFrame",
+                                java.nio.ByteBuffer.class, int.class, int.class);
+                        dockIsActive = bridge.getMethod("isDockActive");
+                    } catch (Throwable ignored) {}
                     theaterBridgePresent = true;
                 } catch (Throwable t) {
                     Log.w(TAG, "theater bridge absent", t);
@@ -6553,6 +6606,7 @@ public class PanelMainActivity extends AppCompatActivity {
             if (!(active instanceof Boolean) || !((Boolean) active)) {
                 return;
             }
+            lastTheaterActive = true; // SCAFFOLD (vr-split)
             // Stereo on: push the composed SBS surface (both renderers draw
             // onto it) so pop-out survives into theater. Falls through to the
             // mono frame when the surface isn't capturable yet.
@@ -6687,6 +6741,212 @@ public class PanelMainActivity extends AppCompatActivity {
             }
         } catch (Throwable t) {
             Log.w(TAG, "theater push failed", t);
+        }
+    }
+
+    /**
+     * SCAFFOLD (vr-split): renders the control cluster into an offscreen bitmap
+     * for the VR dock quad. Detached view hierarchy with ONLY the controls
+     * (transport play state + seek, 3D toggle, mode readout — never the cast
+     * surface), measured + laid out at a fixed 1024x256 and drawn to a cached
+     * Bitmap-backed Canvas on the UI thread. Any thread may call: off-thread
+     * callers get the latest snapshot while a UI-thread refresh is posted
+     * (throttled). Null until the first render lands, and always null when the
+     * :vr module is absent so release/debug builds never do this work.
+     */
+    private Bitmap renderControlsBitmap() {
+        if (!controlsBridgeChecked) {
+            controlsBridgeChecked = true;
+            try {
+                Class.forName("com.spatiallauncher.vr.VrBridge");
+                controlsBridgePresent = true;
+            } catch (Throwable ignored) {
+                controlsBridgePresent = false;
+            }
+        }
+        if (!controlsBridgePresent) {
+            return null;
+        }
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            renderControlsNow();
+        } else {
+            long now = android.os.SystemClock.elapsedRealtime();
+            if (!controlsRenderPosted && now - lastControlsRenderMs >= DOCK_RENDER_MIN_MS) {
+                controlsRenderPosted = true;
+                theaterCopyHandler.post(() -> {
+                    controlsRenderPosted = false;
+                    try {
+                        renderControlsNow();
+                    } catch (Throwable t) {
+                        Log.w(TAG, "controls render failed", t);
+                    }
+                });
+            }
+        }
+        synchronized (controlsLock) {
+            return (controlsBitmap != null && !controlsBitmap.isRecycled()) ? controlsBitmap : null;
+        }
+    }
+
+    // SCAFFOLD (vr-split): UI thread only. Syncs the detached strip with live
+    // panel state and redraws the cached bitmap. All failures soft.
+    private void renderControlsNow() {
+        try {
+            if (isFinishing() || isDestroyed()) {
+                return;
+            }
+            if (controlsStrip == null) {
+                buildControlsStrip();
+                if (controlsStrip == null) {
+                    return;
+                }
+            }
+            boolean hasVideo = videoPlayer != null && videoPlaying;
+            boolean playing = hasVideo && videoPlayer.isPlaying();
+            controlsPlayView.setImageResource(playing
+                    ? android.R.drawable.ic_media_pause
+                    : android.R.drawable.ic_media_play);
+            int max = 1000;
+            int progress = 0;
+            if (videoBarSeek != null) {
+                max = Math.max(1, videoBarSeek.getMax());
+                progress = Math.max(0, Math.min(max, videoBarSeek.getProgress()));
+            }
+            controlsSeekView.setMax(max);
+            controlsSeekView.setProgress(progress);
+            String transport = !hasVideo ? "IDLE" : (playing ? "PLAYING" : "PAUSED");
+            String stereo = forceStereoEnabled ? "3D ON" : "3D OFF";
+            String assist = assistMode != null ? assistMode.name() : "?";
+            controlsStateView.setText(getString(R.string.dock_state_text, stereo, transport, assist));
+            controlsStrip.measure(
+                    View.MeasureSpec.makeMeasureSpec(DOCK_STRIP_W, View.MeasureSpec.EXACTLY),
+                    View.MeasureSpec.makeMeasureSpec(DOCK_STRIP_H, View.MeasureSpec.EXACTLY));
+            controlsStrip.layout(0, 0, DOCK_STRIP_W, DOCK_STRIP_H);
+            synchronized (controlsLock) {
+                if (controlsBitmap == null || controlsBitmap.isRecycled()
+                        || controlsBitmap.getWidth() != DOCK_STRIP_W
+                        || controlsBitmap.getHeight() != DOCK_STRIP_H) {
+                    if (controlsBitmap != null) {
+                        try {
+                            controlsBitmap.recycle();
+                        } catch (Throwable ignored) {
+                        }
+                    }
+                    controlsBitmap = Bitmap.createBitmap(
+                            DOCK_STRIP_W, DOCK_STRIP_H, Bitmap.Config.ARGB_8888);
+                }
+                Canvas canvas = new Canvas(controlsBitmap);
+                canvas.drawColor(Color.BLACK);
+                controlsStrip.draw(canvas);
+                lastControlsRenderMs = android.os.SystemClock.elapsedRealtime();
+            }
+        } catch (Throwable t) {
+            Log.w(TAG, "controls render failed", t);
+        }
+    }
+
+    // SCAFFOLD (vr-split): UI thread only. Builds the detached control strip:
+    // transport play glyph + seek, 3D toggle state, mode readout.
+    private void buildControlsStrip() {
+        LinearLayout strip = new LinearLayout(this);
+        strip.setOrientation(LinearLayout.HORIZONTAL);
+        strip.setGravity(Gravity.CENTER_VERTICAL);
+        strip.setBackgroundColor(Color.BLACK);
+        int pad = 28;
+        strip.setPadding(pad, pad, pad, pad);
+        ImageView play = new ImageView(this);
+        play.setImageResource(android.R.drawable.ic_media_play);
+        play.setColorFilter(Color.WHITE, android.graphics.PorterDuff.Mode.SRC_IN);
+        LinearLayout.LayoutParams playLp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT);
+        playLp.rightMargin = 32;
+        strip.addView(play, playLp);
+        ProgressBar seek = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
+        seek.setMax(1000);
+        seek.setProgress(0);
+        LinearLayout.LayoutParams seekLp = new LinearLayout.LayoutParams(
+                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
+        seekLp.rightMargin = 32;
+        strip.addView(seek, seekLp);
+        TextView state = new TextView(this);
+        state.setTextColor(Color.WHITE);
+        state.setTextSize(TypedValue.COMPLEX_UNIT_PX, 44);
+        state.setSingleLine(true);
+        strip.addView(state, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT));
+        controlsStrip = strip;
+        controlsPlayView = play;
+        controlsSeekView = seek;
+        controlsStateView = state;
+    }
+
+    /**
+     * SCAFFOLD (vr-split): pushes the control-cluster bitmap to the native
+     * dock quad. Mirrors feedTheaterBridge: reflection-only, throttled, all
+     * failures soft. No-op until the first control frame lands.
+     */
+    private void feedDockBridge(Bitmap controls) {
+        try {
+            long now = android.os.SystemClock.elapsedRealtime();
+            if (now - lastDockPushMs < 150) {
+                return;
+            }
+            if (!dockBridgeChecked) {
+                dockBridgeChecked = true;
+                try {
+                    Class<?> bridge = Class.forName("com.spatiallauncher.vr.VrBridge");
+                    dockIsActive = bridge.getMethod("isDockActive");
+                    dockPush = bridge.getMethod("pushControlFrame",
+                            java.nio.ByteBuffer.class, int.class, int.class);
+                    dockBridgePresent = true;
+                } catch (Throwable t) {
+                    Log.w(TAG, "dock bridge absent", t);
+                    dockBridgePresent = false;
+                }
+            }
+            if (!dockBridgePresent || dockPush == null || dockIsActive == null) {
+                return;
+            }
+            Object active = dockIsActive.invoke(null);
+            if (!(active instanceof Boolean) || !((Boolean) active)) {
+                return;
+            }
+            if (controls == null || controls.isRecycled()
+                    || controls.getConfig() != Bitmap.Config.ARGB_8888) {
+                return;
+            }
+            int w = controls.getWidth();
+            int h = controls.getHeight();
+            if (w <= 0 || h <= 0 || w > 1024 || h > 1024) {
+                return;
+            }
+            int need = w * h * 4;
+            if (dockPixels == null || dockPixelsCap < need) {
+                dockPixels = java.nio.ByteBuffer.allocateDirect(need);
+                dockPixelsCap = need;
+            }
+            dockPixels.clear();
+            try {
+                // Same lock the UI thread holds while redrawing the cached
+                // bitmap: no torn copies, no use-after-recycle.
+                synchronized (controlsLock) {
+                    controls.copyPixelsToBuffer(dockPixels);
+                }
+            } catch (Throwable t) {
+                Log.w(TAG, "dock pixel copy failed", t);
+                return;
+            }
+            dockPixels.flip();
+            lastDockPushMs = now;
+            dockPush.invoke(null, dockPixels, w, h);
+            if (!dockFeedLogged) {
+                dockFeedLogged = true;
+                Log.i(TAG, "dock feed live " + w + "x" + h);
+            }
+        } catch (Throwable t) {
+            Log.w(TAG, "dock feed failed", t);
         }
     }
 

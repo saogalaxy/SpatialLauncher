@@ -29,6 +29,30 @@ public final class VrBridge {
         return theaterActive;
     }
 
+    // ---- SCAFFOLD (vr-split): control-dock feed ----
+    // Second pipe: the panel's control cluster rendered offscreen, shown on a
+    // small dock quad below the theater screen (out of the sightline).
+    // Same reflection-only access pattern as the theater feed above.
+    private static volatile boolean dockActive = false;
+
+    public static void setDockActive(boolean active) {
+        dockActive = active;
+    }
+
+    public static boolean isDockActive() {
+        return dockActive;
+    }
+
+    /** Latest pushed dock frame dimensions (written with the pixel copy). */
+    public static volatile int dockFrameW;
+    public static volatile int dockFrameH;
+
+    /**
+     * Copies ARGB_8888 control-UI pixels into the native dock staging buffer.
+     * Always flat (no SBS): the dock is a 2D console, not a stereo surface.
+     */
+    public static native void pushControlFrame(ByteBuffer src, int w, int h);
+
     /** Latest pushed frame dimensions (written with the pixel copy). */
     public static volatile int frameW;
     public static volatile int frameH;
