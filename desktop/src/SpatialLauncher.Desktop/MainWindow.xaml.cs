@@ -3,11 +3,14 @@ using System.Drawing;
 using System.Drawing.Imaging;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
+using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 using SpatialLauncher.Desktop.Core;
 using SpatialLauncher.Desktop.Core.Capture;
 using SpatialLauncher.Desktop.Core.Listen;
+using SpatialLauncher.Desktop.Core.Ocr;
 using SpatialLauncher.Desktop.Core.Reader;
 using SpatialLauncher.Desktop.Core.Session;
 using SpatialLauncher.Desktop.Core.Stream;
@@ -31,6 +34,25 @@ public partial class MainWindow : Window
     private readonly DispatcherTimer _sourceRefreshTimer = new() { Interval = TimeSpan.FromSeconds(3) };
     private string? _selectedSourceId;
 
+    // OCR zone selector (headset parity): rubber-band zones on the preview,
+    // stored normalized in capture space. Empty = default lower band.
+    private const int MaxOcrZones = 6;
+    private readonly List<OcrZone> _ocrZones = new();
+    private bool _zoneEditMode;
+    private bool _zoneDragging;
+    private System.Windows.Point _dragStart;
+    private System.Windows.Point _dragNow;
+    private bool _previewIsSbs;
+    private int _previewBmpW;
+    private int _previewBmpH;
+    // Move/resize state for existing zones.
+    private ZoneDragMode _dragMode = ZoneDragMode.None;
+    private int _dragZoneIndex = -1;
+    private int _resizeCorner;
+    private System.Windows.Point _anchor;
+    private System.Windows.Point _grabOffset;
+    private OcrZone? _editZone;
+
     public MainWindow()
     {
         _settings = _settingsStore.Load();
@@ -52,6 +74,7 @@ public partial class MainWindow : Window
             UpdatePipelineLabel();
         });
         _session.QuestLink.SettingsGetJson = () => SessionSettingsJson.ToJson(_settings);
+        _session.QuestLink.ReaderOnce = () => _reader.SpeakOnceAsync();
         _session.QuestLink.SettingsApplyJson = json =>
         {
             if (!SessionSettingsJson.TryApply(json, _settings, out _))
@@ -62,8 +85,22 @@ public partial class MainWindow : Window
             Dispatcher.BeginInvoke(() =>
             {
                 _uiReady = false;
+                _mode = _settings.AssistMode;
                 ApplyUiFromSettings();
                 _uiReady = true;
+                // Mirror Mode_Click engine sync so a remote mode change behaves
+                // exactly like tapping the chips (Quest B button cycles these).
+                if (_mode == AssistMode.Listen)
+                {
+                    _reader.Stop();
+                    _listen.ApplySettings(_settings);
+                    if (!_listen.IsRunning) _listen.Start();
+                }
+                else
+                {
+                    if (_listen.IsRunning) _listen.Stop();
+                    SyncReaderRunning();
+                }
                 if (!string.IsNullOrEmpty(_session.QuestLinkUrl))
                     QuestLinkUrlBox.Text = _session.QuestLinkUrl;
                 StatusText.Text = "Settings updated from Quest";
@@ -79,9 +116,16 @@ public partial class MainWindow : Window
             StatusText.Text = "Listen: " + text;
         });
         _reader.FrameProvider = () => _session.Capture.CloneLatestFrame();
+        ZoneCanvas.MouseLeftButtonDown += ZoneCanvas_Down;
+        ZoneCanvas.MouseMove += ZoneCanvas_Move;
+        ZoneCanvas.MouseLeftButtonUp += ZoneCanvas_Up;
+        ZoneCanvas.MouseRightButtonDown += ZoneCanvas_Right;
+        ZoneCanvas.SizeChanged += (_, _) => DrawZones();
+        LoadOcrZones();
         ApplyUiFromSettings();
         UpdatePipelineLabel();
         _uiReady = true;
+        RefreshProfileList();
         SyncSettingsFromUi();
         if (_settings.AdvertiseOnLan)
             _session.StartLanAdvertise();
@@ -198,6 +242,11 @@ public partial class MainWindow : Window
                 return;
             }
             PreviewImage.Source = ToBitmapImage(frame);
+            var bmp = (System.Windows.Media.Imaging.BitmapImage)PreviewImage.Source;
+            _previewIsSbs = false;
+            _previewBmpW = bmp.PixelWidth;
+            _previewBmpH = bmp.PixelHeight;
+            DrawZones();
             PreviewHint.Visibility = Visibility.Collapsed;
             StatusText.Text = "Preview: " + source.DisplayName;
         }
@@ -230,6 +279,7 @@ public partial class MainWindow : Window
         }
         _reader.ApplySettings(_settings);
         SyncReaderRunning();
+        _ = RefreshUsbStatusAsync();
         StartButton.IsEnabled = false;
         StopButton.IsEnabled = true;
         PreviewHint.Visibility = Visibility.Collapsed;
@@ -252,6 +302,43 @@ public partial class MainWindow : Window
     }
 
     private void OpenViewer_Click(object sender, RoutedEventArgs e) => EnsureViewer();
+
+    private async void UsbLink_Click(object sender, RoutedEventArgs e)
+    {
+        UsbLinkButton.IsEnabled = false;
+        UsbLinkStatus.Text = "USB: setting up forward…";
+        try
+        {
+            var (ok, message) = await SpatialLauncher.Desktop.Core.Session.UsbLinkManager.EnsureForwardAsync();
+            if (ok)
+                await RefreshUsbStatusAsync();
+            else
+                UsbLinkStatus.Text = "USB link: OFF — " + message;
+            StatusText.Text = ok ? "USB link ready — use USB connect on Quest." : "USB link failed.";
+        }
+        catch (Exception ex)
+        {
+            UsbLinkStatus.Text = "USB link: OFF — " + ex.Message;
+        }
+        finally
+        {
+            UsbLinkButton.IsEnabled = true;
+        }
+    }
+
+    // Live indicator: device attached AND the tcp:8765 forward listed.
+    private async Task RefreshUsbStatusAsync()
+    {
+        try
+        {
+            var (on, detail) = await SpatialLauncher.Desktop.Core.Session.UsbLinkManager.CheckForwardAsync();
+            UsbLinkStatus.Text = on ? $"USB link: ON ({detail})" : $"USB link: OFF ({detail})";
+        }
+        catch
+        {
+            UsbLinkStatus.Text = "USB link: OFF (check failed)";
+        }
+    }
 
     private void EnsureViewer()
     {
@@ -280,8 +367,26 @@ public partial class MainWindow : Window
         {
             try
             {
-                var image = ToBitmapImage(bmp);
+                BitmapImage image;
+                bool isSbs = true;
+                if (PreviewMonoCheck?.IsChecked == true)
+                {
+                    int eyeW = Math.Max(1, bmp.Width / 2);
+                    using var one = new Bitmap(eyeW, bmp.Height, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+                    using (var g = Graphics.FromImage(one))
+                        g.DrawImage(bmp, 0, 0, new Rectangle(0, 0, eyeW, bmp.Height), GraphicsUnit.Pixel);
+                    image = ToBitmapImage(one);
+                    isSbs = false;
+                }
+                else
+                {
+                    image = ToBitmapImage(bmp);
+                }
                 PreviewImage.Source = image;
+                _previewIsSbs = isSbs;
+                _previewBmpW = image.PixelWidth;
+                _previewBmpH = image.PixelHeight;
+                DrawZones();
                 PreviewHint.Visibility = Visibility.Collapsed;
                 _viewer?.SetFrame(image);
             }
@@ -304,6 +409,356 @@ public partial class MainWindow : Window
         image.EndInit();
         image.Freeze();
         return image;
+    }
+
+    private void LoadOcrZones()
+    {
+        try
+        {
+            _ocrZones.Clear();
+            _ocrZones.AddRange(new OcrZoneStore().Load());
+        }
+        catch { /* default band */ }
+        UpdateZoneStatus();
+        DrawZones();
+    }
+
+    private void ZoneEdit_Click(object sender, RoutedEventArgs e)
+    {
+        _zoneEditMode = !_zoneEditMode;
+        ZoneEditButton.Content = _zoneEditMode ? "Edit zones: on" : "Edit zones: off";
+        ZoneCanvas.Cursor = _zoneEditMode ? System.Windows.Input.Cursors.Cross : null;
+        StatusText.Text = _zoneEditMode
+            ? "Drag on the preview (left eye while streaming) to add an OCR zone."
+            : "Ready";
+    }
+
+    private void ZoneClear_Click(object sender, RoutedEventArgs e)
+    {
+        _ocrZones.Clear();
+        _reader.SetZones(_ocrZones);
+        UpdateZoneStatus();
+        DrawZones();
+        StatusText.Text = "OCR zones cleared — default lower band.";
+    }
+
+    // Mono preview: one eye full-width for zone editing. Display only —
+    // the stream keeps its SBS layout either way.
+    private void PreviewMonoChanged(object sender, RoutedEventArgs e)
+    {
+        DrawZones();
+    }
+
+    private void UpdateZoneStatus()
+    {
+        ZoneStatusText.Text = _ocrZones.Count == 0
+            ? "Zones: default lower band"
+            : $"Zones: {_ocrZones.Count} custom";
+    }
+
+    private void ZoneCanvas_Down(object sender, MouseButtonEventArgs e)
+    {
+        if (!_zoneEditMode || _previewBmpW <= 0 || _previewBmpH <= 0) return;
+        var p = e.GetPosition(ZoneCanvas);
+        if (HitZone(p, out int index, out int corner))
+        {
+            _dragZoneIndex = index;
+            _editZone = CopyZone(_ocrZones[index]);
+            var r = ZoneCanvasRect(_ocrZones[index]);
+            if (corner >= 0)
+            {
+                _dragMode = ZoneDragMode.Resize;
+                _resizeCorner = corner;
+                _anchor = OppositeCorner(r, corner);
+            }
+            else
+            {
+                _dragMode = ZoneDragMode.Move;
+                _grabOffset = new System.Windows.Point(p.X - r.x, p.Y - r.y);
+            }
+            _zoneDragging = true;
+            ZoneCanvas.CaptureMouse();
+            e.Handled = true;
+            return;
+        }
+        _dragMode = ZoneDragMode.New;
+        _zoneDragging = true;
+        _dragStart = _dragNow = p;
+        ZoneCanvas.CaptureMouse();
+        e.Handled = true;
+    }
+
+    private void ZoneCanvas_Move(object sender, System.Windows.Input.MouseEventArgs e)
+    {
+        var p = e.GetPosition(ZoneCanvas);
+        if (!_zoneDragging)
+        {
+            if (_zoneEditMode)
+                ZoneCanvas.Cursor = HoverCursor(p);
+            return;
+        }
+        switch (_dragMode)
+        {
+            case ZoneDragMode.New:
+                _dragNow = p;
+                break;
+            case ZoneDragMode.Move:
+                {
+                    var r = ZoneCanvasRect(_ocrZones[_dragZoneIndex]);
+                    var moved = CanvasRectToZone(p.X - _grabOffset.X, p.Y - _grabOffset.Y, r.w, r.h);
+                    if (moved != null)
+                        _editZone = moved;
+                    break;
+                }
+            case ZoneDragMode.Resize:
+                {
+                    double x0 = Math.Min(_anchor.X, p.X), y0 = Math.Min(_anchor.Y, p.Y);
+                    double x1 = Math.Max(_anchor.X, p.X), y1 = Math.Max(_anchor.Y, p.Y);
+                    if (x1 - x0 < 8 || y1 - y0 < 8)
+                        break;
+                    var resized = CanvasRectToZone(x0, y0, x1 - x0, y1 - y0);
+                    if (resized != null)
+                        _editZone = resized;
+                    break;
+                }
+        }
+        DrawZones();
+        e.Handled = true;
+    }
+
+    private void ZoneCanvas_Up(object sender, MouseButtonEventArgs e)
+    {
+        if (!_zoneDragging) return;
+        _zoneDragging = false;
+        try { ZoneCanvas.ReleaseMouseCapture(); } catch { /* ignore */ }
+        if (_dragMode == ZoneDragMode.New)
+        {
+            var end = e.GetPosition(ZoneCanvas);
+            double rx = Math.Min(_dragStart.X, end.X), ry = Math.Min(_dragStart.Y, end.Y);
+            var zone = CanvasRectToZone(rx, ry, Math.Abs(end.X - _dragStart.X), Math.Abs(end.Y - _dragStart.Y));
+            if (zone != null)
+            {
+                if (_ocrZones.Count >= MaxOcrZones)
+                    _ocrZones.RemoveAt(0);
+                _ocrZones.Add(zone);
+                _reader.SetZones(_ocrZones);
+                UpdateZoneStatus();
+                StatusText.Text = $"OCR zone added ({_ocrZones.Count}/{MaxOcrZones}).";
+            }
+        }
+        else if (_dragZoneIndex >= 0 && _editZone != null)
+        {
+            _ocrZones[_dragZoneIndex] = _editZone;
+            _reader.SetZones(_ocrZones);
+            UpdateZoneStatus();
+            StatusText.Text = _dragMode == ZoneDragMode.Move ? "OCR zone moved." : "OCR zone resized.";
+        }
+        _dragMode = ZoneDragMode.None;
+        _dragZoneIndex = -1;
+        _editZone = null;
+        DrawZones();
+        e.Handled = true;
+    }
+
+    private void ZoneCanvas_Right(object sender, MouseButtonEventArgs e)
+    {
+        if (!_zoneEditMode) return;
+        if (HitZone(e.GetPosition(ZoneCanvas), out int index, out _))
+        {
+            _ocrZones.RemoveAt(index);
+            _reader.SetZones(_ocrZones);
+            UpdateZoneStatus();
+            DrawZones();
+            StatusText.Text = "OCR zone deleted.";
+            e.Handled = true;
+        }
+    }
+
+    private enum ZoneDragMode { None, New, Move, Resize }
+
+    private static OcrZone CopyZone(OcrZone z) => new() { X = z.X, Y = z.Y, W = z.W, H = z.H };
+
+    // Shared preview geometry: Uniform-stretch bitmap placement in the canvas,
+    // plus the eye/capture widths for SBS mapping (left eye carries capture).
+    private bool GetPreviewTransform(out double scale, out double ox, out double oy,
+        out double eyeW, out double capW)
+    {
+        scale = ox = oy = eyeW = capW = 0;
+        double canvasW = ZoneCanvas.ActualWidth, canvasH = ZoneCanvas.ActualHeight;
+        if (canvasW <= 0 || canvasH <= 0 || _previewBmpW <= 0 || _previewBmpH <= 0)
+            return false;
+        scale = Math.Min(canvasW / _previewBmpW, canvasH / _previewBmpH);
+        ox = (canvasW - _previewBmpW * scale) / 2.0;
+        oy = (canvasH - _previewBmpH * scale) / 2.0;
+        eyeW = _previewIsSbs ? _previewBmpW / 2.0 : _previewBmpW;
+        capW = _previewIsSbs ? (MirrorSession.EffectiveFullSbs(_settings) ? eyeW : eyeW * 2.0) : _previewBmpW;
+        return true;
+    }
+
+    // Normalized capture-space zone -> canvas rect (left eye).
+    private (double x, double y, double w, double h) ZoneCanvasRect(OcrZone z)
+    {
+        GetPreviewTransform(out var scale, out var ox, out var oy, out var eyeW, out _);
+        return (ox + z.X * eyeW * scale, oy + z.Y * _previewBmpH * scale,
+            z.W * eyeW * scale, z.H * _previewBmpH * scale);
+    }
+
+    // Canvas rect -> normalized capture-space zone (null when degenerate).
+    private OcrZone? CanvasRectToZone(double x, double y, double w, double h)
+    {
+        if (!GetPreviewTransform(out var scale, out var ox, out var oy, out var eyeW, out var capW))
+            return null;
+        double bx0 = Math.Clamp((x - ox) / scale, 0, eyeW);
+        double by0 = Math.Clamp((y - oy) / scale, 0, _previewBmpH);
+        double bw = Math.Min(w / scale, eyeW - bx0);
+        double bh = Math.Min(h / scale, _previewBmpH - by0);
+        if (bw < 8 || bh < 8)
+            return null;
+        double capH = _previewBmpH;
+        var zone = new OcrZone { X = bx0 / capW, Y = by0 / capH, W = bw / capW, H = bh / capH };
+        if (zone.W <= 0.005 || zone.H <= 0.005)
+            return null;
+        return zone;
+    }
+
+    private const double ZoneGrip = 10.0;
+
+    private static System.Windows.Point OppositeCorner((double x, double y, double w, double h) r, int corner) =>
+        corner switch
+        {
+            0 => new System.Windows.Point(r.x + r.w, r.y + r.h), // TL -> BR
+            1 => new System.Windows.Point(r.x, r.y + r.h),       // TR -> BL
+            2 => new System.Windows.Point(r.x, r.y),             // BR -> TL
+            _ => new System.Windows.Point(r.x + r.w, r.y),       // BL -> TR
+        };
+
+    // Topmost zone first; corners beat bodies. Corner index 0 TL,1 TR,2 BR,3 BL.
+    private bool HitZone(System.Windows.Point p, out int index, out int corner)
+    {
+        index = -1;
+        corner = -1;
+        if (!GetPreviewTransform(out _, out _, out _, out _, out _))
+            return false;
+        var rects = new System.Collections.Generic.List<(double x, double y, double w, double h)>();
+        for (int i = 0; i < _ocrZones.Count; i++)
+            rects.Add(ZoneCanvasRect(_ocrZones[i]));
+        for (int i = rects.Count - 1; i >= 0; i--)
+        {
+            var (x, y, w, h) = rects[i];
+            System.Windows.Point[] grips =
+            [
+                new(x, y), new(x + w, y), new(x + w, y + h), new(x, y + h)
+            ];
+            for (int c = 0; c < 4; c++)
+            {
+                if (Math.Abs(p.X - grips[c].X) <= ZoneGrip && Math.Abs(p.Y - grips[c].Y) <= ZoneGrip)
+                {
+                    index = i;
+                    corner = c;
+                    return true;
+                }
+            }
+        }
+        for (int i = rects.Count - 1; i >= 0; i--)
+        {
+            var (x, y, w, h) = rects[i];
+            if (p.X >= x && p.X <= x + w && p.Y >= y && p.Y <= y + h)
+            {
+                index = i;
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private System.Windows.Input.Cursor HoverCursor(System.Windows.Point p)
+    {
+        if (HitZone(p, out _, out int corner))
+        {
+            if (corner >= 0)
+                return (corner == 0 || corner == 2)
+                    ? System.Windows.Input.Cursors.SizeNWSE
+                    : System.Windows.Input.Cursors.SizeNESW;
+            return System.Windows.Input.Cursors.SizeAll;
+        }
+        return System.Windows.Input.Cursors.Cross;
+    }
+
+    private void DrawZones()
+    {
+        if (ZoneCanvas == null) return;
+        ZoneCanvas.Children.Clear();
+        double canvasW = ZoneCanvas.ActualWidth, canvasH = ZoneCanvas.ActualHeight;
+        if (canvasW <= 0 || canvasH <= 0 || _previewBmpW <= 0 || _previewBmpH <= 0)
+            return;
+        double scale = Math.Min(canvasW / _previewBmpW, canvasH / _previewBmpH);
+        double ox = (canvasW - _previewBmpW * scale) / 2.0;
+        double oy = (canvasH - _previewBmpH * scale) / 2.0;
+        double eyeW = _previewIsSbs ? _previewBmpW / 2.0 : _previewBmpW;
+        double capW = _previewIsSbs ? (MirrorSession.EffectiveFullSbs(_settings) ? eyeW : eyeW * 2.0) : _previewBmpW;
+        for (int i = 0; i < _ocrZones.Count; i++)
+        {
+            var z = (_dragZoneIndex == i && _editZone != null) ? _editZone : _ocrZones[i];
+            // Capture-normalized -> bitmap left eye -> canvas.
+            double bx0 = z.X * capW * (eyeW / capW);
+            double bw = z.W * capW * (eyeW / capW);
+            double by0 = z.Y * _previewBmpH;
+            double bh = z.H * _previewBmpH;
+            double rx = ox + bx0 * scale, ry = oy + by0 * scale;
+            double rw = bw * scale, rh = bh * scale;
+            AddZoneRect(rx, ry, rw, rh, false);
+            if (_zoneEditMode)
+                AddHandles(rx, ry, rw, rh);
+        }
+        if (_zoneDragging && _dragMode == ZoneDragMode.New)
+        {
+            double rx = Math.Min(_dragStart.X, _dragNow.X);
+            double ry = Math.Min(_dragStart.Y, _dragNow.Y);
+            double rw = Math.Abs(_dragNow.X - _dragStart.X);
+            double rh = Math.Abs(_dragNow.Y - _dragStart.Y);
+            AddZoneRect(rx, ry, rw, rh, true);
+        }
+    }
+
+    private void AddHandles(double x, double y, double w, double h)
+    {
+        const double s = 6.0;
+        System.Windows.Point[] grips =
+        [
+            new(x, y), new(x + w, y), new(x + w, y + h), new(x, y + h)
+        ];
+        foreach (var g in grips)
+        {
+            var r = new System.Windows.Shapes.Rectangle
+            {
+                Width = s,
+                Height = s,
+                Stroke = new SolidColorBrush(Colors.White),
+                StrokeThickness = 1,
+                Fill = new SolidColorBrush(Colors.Lime)
+            };
+            Canvas.SetLeft(r, g.X - s / 2);
+            Canvas.SetTop(r, g.Y - s / 2);
+            ZoneCanvas.Children.Add(r);
+        }
+    }
+
+    private void AddZoneRect(double x, double y, double w, double h, bool rubber)
+    {
+        if (w < 2 || h < 2) return;
+        var r = new System.Windows.Shapes.Rectangle
+        {
+            Width = w,
+            Height = h,
+            Stroke = new SolidColorBrush(rubber ? Colors.Yellow : Colors.Lime),
+            StrokeThickness = rubber ? 1 : 2,
+            Fill = System.Windows.Media.Brushes.Transparent
+        };
+        if (rubber)
+            r.StrokeDashArray = new DoubleCollection { 4, 2 };
+        Canvas.SetLeft(r, x);
+        Canvas.SetTop(r, y);
+        ZoneCanvas.Children.Add(r);
     }
 
     private void DepthPreset_Click(object sender, RoutedEventArgs e)
@@ -366,6 +821,127 @@ public partial class MainWindow : Window
         {
             StatusText.Text = "Save failed: " + ex.Message;
         }
+    }
+
+    private bool _refreshingProfiles;
+
+    private void RefreshProfileList()
+    {
+        _refreshingProfiles = true;
+        try
+        {
+            string keep = ProfileBox.Text;
+            var names = _settingsStore.ListProfiles();
+            ProfileBox.ItemsSource = names;
+            if (names.Contains(keep))
+                ProfileBox.SelectedItem = keep;
+        }
+        finally
+        {
+            _refreshingProfiles = false;
+        }
+    }
+
+    private void ProfileSave_Click(object sender, RoutedEventArgs e)
+    {
+        string name = (ProfileBox.Text ?? "").Trim();
+        if (string.IsNullOrEmpty(name))
+        {
+            StatusText.Text = "Type a profile name first, then Save profile.";
+            return;
+        }
+        try
+        {
+            SyncSettingsFromUi();
+            _settingsStore.SaveProfile(name, _settings);
+            RefreshProfileList();
+            ProfileBox.SelectedItem = name;
+            StatusText.Text = $"Profile '{name}' saved.";
+        }
+        catch (Exception ex)
+        {
+            StatusText.Text = "Profile save failed: " + ex.Message;
+        }
+    }
+
+    private void ProfileDelete_Click(object sender, RoutedEventArgs e)
+    {
+        string name = (ProfileBox.SelectedItem as string ?? ProfileBox.Text ?? "").Trim();
+        if (string.IsNullOrEmpty(name))
+        {
+            StatusText.Text = "Pick a profile to delete.";
+            return;
+        }
+        try
+        {
+            if (_settingsStore.DeleteProfile(name))
+            {
+                RefreshProfileList();
+                ProfileBox.Text = "";
+                StatusText.Text = $"Profile '{name}' deleted.";
+            }
+            else
+            {
+                StatusText.Text = $"Profile '{name}' not found.";
+            }
+        }
+        catch (Exception ex)
+        {
+            StatusText.Text = "Profile delete failed: " + ex.Message;
+        }
+    }
+
+    private void ProfileBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_refreshingProfiles || !_uiReady) return;
+        if (ProfileBox.SelectedItem is string name && !string.IsNullOrWhiteSpace(name))
+            ApplyProfile(name);
+    }
+
+    private void ApplyProfile(string name)
+    {
+        UserSettings? loaded;
+        try
+        {
+            loaded = _settingsStore.LoadProfile(name);
+        }
+        catch (Exception ex)
+        {
+            StatusText.Text = "Profile load failed: " + ex.Message;
+            return;
+        }
+        if (loaded == null)
+        {
+            StatusText.Text = $"Profile '{name}' not found.";
+            return;
+        }
+        _settings = loaded;
+        _mode = loaded.AssistMode;
+        _useOpus = loaded.UseOpusTranslate;
+        _session.ApplySettings(_settings);
+        _reader.ApplySettings(_settings);
+        _listen.ApplySettings(_settings);
+        _uiReady = false;
+        ApplyUiFromSettings();
+        _uiReady = true;
+        if (_mode == AssistMode.Listen)
+        {
+            _reader.Stop();
+            _listen.ApplySettings(_settings);
+            if (!_listen.IsRunning) _listen.Start();
+        }
+        else
+        {
+            if (_listen.IsRunning) _listen.Stop();
+            SyncReaderRunning();
+        }
+        try
+        {
+            _settingsStore.Save(_settings);
+        }
+        catch { /* profile already persisted; live file best-effort */ }
+        StatusText.Text = $"Profile '{name}' applied.";
+        UpdatePipelineLabel();
     }
 
     private void Mode_Click(object sender, RoutedEventArgs e)
@@ -573,6 +1149,7 @@ public partial class MainWindow : Window
                                   : "\nCaptions/OCR off · 3D/cast only")
                               + $" · Depth={_settings.DepthPreset} @{_settings.DepthHz}Hz"
                               + $" · {_session.DepthDeviceLabel}"
+                              + $" · {_session.DepthModelStatus}"
                               + $" · stream {_settings.StreamWidth}px "
                               + (_settings.StreamCodec switch
                               {

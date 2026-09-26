@@ -43,6 +43,7 @@ final class DesktopLinkAudioReceiver {
     private long firstPtsUs = -1;
     private long packetsRecv;
     private long packetsPlayed;
+    private int peakSinceLog;
 
     boolean isRunning() {
         return running;
@@ -300,10 +301,33 @@ final class DesktopLinkAudioReceiver {
             if (samples > 0 && track != null) {
                 int shorts = samples * CHANNELS;
                 ByteBuffer.wrap(pcmBytes).order(ByteOrder.LITTLE_ENDIAN).asShortBuffer().put(pcm, 0, shorts);
+                int peak = 0;
+                for (int i = 0; i < shorts; i++) {
+                    int v = Math.abs((int) pcm[i]);
+                    if (v > peak) {
+                        peak = v;
+                    }
+                }
+                if (peak > peakSinceLog) {
+                    peakSinceLog = peak;
+                }
                 try {
                     track.write(pcmBytes, 0, shorts * 2);
                 } catch (Exception e) {
                     Log.w(TAG, "AudioTrack write failed", e);
+                }
+                if (++packetsPlayed % 300 == 0) {
+                    String state;
+                    try {
+                        int ps = track.getPlayState();
+                        state = ps == AudioTrack.PLAYSTATE_PLAYING ? "playing"
+                                : ps == AudioTrack.PLAYSTATE_PAUSED ? "paused" : "stopped";
+                    } catch (Exception e) {
+                        state = "unknown";
+                    }
+                    Log.i(TAG, "playout played=" + packetsPlayed + " peak=" + peakSinceLog
+                            + " track=" + state);
+                    peakSinceLog = 0;
                 }
             }
             nextSeq++;

@@ -62,9 +62,13 @@ public sealed class UserSettings
         }
         else
         {
+            // Movies footage is slow and smooth, so it can take a much heavier blend
+            // than gaming without feeling laggy. The old 20% let DA3 noise through as
+            // per-frame disparity shimmer; edge-clean also runs higher so silhouettes
+            // stop smearing foreground into background.
             DepthHz = 30;
-            DepthTemporalSmoothPercent = 20;
-            EdgeCleanPercent = 55;
+            DepthTemporalSmoothPercent = 55;
+            EdgeCleanPercent = 70;
         }
     }
 }

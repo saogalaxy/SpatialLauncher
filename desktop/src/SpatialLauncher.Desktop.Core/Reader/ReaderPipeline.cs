@@ -46,6 +46,44 @@ public sealed class ReaderPipeline : IDisposable
         _zoneStore.Save(zones);
     }
 
+    /// <summary>
+    /// Controller one-shot (Quest A button): OCR the current frame and speak
+    /// it once, bypassing the settle/dedupe of the continuous loop. Explicit
+    /// user action, so it speaks even when continuous TTS is off.
+    /// </summary>
+    public async Task<string> SpeakOnceAsync()
+    {
+        try
+        {
+            if (FrameProvider == null)
+                return "";
+            using var frame = FrameProvider();
+            if (frame == null)
+                return "";
+            string raw = await _ocr.RecognizeAsync(frame, _zones);
+            raw = raw.Replace('\n', ' ').Trim();
+            if (string.IsNullOrEmpty(raw))
+                return "";
+            bool translate = _settings.UseOpusTranslate
+                             && _settings.AssistMode is AssistMode.Translate or AssistMode.Share;
+            string spoken = translate
+                ? await _opus.ToEnglishAsync(raw, true)
+                : await _opus.ToEnglishAsync(raw, false);
+            _shareCaption = spoken;
+            CaptionChanged?.Invoke(spoken);
+            // Explicit button press: force re-speak even if the text matches
+            // the last utterance (SpeechEngine drops identical repeats).
+            _tts.Speak(spoken, force: true);
+            StatusChanged?.Invoke("Spoke once: " + Truncate(spoken, 80));
+            return spoken;
+        }
+        catch (Exception ex)
+        {
+            StatusChanged?.Invoke("Speak once: " + ex.Message);
+            return "";
+        }
+    }
+
     public void Start()
     {
         Stop();

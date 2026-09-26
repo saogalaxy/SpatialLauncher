@@ -32,6 +32,14 @@
           <TextBlock Text="Session" FontSize="16" FontWeight="SemiBold" Margin="0,0,0,4"/>
           <TextBlock TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" FontSize="11" Margin="0,0,0,8"
                      Text="Pick Primary monitor for fullscreen games, then Start Session. Quest Desktop Link auto-finds this PC."/>
+          <TextBlock Text="Profiles" FontWeight="SemiBold" Margin="0,0,0,2"/>
+          <ComboBox x:Name="ProfileBox" IsEditable="True" Margin="0,0,0,4"
+                    ToolTip="Pick a saved profile to apply it, or type a name and Save"
+                    SelectionChanged="ProfileBox_SelectionChanged"/>
+          <WrapPanel Margin="0,0,0,6">
+            <Button x:Name="ProfileSaveButton" Content="Save profile" Padding="10,4" Click="ProfileSave_Click" Margin="0,0,8,0"/>
+            <Button x:Name="ProfileDeleteButton" Content="Delete" Padding="10,4" Click="ProfileDelete_Click"/>
+          </WrapPanel>
           <DockPanel Margin="0,0,0,6">
             <Button DockPanel.Dock="Right" Content="Refresh" Padding="10,4" Click="RefreshSources_Click"/>
             <TextBlock Text="Sources" VerticalAlignment="Center" FontWeight="SemiBold"/>
@@ -91,9 +99,9 @@
                        Text="Headset mirrors PC speakers to Quest as Opus over UDP (both play). Start Session, connect Quest."/>
 
             <CheckBox x:Name="Live3dCheck" Content="Live 3D — depth warp on PC" IsChecked="True" Margin="0,2,0,2" Checked="SettingsChanged" Unchecked="SettingsChanged"/>
-            <CheckBox x:Name="FullSbsCheck" Content="Full SBS — for Virtual Desktop / Immersed" Margin="0,2,0,2" Checked="SettingsChanged" Unchecked="SettingsChanged"/>
+            <CheckBox x:Name="FullSbsCheck" Content="Full SBS — JPEG only (MPEG/AV1 always full)" Margin="0,2,0,2" Checked="SettingsChanged" Unchecked="SettingsChanged"/>
             <TextBlock TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" FontSize="10" Margin="0,0,0,6"
-                       Text="OFF = Half SBS for Spatial Launcher on Quest. ON = Full SBS for VD (set VD to Full SBS)."/>
+                       Text="OFF = Half SBS for Spatial Launcher on Quest (JPEG). MPEG/AV1 always render full SBS."/>
 
             <TextBlock x:Name="StreamWidthLabel" Text="Stream width 1920 — capture size sent to Quest" Margin="0,4,0,2" FontSize="12"/>
             <Slider x:Name="StreamWidthSlider" Minimum="1280" Maximum="2560" Value="1920" TickFrequency="160" IsSnapToTickEnabled="True" ValueChanged="SettingsChanged"/>
@@ -138,6 +146,10 @@
             <TextBlock TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" FontSize="10" Margin="0,6,0,0"
                        Text="Change depth/quality from Quest Desktop Link controls while streaming — no need to leave fullscreen on PC."/>
             <Button Content="Open SBS Viewer (optional)" Margin="0,8,0,0" Height="28" Click="OpenViewer_Click"/>
+            <Button x:Name="UsbLinkButton" Content="Enable USB link" Margin="0,8,0,0" Height="28" Click="UsbLink_Click"
+                    ToolTip="Forward Quest USB localhost:8765 to this PC (video + settings; audio stays on Wi-Fi)"/>
+            <TextBlock x:Name="UsbLinkStatus" TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" FontSize="10" Margin="0,4,0,0"
+                       Text="USB: not forwarded — plug in Quest 3 with USB debugging on."/>
           </StackPanel>
         </ScrollViewer>
       </Grid>
@@ -147,8 +159,9 @@
                   Background="Transparent" ResizeBehavior="PreviousAndNext" ShowsPreview="True"/>
 
     <Border Grid.Column="2" Background="Black" CornerRadius="10">
-      <Grid>
+      <Grid x:Name="PreviewHost">
         <Image x:Name="PreviewImage" Stretch="Uniform"/>
+        <Canvas x:Name="ZoneCanvas" Background="Transparent"/>
         <TextBlock x:Name="PreviewHint" Text="Select a source to preview - Start Session to stream"
                    HorizontalAlignment="Center" VerticalAlignment="Center"
                    Foreground="{StaticResource MutedBrush}" TextAlignment="Center"/>
@@ -192,6 +205,18 @@
 
           <TextBlock Text="OCR smoothness" Margin="0,4,0,2"/>
           <Slider x:Name="OcrSmoothSlider" Minimum="0" Maximum="100" Value="55" ValueChanged="SettingsChanged"/>
+          <TextBlock Text="OCR zones" Margin="0,8,0,2"/>
+          <TextBlock TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" FontSize="10" Margin="0,0,0,4"
+                     Text="Drag on the preview to add a zone (left eye while streaming). Drag inside to move, corners to resize, right-click to delete."/>
+          <WrapPanel>
+            <Button x:Name="ZoneEditButton" Content="Edit zones: off" Click="ZoneEdit_Click" Margin="0,0,8,0"/>
+            <Button x:Name="ZoneClearButton" Content="Clear zones" Click="ZoneClear_Click" Margin="0,0,8,0"/>
+            <CheckBox x:Name="PreviewMonoCheck" Content="Mono preview" VerticalAlignment="Center"
+                      Checked="PreviewMonoChanged" Unchecked="PreviewMonoChanged"
+                      ToolTip="Show one eye full-width while streaming — easier zone editing (stream unaffected)"/>
+          </WrapPanel>
+          <TextBlock x:Name="ZoneStatusText" FontSize="11" Foreground="{StaticResource MutedBrush}" Margin="0,4,0,0"
+                     Text="Zones: default lower band"/>
           <TextBlock Text="Read speed" Margin="0,8,0,2"/>
           <Slider x:Name="TtsSpeedSlider" Minimum="50" Maximum="200" Value="100" ValueChanged="SettingsChanged"/>
 

@@ -33,9 +33,28 @@ public sealed class MirrorSession : IDisposable
     public bool DepthModelLoaded => _depth?.HasOnnxModel == true;
     public string DepthModelLabel => _depth?.ModelLabel ?? "none";
     public string DepthDeviceLabel => _depth?.DeviceLabel ?? "none";
+
+    /// <summary>
+    /// Model actually in use. Surfaces a loud warning when inference failed and
+    /// brightness is standing in for depth, so a broken model can't look like a
+    /// working one.
+    /// </summary>
+    public string DepthModelStatus =>
+        _depth == null ? "no depth model"
+        : _depth.FellBackToLuminance
+            ? _depth.ModelLabel + " BROKEN - warping by brightness, not depth"
+            : _depth.ModelLabel;
     private DepthPreset _loadedPreset;
     public FrameCaptureService Capture => _capture;
     public QuestLinkServer QuestLink => _questLink;
+
+    /// <summary>
+    /// Compressed codecs always render full SBS (bandwidth allows full-res
+    /// eyes); the toggle covers MJPEG, where full SBS doubles the JPEG bytes.
+    /// </summary>
+    public static bool EffectiveFullSbs(UserSettings settings) =>
+        settings.FullSbs
+        || settings.StreamCodec is StreamCodec.H264 or StreamCodec.Av1;
     public DiscoveryAdvertiser Discovery => _discovery;
     public AudioLinkStreamer Audio => _audio;
     public string? QuestLinkUrl => _questLink.AdvertiseUrl;
@@ -45,7 +64,7 @@ public sealed class MirrorSession : IDisposable
         _settings = settings;
         _capture.WorkWidth = Math.Clamp(settings.StreamWidth, 960, 3840);
         int q = Math.Clamp(settings.JpegQuality, 50, 98);
-        if (settings.FullSbs)
+        if (EffectiveFullSbs(settings))
             q = Math.Max(50, q - 8);
         _questLink.JpegQuality = q;
         _questLink.SharpenPercent = Math.Clamp(settings.SharpenPercent, 0, 80);
@@ -289,7 +308,7 @@ public sealed class MirrorSession : IDisposable
 
             try
             {
-                bool fullSbs = _settings.FullSbs;
+                bool fullSbs = EffectiveFullSbs(_settings);
                 Bitmap sbs;
                 var depth = _cachedDepth;
                 if (_settings.Live3D && depth != null)

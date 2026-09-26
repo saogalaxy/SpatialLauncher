@@ -57,6 +57,18 @@ public static class SessionSettingsJson
                     : DepthPreset.Gaming;
                 target.ApplyDepthPresetDefaults();
             }
+            if (!string.IsNullOrWhiteSpace(patch.AssistMode))
+            {
+                string m = patch.AssistMode.Trim().ToLowerInvariant();
+                if (m.StartsWith("trans")) target.AssistMode = AssistMode.Translate;
+                else if (m.StartsWith("share")) target.AssistMode = AssistMode.Share;
+                else if (m.StartsWith("listen")) target.AssistMode = AssistMode.Listen;
+                else if (m.StartsWith("read")) target.AssistMode = AssistMode.Read;
+            }
+            if (patch.TtsContinuous.HasValue)
+                target.TtsContinuous = patch.TtsContinuous.Value;
+            if (patch.TtsEnabled.HasValue)
+                target.TtsEnabled = patch.TtsEnabled.Value;
             return true;
         }
         catch (Exception ex)
@@ -106,6 +118,9 @@ public static class SessionSettingsJson
         public string? Codec { get; set; }
         public string? Audio { get; set; }
         public string? DepthPreset { get; set; }
+        public string? AssistMode { get; set; }
+        public bool? TtsContinuous { get; set; }
+        public bool? TtsEnabled { get; set; }
 
         public Dict() { }
 
@@ -126,6 +141,9 @@ public static class SessionSettingsJson
             DepthPreset = s.DepthPreset == global::SpatialLauncher.Desktop.Core.DepthPreset.Movies
                 ? "movies"
                 : "gaming";
+            AssistMode = s.AssistMode.ToString().ToLowerInvariant();
+            TtsContinuous = s.TtsContinuous;
+            TtsEnabled = s.TtsEnabled;
         }
     }
 }

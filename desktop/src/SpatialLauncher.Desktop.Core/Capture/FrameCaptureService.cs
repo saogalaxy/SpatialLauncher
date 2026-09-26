@@ -170,20 +170,70 @@ public sealed class FrameCaptureService : IDisposable
     {
         maxWidth = Math.Clamp(maxWidth, 960, 3840);
         if (source.Kind == CaptureSourceKind.Monitor)
-            return GrabRegionScaled(MonitorBounds(source.MonitorIndex), maxWidth);
+        {
+            var bounds = MonitorBounds(source.MonitorIndex);
+            var bmp = GrabRegionScaled(bounds, maxWidth);
+            if (bmp != null && bounds is Rectangle r)
+                DrawCursor(bmp, r);
+            return bmp;
+        }
         if (source.Hwnd == IntPtr.Zero || !IsWindow(source.Hwnd))
             return null;
         if (!GetWindowRect(source.Hwnd, out RECT wnd) || wnd.Width <= 4 || wnd.Height <= 4)
             return null;
-        var scaled = GrabRegionScaled(new Rectangle(wnd.Left, wnd.Top, wnd.Width, wnd.Height), maxWidth);
+        var wndRect = new Rectangle(wnd.Left, wnd.Top, wnd.Width, wnd.Height);
+        var scaled = GrabRegionScaled(wndRect, maxWidth);
         if (scaled != null)
+        {
+            DrawCursor(scaled, wndRect);
             return scaled;
+        }
         var printed = PrintWindowBitmap(source.Hwnd);
         if (printed == null) return null;
         var down = Downscale(printed, maxWidth);
         if (!ReferenceEquals(down, printed))
             printed.Dispose();
+        POINT origin = new() { X = 0, Y = 0 };
+        if (ClientToScreen(source.Hwnd, ref origin))
+            DrawCursor(down, new Rectangle(origin.X, origin.Y, down.Width, down.Height));
         return down;
+    }
+
+    /// <summary>
+    /// GDI blits never include the mouse pointer, so composite it per frame.
+    /// Best-effort: any failure leaves the frame untouched.
+    /// </summary>
+    private static void DrawCursor(Bitmap frame, Rectangle srcBounds)
+    {
+        try
+        {
+            var ci = new CURSORINFO { cbSize = Marshal.SizeOf<CURSORINFO>() };
+            if (!GetCursorInfo(ref ci) || (ci.flags & CURSOR_SHOWING) == 0 || ci.hCursor == IntPtr.Zero)
+                return;
+            int hx = 0, hy = 0;
+            try
+            {
+                if (GetIconInfo(ci.hCursor, out ICONINFO ii))
+                {
+                    hx = ii.xHotspot;
+                    hy = ii.yHotspot;
+                    if (ii.hbmMask != IntPtr.Zero) DeleteObject(ii.hbmMask);
+                    if (ii.hbmColor != IntPtr.Zero) DeleteObject(ii.hbmColor);
+                }
+            }
+            catch { /* default tip */ }
+            float s = (float)frame.Width / Math.Max(1, srcBounds.Width);
+            int cx = (int)((ci.ptScreenPos.X - srcBounds.X) * s - hx * s);
+            int cy = (int)((ci.ptScreenPos.Y - srcBounds.Y) * s - hy * s);
+            int cw = Math.Max(8, (int)(32 * s)), ch = Math.Max(8, (int)(32 * s));
+            if (cx >= frame.Width || cy >= frame.Height || cx + cw <= 0 || cy + ch <= 0)
+                return;
+            // Clone: the FromHandle wrapper must never own (destroy) the shared cursor.
+            using var icon = (Icon)Icon.FromHandle(ci.hCursor).Clone();
+            using var g = Graphics.FromImage(frame);
+            g.DrawIcon(icon, new Rectangle(cx, cy, cw, ch));
+        }
+        catch { /* cursor is best-effort */ }
     }
 
     private static Rectangle? MonitorBounds(int index)
@@ -283,7 +333,35 @@ public sealed class FrameCaptureService : IDisposable
         public int Height => Bottom - Top;
     }
 
+    [StructLayout(LayoutKind.Sequential)]
+    private struct POINT
+    {
+        public int X, Y;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct CURSORINFO
+    {
+        public int cbSize;
+        public int flags;
+        public IntPtr hCursor;
+        public POINT ptScreenPos;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct ICONINFO
+    {
+        public bool fIcon;
+        public int xHotspot, yHotspot;
+        public IntPtr hbmMask, hbmColor;
+    }
+
+    private const int CURSOR_SHOWING = 0x00000001;
+
     [DllImport("user32.dll")] private static extern bool IsWindow(IntPtr hWnd);
+    [DllImport("user32.dll")] private static extern bool GetCursorInfo(ref CURSORINFO pci);
+    [DllImport("user32.dll")] private static extern bool GetIconInfo(IntPtr hIcon, out ICONINFO piconinfo);
+    [DllImport("user32.dll")] private static extern bool ClientToScreen(IntPtr hWnd, ref POINT lpPoint);
     [DllImport("user32.dll")] private static extern bool GetClientRect(IntPtr hWnd, out RECT lpRect);
     [DllImport("user32.dll")] private static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
     [DllImport("user32.dll")] private static extern IntPtr GetDC(IntPtr hWnd);

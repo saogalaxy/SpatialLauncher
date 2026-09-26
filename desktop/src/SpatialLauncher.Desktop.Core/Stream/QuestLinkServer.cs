@@ -83,6 +83,8 @@ public sealed class QuestLinkServer : IDisposable
     public Func<string>? SettingsGetJson { get; set; }
     /// <summary>POST /settings body → apply; return updated JSON or null on failure.</summary>
     public Func<string, string?>? SettingsApplyJson { get; set; }
+    /// <summary>Controller one-shot (Quest A): OCR current frame + speak once.</summary>
+    public Func<Task<string>>? ReaderOnce { get; set; }
     /// <summary>Optional audio diagnostics blob for GET /status.</summary>
     public Func<string>? AudioDebugJson { get; set; }
 
@@ -193,11 +195,14 @@ public sealed class QuestLinkServer : IDisposable
                     try
                     {
                         _av1.Ensure(src.Width, src.Height, kbps);
-                        // Force a key-ish AU frequently for low-latency desktop share.
-                        bool wantKey = true;
+                        // Same 1 Hz key cadence as MPEG: every-AU keys starve
+                        // inter frames into mushy pixelation on detail-heavy
+                        // content (Movies preset shows it first).
+                        long nowAv1 = Environment.TickCount64;
+                        bool wantKey = _lastKeyTick == 0 || nowAv1 - _lastKeyTick >= 1000;
                         bytes = _av1.Encode(src, forceKeyFrame: wantKey);
-                        if (bytes != null)
-                            _lastKeyTick = Environment.TickCount64;
+                        if (wantKey)
+                            _lastKeyTick = nowAv1;
                     }
                     catch (Exception ex)
                     {
@@ -281,7 +286,7 @@ public sealed class QuestLinkServer : IDisposable
         }
     }
 
-    private void HandleClient(TcpClient client)
+    private async Task HandleClient(TcpClient client)
     {
         using (client)
         using (var stream = client.GetStream())
@@ -294,6 +299,21 @@ public sealed class QuestLinkServer : IDisposable
                 if (path.StartsWith("/settings", StringComparison.OrdinalIgnoreCase))
                 {
                     HandleSettings(stream, method, body);
+                    return;
+                }
+
+                if (path.Equals("/reader/once", StringComparison.OrdinalIgnoreCase))
+                {
+                    string text = "";
+                    try
+                    {
+                        if (ReaderOnce != null)
+                            text = await ReaderOnce();
+                    }
+                    catch { /* empty */ }
+                    byte[] onceBody = Encoding.UTF8.GetBytes(
+                        $"{{\"ok\":true,\"text\":{JsonString(text)}}}");
+                    WriteHttp(stream, "200 OK", "application/json", onceBody);
                     return;
                 }
 

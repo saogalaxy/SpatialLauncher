@@ -104,6 +104,8 @@ public class DesktopLinkActivity extends AppCompatActivity implements SurfaceHol
     private Button codecAv1Btn;
     private Button presetGamingBtn;
     private Button presetMoviesBtn;
+    private Button speakScreenBtn;
+    private ToggleButton continuousToggle;
     private String selectedCodec = "mjpeg";
     private String selectedPreset = "gaming";
     private volatile boolean applyingRemote;
@@ -205,6 +207,20 @@ public class DesktopLinkActivity extends AppCompatActivity implements SurfaceHol
         presetMoviesBtn = findViewById(R.id.desktop_link_preset_movies);
         findViewById(R.id.desktop_link_min).setOnClickListener(v -> minimizeChrome());
         findViewById(R.id.desktop_link_exit).setOnClickListener(v -> finish());
+        Button usbBtn = findViewById(R.id.desktop_link_usb);
+        if (usbBtn != null) {
+            usbBtn.setOnClickListener(v -> connectUsb());
+        }
+        // Reader controls (on-screen: controller key events are eaten by the
+        // system here — B arrives as Back, A never arrives).
+        speakScreenBtn = findViewById(R.id.desktop_link_speak_screen);
+        continuousToggle = findViewById(R.id.desktop_link_continuous);
+        if (speakScreenBtn != null) {
+            speakScreenBtn.setOnClickListener(v -> speakPcFrameOnce());
+        }
+        if (continuousToggle != null) {
+            continuousToggle.setOnClickListener(v -> togglePcContinuous());
+        }
         tapCatcher.setOnClickListener(v -> {
             if (chromeHidden) {
                 if (System.currentTimeMillis() < chromeLockedUntil) {
@@ -303,6 +319,61 @@ public class DesktopLinkActivity extends AppCompatActivity implements SurfaceHol
             main.postDelayed(this, 2500);
         }
     };
+
+    /**
+     * USB link: the PC forwards its :8765 over adb, so the stream lives at
+     * Quest localhost. Same path as LAN discovery from here on; audio has no
+     * UDP forward and stays on Wi-Fi.
+     */
+    private void connectUsb() {
+        String next = "http://127.0.0.1:8765/" + codecPathSuffix(selectedCodec);
+        urlInput.setText(next);
+        getSharedPreferences(PREFS, MODE_PRIVATE).edit().putString(KEY_URL, next).apply();
+        setStatus(getString(R.string.desktop_link_usb_hint));
+        Log.i(TAG, "USB connect -> " + next);
+        probeUsbLink();
+        boolean workerAlive = worker != null && worker.isAlive();
+        if (!streamDesired || !workerAlive) {
+            forceReconnect();
+        }
+    }
+
+    /** Live indicator: can we actually reach the PC through the USB forward? */
+    private void probeUsbLink() {
+        new Thread(() -> {
+            HttpURLConnection c = null;
+            try {
+                c = (HttpURLConnection) new URL("http://127.0.0.1:8765/status").openConnection();
+                c.setConnectTimeout(2500);
+                c.setReadTimeout(2500);
+                c.setRequestMethod("GET");
+                if (c.getResponseCode() != 200) {
+                    setStatus(getString(R.string.desktop_link_usb_hint));
+                    return;
+                }
+                ByteArrayOutputStream bos = new ByteArrayOutputStream();
+                InputStream in = c.getInputStream();
+                byte[] buf = new byte[2048];
+                int n;
+                while ((n = in.read(buf)) >= 0) bos.write(buf, 0, n);
+                String body = bos.toString("UTF-8");
+                boolean live = body.contains("\"sessionActive\":true");
+                if (body.contains("\"ok\":true")) {
+                    setStatus(live ? getString(R.string.desktop_link_usb_live)
+                            : getString(R.string.desktop_link_usb_forward_only));
+                } else {
+                    setStatus(getString(R.string.desktop_link_usb_hint));
+                }
+            } catch (Exception e) {
+                Log.w(TAG, "USB probe failed", e);
+                setStatus(getString(R.string.desktop_link_usb_hint));
+            } finally {
+                if (c != null) {
+                    c.disconnect();
+                }
+            }
+        }, "DesktopLinkUsbProbe").start();
+    }
 
     private void startDiscovery(boolean autoConnect) {
         if (discoverThread != null && discoverThread.isAlive()) {
@@ -2180,5 +2251,128 @@ public class DesktopLinkActivity extends AppCompatActivity implements SurfaceHol
 
     private void setStatus(String msg) {
         main.post(() -> status.setText(msg));
+    }
+
+    /**
+     * Reader controls while linked (on-screen buttons: controller key events
+     * never arrive here — B is eaten by the system as Back, A never arrives).
+     * Speak reads one OCR pass of the current frame (manual one-shot; the
+     * pipeline covers continuous). Gated on a live stream.
+     */
+
+    private void togglePcContinuous() {
+        if (!(wantStream || running)) {
+            setStatus(getString(R.string.desktop_link_waiting_session));
+            return;
+        }
+        new Thread(() -> {
+            try {
+                String base = settingsBaseUrl();
+                if (base == null) {
+                    return;
+                }
+                boolean current = fetchPcTtsContinuous(base + "/settings");
+                JSONObject body = new JSONObject();
+                body.put("ttsContinuous", !current);
+                postJson(base + "/settings", body.toString());
+                main.post(() -> {
+                    if (continuousToggle != null) {
+                        continuousToggle.setChecked(!current);
+                    }
+                });
+                setStatus("PC continuous: " + (!current ? "on" : "off"));
+                Log.i(TAG, "reader button -> PC ttsContinuous " + (!current));
+            } catch (Exception e) {
+                Log.w(TAG, "PC continuous toggle failed", e);
+            }
+        }, "DesktopLinkPcTts").start();
+    }
+
+    private void speakPcFrameOnce() {
+        if (!(wantStream || running)) {
+            setStatus(getString(R.string.desktop_link_waiting_session));
+            return;
+        }
+        new Thread(() -> {
+            try {
+                String base = settingsBaseUrl();
+                if (base == null) {
+                    return;
+                }
+                String resp = postJson(base + "/reader/once", "{}");
+                String text = "";
+                try {
+                    text = new JSONObject(resp).optString("text", "");
+                } catch (Exception ignored) {
+                }
+                if (!text.isEmpty()) {
+                    setStatus(text);
+                } else {
+                    setStatus(getString(R.string.desktop_link_speak_empty));
+                }
+                Log.i(TAG, "reader button -> PC speak-once (" + text.length() + " chars)");
+            } catch (Exception e) {
+                Log.w(TAG, "PC speak-once failed", e);
+            }
+        }, "DesktopLinkPcSpeak").start();
+    }
+
+    private String settingsBaseUrl() {
+        String stream = urlInput.getText() != null ? urlInput.getText().toString().trim() : "";
+        if (stream.isEmpty()) return null;
+        int slash = stream.lastIndexOf('/');
+        if (slash <= "http://x".length()) return null;
+        return stream.substring(0, slash);
+    }
+
+    private boolean fetchPcTtsContinuous(String url) {
+        HttpURLConnection c = null;
+        try {
+            c = (HttpURLConnection) new URL(url).openConnection();
+            c.setConnectTimeout(2500);
+            c.setReadTimeout(2500);
+            c.setRequestMethod("GET");
+            if (c.getResponseCode() != 200) {
+                return false;
+            }
+            ByteArrayOutputStream bos = new ByteArrayOutputStream();
+            InputStream in = c.getInputStream();
+            byte[] buf = new byte[2048];
+            int n;
+            while ((n = in.read(buf)) >= 0) bos.write(buf, 0, n);
+            return new JSONObject(bos.toString("UTF-8")).optBoolean("ttsContinuous", false);
+        } catch (Exception e) {
+            Log.w(TAG, "PC ttsContinuous fetch failed", e);
+            return false;
+        } finally {
+            if (c != null) {
+                c.disconnect();
+            }
+        }
+    }
+
+    private String postJson(String url, String json) throws Exception {
+        HttpURLConnection c = (HttpURLConnection) new URL(url).openConnection();
+        try {
+            c.setConnectTimeout(2500);
+            c.setReadTimeout(15000);
+            c.setRequestMethod("POST");
+            c.setDoOutput(true);
+            c.setRequestProperty("Content-Type", "application/json");
+            byte[] bytes = json.getBytes(StandardCharsets.UTF_8);
+            c.getOutputStream().write(bytes);
+            int code = c.getResponseCode();
+            InputStream in = code >= 400 ? c.getErrorStream() : c.getInputStream();
+            if (in == null) {
+                return "";
+            }
+            ByteArrayOutputStream bos = new ByteArrayOutputStream();
+            byte[] buf = new byte[2048];
+            int n;
+            while ((n = in.read(buf)) >= 0) bos.write(buf, 0, n);
+            return bos.toString("UTF-8");
+        } finally {
+            c.disconnect();
+        }
     }
 }

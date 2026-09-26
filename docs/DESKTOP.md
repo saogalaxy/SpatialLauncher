@@ -43,11 +43,32 @@ flowchart LR
 3. Paste URL only if discovery fails (firewall / AP isolation).  
 4. Allow **TCP 8765**, **UDP 8766** (discovery), **UDP 8767** (audio) on the Windows Firewall LAN profile. PC speakers stay on while Headset mirrors — mute speakers for Quest-only.
 
+### USB link (no Wi-Fi for video)
+
+1. PC: plug in Quest 3 (USB debugging on, authorize the RSA prompt), **Enable USB link**
+   in Quest Link settings (forwards Quest `localhost:8765` → PC; needs `adb` —
+   PATH, `%LOCALAPPDATA%\Android\Sdk`, `ANDROID_HOME`, or Program Files copy).
+2. Quest: Desktop Link chrome → **USB** connects to `http://127.0.0.1:8765/...`
+   with the current codec. Reader/speak endpoints ride the same forward.
+3. Audio stays on Wi-Fi (Opus is UDP and cannot adb-forward). Without Wi-Fi
+   there is no headset audio; video, settings, and reader still work.
+
 Quest button/slider help: [HELP.md](HELP.md) § Desktop Link.
+
+While linked with a live stream: controller **B** toggles PC continuous TTS
+on/off, controller **A** speaks one OCR pass of the current frame
+(`POST /reader/once`, manual one-shot; continuous stays pipeline-driven).
 
 ## PC settings (Spatial Launcher Desktop)
 
 Use **Save** on each section to persist to `%LocalAppData%\SpatialLauncherDesktop\user_settings.json`. Quest can push the same knobs while streaming.
+
+### Profiles
+
+The Session panel has a **Profiles** selector: type a name and **Save profile** to
+snapshot all current settings, pick a saved profile to apply it live (mode
+chips, engines, and UI follow; the live file tracks the active profile),
+**Delete** to remove. Stored in `user_setting_profiles.json` next to the live file.
 
 ### Stream
 
@@ -56,7 +77,7 @@ Use **Save** on each section to persist to `%LocalAppData%\SpatialLauncherDeskto
 | **Gaming / Movies** | Gaming | Gaming = DA-V2 ViT-S ~20 Hz. Movies = DA3 (+ fallbacks), higher depth Hz |
 | **JPEG / MPEG / AV1** | JPEG | JPEG sharpest. **AV1** preferred compressed on Quest 3/3S. MPEG = H.264 compatibility |
 | **Live 3D** | On | PC depth warp into SBS |
-| **Full SBS** | Off | Off = Half SBS for Spatial Launcher. On = Full SBS for Virtual Desktop / Immersed (drops quality slider by 8) |
+| **Full SBS** | Off | JPEG half-SBS for Spatial Launcher; MPEG/AV1 always render full SBS |
 | **Stream width** | 1920 | 1280–2560 capture width |
 | **Video / JPEG quality** | 85 | Also maps to H.264/AV1 bitrate (~4–18 Mbps; MPEG gets an extra bump) |
 | **Sharpen** | 25 | JPEG only (skipped for MPEG/AV1) |
@@ -101,6 +122,14 @@ Codec / Gaming↔Movies switches and reconnect must stay live. Full invariants: 
 | Listen | WASAPI → SenseVoice → OPUS → Piper |
 
 Speech plays on the PC. Quest shows the 3D picture only.
+
+### OCR zones
+
+Empty zones = default lower dialogue band (Quest parity). Toggle **Edit zones**,
+drag on the preview to add up to 6 capture-space zones (left eye while
+streaming; right-eye drags are ignored since both eyes carry the same frame),
+**Clear zones** to reset. Zones apply live to the reader and persist in
+`%LocalAppData%\SpatialLauncherDesktop\ocr_zones.json`.
 
 ## System tray
 

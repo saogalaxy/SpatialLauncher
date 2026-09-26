@@ -44,6 +44,14 @@
                 android:textStyle="bold" />
 
             <Button
+                android:id="@+id/desktop_link_usb"
+                android:layout_width="wrap_content"
+                android:layout_height="36dp"
+                android:layout_marginStart="6dp"
+                android:minWidth="0dp"
+                android:text="@string/desktop_link_usb" />
+
+            <Button
                 android:id="@+id/desktop_link_min"
                 android:layout_width="wrap_content"
                 android:layout_height="36dp"
@@ -145,6 +153,31 @@
                     android:checked="false"
                     android:textOff="@string/desktop_link_full_sbs_off"
                     android:textOn="@string/desktop_link_full_sbs_on" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="14dp"
+                    android:text="@string/desktop_link_section_reader"
+                    android:textColor="@color/text_primary"
+                    android:textSize="13sp"
+                    android:textStyle="bold" />
+
+                <Button
+                    android:id="@+id/desktop_link_speak_screen"
+                    android:layout_width="match_parent"
+                    android:layout_height="40dp"
+                    android:layout_marginTop="4dp"
+                    android:text="@string/desktop_link_speak_screen" />
+
+                <ToggleButton
+                    android:id="@+id/desktop_link_continuous"
+                    android:layout_width="match_parent"
+                    android:layout_height="40dp"
+                    android:layout_marginTop="4dp"
+                    android:checked="false"
+                    android:textOff="@string/desktop_link_continuous_off"
+                    android:textOn="@string/desktop_link_continuous_on" />
 
                 <TextView
                     android:layout_width="wrap_content"

@@ -250,6 +250,15 @@
     <string name="desktop_link_exit">Exit</string>
     <string name="desktop_link_min_hint">Settings hidden for 10s — move your ray off the panel, then point at it again to show controls. Stream keeps playing.</string>
     <string name="desktop_link_min_locked">Settings stay hidden a few more seconds — then point at the panel to show them.</string>
+    <string name="desktop_link_speak_empty">No readable text on screen right now.</string>
+    <string name="desktop_link_usb">USB</string>
+    <string name="desktop_link_usb_hint">USB link needs \"Enable USB link\" on the PC first (video + settings over USB; audio stays on Wi-Fi).</string>
+    <string name="desktop_link_usb_live">USB link live — video over USB, audio on Wi-Fi.</string>
+    <string name="desktop_link_usb_forward_only">USB forward reachable — start the PC session to stream.</string>
+    <string name="desktop_link_section_reader">Reader</string>
+    <string name="desktop_link_speak_screen">Speak screen</string>
+    <string name="desktop_link_continuous_on">Continuous: on</string>
+    <string name="desktop_link_continuous_off">Continuous: off</string>
     <string name="desktop_link_idle">Not connected</string>
     <string name="desktop_link_connecting">Connecting…</string>
     <string name="desktop_link_searching">Searching LAN for Spatial Launcher Desktop…</string>
@@ -349,10 +358,6 @@
     <string name="tts_reading_now">Reading…</string>
     <string name="tts_unavailable">Headset TTS engine is not available. System speech does not work on this HMD.</string>
     <string name="toggle_3d_label">3D</string>
-    <string name="toggle_3d_plus_label">3D+</string>
-    <string name="head_parallax_description">Head parallax (3D plus)</string>
-    <string name="head_parallax_on">3D+ on — turn your head to look around</string>
-    <string name="head_parallax_off">3D+ off</string>
     <string name="empty_state_message">No app running.\nAdd an app from the dock below to get started.</string>
     <string name="add_game_dock_label">Add App</string>
     <string name="add_game_dialog_title">Add an app to the dock</string>

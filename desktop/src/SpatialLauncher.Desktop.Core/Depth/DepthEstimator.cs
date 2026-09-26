@@ -17,13 +17,19 @@ public sealed class DepthEstimator : IDisposable
     private readonly string _deviceLabel;
     private readonly int _modelSize;
     private readonly bool _maxScale;
+    private readonly DepthInputLayout _inputLayout;
     private float[,]? _prevDepth;
     private readonly object _smoothLock = new();
+    private int _polarityVote;
+    private bool _polarityLocked;
+    private readonly object _polarityLock = new();
 
     public bool HasOnnxModel => _session != null;
     public string ModelLabel => _modelLabel;
     public string DeviceLabel => _deviceLabel;
     public bool UsesMoviesPath => _maxScale;
+    /// <summary>True when inference failed and brightness is standing in for depth.</summary>
+    public bool FellBackToLuminance { get; private set; }
 
     public DepthEstimator(DepthPreset preset = DepthPreset.Gaming)
         : this(ModelPaths.DepthModelFor(preset), preset)
@@ -46,6 +52,7 @@ public sealed class DepthEstimator : IDisposable
                 _session = new InferenceSession(modelPath, opts);
                 _inputName = _session.InputMetadata.Keys.First();
                 _modelSize = ReadInputSize(_session, _inputName, 518);
+                _inputLayout = ReadInputLayout(_session, _inputName);
                 _deviceLabel = "DirectML GPU/VRAM";
                 return;
             }
@@ -56,6 +63,7 @@ public sealed class DepthEstimator : IDisposable
                     _session = new InferenceSession(modelPath);
                     _inputName = _session.InputMetadata.Keys.First();
                     _modelSize = ReadInputSize(_session, _inputName, 518);
+                    _inputLayout = ReadInputLayout(_session, _inputName);
                     _deviceLabel = "CPU/RAM (ONNX, DirectML failed)";
                     return;
                 }
@@ -94,12 +102,13 @@ public sealed class DepthEstimator : IDisposable
         float[,] fresh;
         if (_session != null)
         {
-            try { fresh = EstimateOnnx(frame); }
-            catch { fresh = EstimateLuminance(frame); }
+            try { fresh = EstimateOnnx(frame); FellBackToLuminance = false; }
+            catch { fresh = EstimateLuminance(frame); FellBackToLuminance = true; }
         }
         else
         {
             fresh = EstimateLuminance(frame);
+            FellBackToLuminance = true;
         }
 
         if (temporalSmoothPercent <= 0)
@@ -151,9 +160,14 @@ public sealed class DepthEstimator : IDisposable
             g.PixelOffsetMode = System.Drawing.Drawing2D.PixelOffsetMode.HighQuality;
             g.DrawImage(frame, new Rectangle(0, 0, size, size));
         }
-        var input = new DenseTensor<float>(new[] { 1, 3, size, size });
+
+        // DA3 declares "image" as NHWC uint8 raw RGB, while DA-V2 declares
+        // "pixel_values" as NCHW normalized float. Feeding DA3 the V2 layout
+        // throws InvalidArgument and silently drops to the luminance fallback,
+        // which warps by brightness. Build whatever the model actually asks for.
         float[] mean = [0.485f, 0.456f, 0.406f];
         float[] std = [0.229f, 0.224f, 0.225f];
+        NamedOnnxValue input;
         var data = resized.LockBits(
             new Rectangle(0, 0, size, size),
             ImageLockMode.ReadOnly,
@@ -164,16 +178,37 @@ public sealed class DepthEstimator : IDisposable
             {
                 byte* basePtr = (byte*)data.Scan0;
                 int stride = data.Stride;
-                for (int y = 0; y < size; y++)
+                if (_inputLayout == DepthInputLayout.NhwcByte)
                 {
-                    byte* row = basePtr + y * stride;
-                    for (int x = 0; x < size; x++)
+                    var rawBytes = new DenseTensor<byte>(new[] { 1, size, size, 3 });
+                    for (int y = 0; y < size; y++)
                     {
-                        byte* px = row + x * 4;
-                        input[0, 0, y, x] = ((px[2] / 255f) - mean[0]) / std[0];
-                        input[0, 1, y, x] = ((px[1] / 255f) - mean[1]) / std[1];
-                        input[0, 2, y, x] = ((px[0] / 255f) - mean[2]) / std[2];
+                        byte* row = basePtr + y * stride;
+                        for (int x = 0; x < size; x++)
+                        {
+                            byte* px = row + x * 4;
+                            rawBytes[0, y, x, 0] = px[2];
+                            rawBytes[0, y, x, 1] = px[1];
+                            rawBytes[0, y, x, 2] = px[0];
+                        }
                     }
+                    input = NamedOnnxValue.CreateFromTensor(_inputName, rawBytes);
+                }
+                else
+                {
+                    var norm = new DenseTensor<float>(new[] { 1, 3, size, size });
+                    for (int y = 0; y < size; y++)
+                    {
+                        byte* row = basePtr + y * stride;
+                        for (int x = 0; x < size; x++)
+                        {
+                            byte* px = row + x * 4;
+                            norm[0, 0, y, x] = ((px[2] / 255f) - mean[0]) / std[0];
+                            norm[0, 1, y, x] = ((px[1] / 255f) - mean[1]) / std[1];
+                            norm[0, 2, y, x] = ((px[0] / 255f) - mean[2]) / std[2];
+                        }
+                    }
+                    input = NamedOnnxValue.CreateFromTensor(_inputName, norm);
                 }
             }
         }
@@ -182,7 +217,7 @@ public sealed class DepthEstimator : IDisposable
             resized.UnlockBits(data);
         }
 
-        using var results = _session!.Run(new[] { NamedOnnxValue.CreateFromTensor(_inputName, input) });
+        using var results = _session!.Run(new[] { input });
         var output = PickDepthTensor(results);
         int h = output.Dimensions.Length >= 3 ? (int)output.Dimensions[^2] : size;
         int w = output.Dimensions.Length >= 3 ? (int)output.Dimensions[^1] : size;
@@ -203,17 +238,21 @@ public sealed class DepthEstimator : IDisposable
         }
 
         // Depth Anything outputs are typically larger = farther → invert to near=1.
-        bool invert = MeanIsFarther(raw);
+        bool invert = ResolveInvert(raw);
         var depth = new float[h, w];
         if (_maxScale)
         {
-            // iw3 Any_V3_Mono style: scale by max only (keeps outdoor/indoor relative pop).
-            float scale = Math.Max(1e-6f, Math.Abs(max));
+            // Movies/DA3: normalize over a robust 2-98 percentile window.
+            // Dividing by the raw max clipped most of a letterboxed/vignetted
+            // frame to one depth value, and the plateau borders warped into
+            // hard seams that read as a bad lenticular.
+            var (lo, hi) = RobustRange(raw, min, max);
+            float range = Math.Max(1e-6f, hi - lo);
             for (int y = 0; y < h; y++)
             for (int x = 0; x < w; x++)
             {
-                float n = raw[y, x] / scale;
-                depth[y, x] = invert ? 1f - Math.Clamp(n, 0f, 1f) : Math.Clamp(n, 0f, 1f);
+                float n = Math.Clamp((raw[y, x] - lo) / range, 0f, 1f);
+                depth[y, x] = invert ? 1f - n : n;
             }
         }
         else
@@ -227,6 +266,37 @@ public sealed class DepthEstimator : IDisposable
             }
         }
         return depth;
+    }
+
+    /// <summary>Channel layout a depth model declares for its image input.</summary>
+    private enum DepthInputLayout
+    {
+        /// <summary>DA-V2 style: [1,3,H,W] float32, ImageNet-normalized.</summary>
+        NchwFloat,
+        /// <summary>DA3 style: [1,H,W,3] uint8 raw RGB.</summary>
+        NhwcByte,
+    }
+
+    /// <summary>
+    /// Reads the declared input contract instead of assuming DA-V2's layout. DA3
+    /// exports "image" as NHWC uint8; feeding it NCHW float makes every run throw
+    /// and the session silently degrades to brightness-as-depth.
+    /// </summary>
+    private static DepthInputLayout ReadInputLayout(InferenceSession session, string inputName)
+    {
+        try
+        {
+            var meta = session.InputMetadata[inputName];
+            if (meta.Dimensions.Length != 4) return DepthInputLayout.NchwFloat;
+            bool isByte = meta.ElementType == typeof(byte);
+            bool channelsLast = meta.Dimensions[3] == 3;
+            bool channelsFirst = meta.Dimensions[1] == 3;
+            if (isByte && channelsLast) return DepthInputLayout.NhwcByte;
+            if (!isByte && channelsFirst) return DepthInputLayout.NchwFloat;
+            // Ambiguous: fall back to the declared element type.
+            return isByte ? DepthInputLayout.NhwcByte : DepthInputLayout.NchwFloat;
+        }
+        catch { return DepthInputLayout.NchwFloat; }
     }
 
     private static Tensor<float> PickDepthTensor(IDisposableReadOnlyCollection<DisposableNamedOnnxValue> results)
@@ -249,13 +319,75 @@ public sealed class DepthEstimator : IDisposable
         return best ?? results.First().AsTensor<float>();
     }
 
-    /// <summary>If border (often sky/bg) is higher than center, larger = farther.</summary>
-    private static bool MeanIsFarther(float[,] raw)
+    /// <summary>
+    /// Robust low/high cut points (2nd/98th percentile) from a 1024-bin histogram.
+    /// DA3 raw output has outlier tails, so a min/max window lets one far pixel
+    /// dominate and squeeze the rest of the frame into a narrow, clipping band.
+    /// </summary>
+    private static (float lo, float hi) RobustRange(float[,] raw, float min, float max)
     {
         int h = raw.GetLength(0);
         int w = raw.GetLength(1);
-        if (h < 8 || w < 8) return true;
+        const int Bins = 1024;
+        float span = max - min;
+        if (span <= 1e-6f) return (min, min + 1e-6f);
+        float scale = (Bins - 1) / span;
+        var hist = new int[Bins];
+        for (int y = 0; y < h; y++)
+        for (int x = 0; x < w; x++)
+            hist[Math.Clamp((int)((raw[y, x] - min) * scale), 0, Bins - 1)]++;
+
+        int total = h * w;
+        int loTarget = (int)(total * 0.02f);
+        int hiTarget = (int)(total * 0.98f);
+        int acc = 0, loBin = 0, hiBin = Bins - 1;
+        bool gotLo = false;
+        for (int b = 0; b < Bins; b++)
+        {
+            acc += hist[b];
+            if (!gotLo && acc >= loTarget) { loBin = b; gotLo = true; }
+            if (acc >= hiTarget) { hiBin = b; break; }
+        }
+        if (hiBin <= loBin) return (min, max);
+        return (min + loBin / scale, min + hiBin / scale);
+    }
+
+    /// <summary>
+    /// Sticky near/far polarity. Flipping this inverts the entire depth map, so the
+    /// warp snaps to the opposite direction and pixels visibly tear — up to 30x a
+    /// second in Movies. The first frame decides; after that only a decisive margin
+    /// is allowed to switch.
+    /// </summary>
+    private bool ResolveInvert(float[,] raw)
+    {
+        float margin = FartherMargin(raw);
+        lock (_polarityLock)
+        {
+            if (!_polarityLocked)
+            {
+                _polarityVote = margin > 0f ? 1 : -1;
+                _polarityLocked = true;
+            }
+            else if (Math.Abs(margin) > 0.25f)
+            {
+                _polarityVote = margin > 0f ? 1 : -1;
+            }
+            return _polarityVote > 0;
+        }
+    }
+
+    /// <summary>
+    /// Signed evidence that larger = farther, scaled by the border spread so the
+    /// threshold means the same thing on any frame. Letterbox bars and vignettes sit
+    /// in the border ring, so on cinematic content this hovers near zero.
+    /// </summary>
+    private static float FartherMargin(float[,] raw)
+    {
+        int h = raw.GetLength(0);
+        int w = raw.GetLength(1);
+        if (h < 8 || w < 8) return 1f;
         double border = 0, center = 0;
+        double bMin = double.MaxValue, bMax = double.MinValue;
         int nb = 0, nc = 0;
         int y0 = h / 4, y1 = 3 * h / 4, x0 = w / 4, x1 = 3 * w / 4;
         for (int y = 0; y < h; y++)
@@ -264,10 +396,16 @@ public sealed class DepthEstimator : IDisposable
             float v = raw[y, x];
             bool inCenter = y >= y0 && y < y1 && x >= x0 && x < x1;
             if (inCenter) { center += v; nc++; }
-            else { border += v; nb++; }
+            else
+            {
+                border += v; nb++;
+                if (v < bMin) bMin = v;
+                if (v > bMax) bMax = v;
+            }
         }
-        if (nb == 0 || nc == 0) return true;
-        return (border / nb) > (center / nc);
+        if (nb == 0 || nc == 0) return 1f;
+        double spread = Math.Max(1e-6, bMax - bMin);
+        return (float)((border / nb - center / nc) / spread);
     }
 
     private static float[,] EstimateLuminance(Bitmap frame)
