@@ -49,12 +49,17 @@ public sealed class MirrorSession : IDisposable
     public QuestLinkServer QuestLink => _questLink;
 
     /// <summary>
-    /// Compressed codecs always render full SBS (bandwidth allows full-res
-    /// eyes); the toggle covers MJPEG, where full SBS doubles the JPEG bytes.
+    /// Honours the Full SBS toggle for every codec.
+    ///
+    /// This used to force full SBS for H.264/AV1 on the assumption that
+    /// bandwidth allowed full-res eyes. It does not: full SBS doubles the frame
+    /// to ~4.1 MP at StreamWidth 1920 (vs ~2.1 MP half), the encoder could not
+    /// sustain the frame rate, and the headset buffer starved - the stream went
+    /// choppy in a way that read like a bad connection. It also overrode the
+    /// user's own toggle. Half SBS by default; the toggle still gives full-res
+    /// eyes for those who want them.
     /// </summary>
-    public static bool EffectiveFullSbs(UserSettings settings) =>
-        settings.FullSbs
-        || settings.StreamCodec is StreamCodec.H264 or StreamCodec.Av1;
+    public static bool EffectiveFullSbs(UserSettings settings) => settings.FullSbs;
     public DiscoveryAdvertiser Discovery => _discovery;
     public AudioLinkStreamer Audio => _audio;
     public string? QuestLinkUrl => _questLink.AdvertiseUrl;

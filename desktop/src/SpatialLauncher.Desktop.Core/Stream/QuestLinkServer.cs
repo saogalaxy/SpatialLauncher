@@ -18,6 +18,9 @@ public sealed class QuestLinkServer : IDisposable
 {
     public const int DefaultPort = 8765;
 
+    /// <summary>Keyframe cadence for the compressed codecs, in milliseconds.</summary>
+    private const int KeyIntervalMs = 500;
+
     private TcpListener? _listener;
     private Thread? _thread;
     private Thread? _encodeThread;
@@ -169,8 +172,11 @@ public sealed class QuestLinkServer : IDisposable
                     int kbps = Math.Max(6000, JpegQualityToBitrateKbps(JpegQuality) + 2000);
                     _h264.Ensure(src.Width, src.Height, kbps);
                     long now = Environment.TickCount64;
-                    // Key ~1 Hz — every-frame "key" + AllSamplesIndependent was crushing quality.
-                    bool wantKey = _lastKeyTick == 0 || now - _lastKeyTick >= 1000;
+                    // Key ~2 Hz. Every-frame "key" + AllSamplesIndependent was
+                    // crushing quality, but 1 Hz left a full second of smear after
+                    // any screen change, which reads as a glitch. 500 ms halves
+                    // the recovery window and costs little at these bitrates.
+                    bool wantKey = _lastKeyTick == 0 || now - _lastKeyTick >= KeyIntervalMs;
                     bytes = _h264.Encode(src, forceKeyFrame: wantKey);
                     if (wantKey)
                         _lastKeyTick = now;
@@ -194,11 +200,11 @@ public sealed class QuestLinkServer : IDisposable
                     try
                     {
                         _av1.Ensure(src.Width, src.Height, kbps);
-                        // Same 1 Hz key cadence as MPEG: every-AU keys starve
-                        // inter frames into mushy pixelation on detail-heavy
-                        // content (Movies preset shows it first).
+                        // Same key cadence as MPEG: every-AU keys starve inter
+                        // frames into mushy pixelation on detail-heavy content
+                        // (Movies preset shows it first).
                         long nowAv1 = Environment.TickCount64;
-                        bool wantKey = _lastKeyTick == 0 || nowAv1 - _lastKeyTick >= 1000;
+                        bool wantKey = _lastKeyTick == 0 || nowAv1 - _lastKeyTick >= KeyIntervalMs;
                         bytes = _av1.Encode(src, forceKeyFrame: wantKey);
                         if (wantKey)
                             _lastKeyTick = nowAv1;
@@ -253,7 +259,9 @@ public sealed class QuestLinkServer : IDisposable
     private static int JpegQualityToBitrateKbps(int jpegQuality)
     {
         int q = Math.Clamp(jpegQuality, 50, 98);
-        // ~4–18 Mbps — room for Full SBS / 72 Hz without looking softer than JPEG.
+        // ~4-18 Mbps - room for Full SBS / 72 Hz without looking softer than JPEG.
+        // At the default half-SBS (StreamWidth 1920 -> 1920x1080) quality 85 is
+        // ~5.6 bits/pixel, which is comfortably sharp for desktop text.
         return 4000 + (q - 50) * 300;
     }
 

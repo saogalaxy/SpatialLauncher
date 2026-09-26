@@ -2,6 +2,18 @@
 
 All notable changes to **Spatial Launcher** (Quest app + Windows Desktop) are recorded here.
 
+- **Stream choppiness fixed (regression from 1.0.2-beta).** Full SBS was being
+  forced for H.264/AV1 on the assumption that bandwidth allowed full-res eyes. It
+  does not: at StreamWidth 1920 that made each frame 3840x1080 (~4.1 MP) instead of
+  1920x1080 (~2.1 MP), doubling the encoder and network load for pixels the headset
+  panel downsamples anyway. The encoder could not sustain the rate, the headset
+  buffer starved, and the result read like a bad internet connection. It also
+  overrode the user's own Full SBS toggle. The toggle is now honoured for every
+  codec again. Verified with the pre-regression build: it used `settings.FullSbs`
+  directly.
+- **AV1 keyframe cadence 1 Hz -> 2 Hz.** 1 Hz left up to a full second of smear
+  after a screen change.
+
 - **USB PC→Quest streaming removed.** It never worked end to end: over adb the
   forward, the listeners and the status path were all verified, but no video frame
   ever arrived on the headset. The NCM alternative was dropped too, because the USB
