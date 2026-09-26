@@ -2,7 +2,14 @@
 <resources>
     <string name="app_name">Spatial Launcher</string>
     <string name="panel_alerts_channel">Launcher status</string>
-    <string name="beta_update_available">New beta build available: %1$s → %2$s. Download from the GitHub release page.</string>
+    <string name="beta_update_available">New beta build available: %1$s → %2$s.</string>
+    <string name="beta_update_title">Beta update available</string>
+    <string name="beta_update_install">Install</string>
+    <string name="beta_update_later">Later</string>
+    <string name="beta_update_downloading">Downloading beta build %1$s…</string>
+    <string name="beta_update_installing">Beta build %1$s handed to the installer.</string>
+    <string name="beta_update_allow_installs">Allow installs from Spatial Launcher, then tap Install again.</string>
+    <string name="beta_update_failed">Beta update failed: %1$s</string>
     <string name="setting_force_stereo">Force stereo render</string>
     <string name="setting_depth_strength">Depth strength</string>
     <string name="setting_convergence">Convergence</string>

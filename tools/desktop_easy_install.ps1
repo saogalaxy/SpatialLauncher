@@ -27,6 +27,42 @@ function Fail([string]$Message) {
     exit 1
 }
 
+# Reports how far this checkout is behind origin/main, or $null when that cannot
+# be determined. Never throws: no git, no remote, offline or a non-repo checkout
+# all mean "cannot tell", which must never fail an install.
+function Get-GitHubUpdateFlag {
+    try {
+        if (-not (Get-Command git -ErrorAction SilentlyContinue)) { return $null }
+        if (-not (Test-Path -LiteralPath (Join-Path $Root ".git"))) { return $null }
+        & git rev-parse --is-inside-work-tree 2>$null | Out-Null
+        if ($LASTEXITCODE -ne 0) { return $null }
+        & git fetch origin main --quiet 2>$null | Out-Null
+        $remote = (& git rev-parse --verify --quiet origin/main 2>$null | Select-Object -First 1)
+        if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($remote)) { return $null }
+        $behind = (& git rev-list --count "HEAD..origin/main"2>$null | Select-Object -First 1)
+        if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($behind)) { return $null }
+        $count = 0
+        if (-not [int]::TryParse(($behind | Out-String).Trim(), [ref]$count)) { return $null }
+        if ($count -le 0) { return $null }
+        $sha = (& git rev-parse --short origin/main 2>$null | Select-Object -First 1)
+        return [pscustomobject]@{ Behind = $count; Sha = "$sha".Trim() }
+    } catch {
+        return $null
+    }
+}
+
+function Show-GitHubUpdateFlag {
+    param($Flag)
+    if ($null -eq $Flag) { return }
+    Write-Host ""
+    Write-Host "  +------------------------------------------------------------------" -ForegroundColor Yellow
+    Write-Host "  |  GITHUB HAS NEWER CHANGES - this build may be out of date         |" -ForegroundColor Yellow
+    Write-Host ("  |  {0} commit(s) behind origin/main ({1})" -f $Flag.Behind, $Flag.Sha) -ForegroundColor Yellow
+    Write-Host "  |  To update:  git pull  then re-run this installer.              |" -ForegroundColor Yellow
+    Write-Host "  +------------------------------------------------------------------" -ForegroundColor Yellow
+    Write-Host ""
+}
+
 Write-Host ""
 Write-Host "Spatial Launcher Desktop Easy Installer" -ForegroundColor White
 Write-Host "Build + install PC app (Owl-style session + Quest Link stream)." -ForegroundColor DarkGray
@@ -53,8 +89,10 @@ if (-not (Test-Path $Sln)) {
 }
 
 if (-not $SkipBuild) {
-    Write-Step "Publishing Release self-contained win-x64"
-    New-Item -ItemType Directory -Force -Path $PublishDir | Out-Null
+Write-Step "Publishing Release self-contained win-x64"
+$gitFlag = Get-GitHubUpdateFlag
+Show-GitHubUpdateFlag $gitFlag
+New-Item -ItemType Directory -Force -Path $PublishDir | Out-Null
     & dotnet publish (Join-Path $DesktopDir "src\SpatialLauncher.Desktop\SpatialLauncher.Desktop.csproj") `
         -c Release -r win-x64 --self-contained true `
         -p:PublishSingleFile=false `
@@ -267,5 +305,10 @@ Get-ChildItem -Path $modelRoot -Recurse -File -ErrorAction SilentlyContinue | Fo
 $appMb = [math]::Round($appBytes / 1MB, 1)
 $modelMb = [math]::Round($modelBytes / 1MB, 1)
 Write-Host ("PC storage used: app {0} MB + models {1} MB = ~{2} MB under {3}" -f $appMb, $modelMb, ($appMb + $modelMb), (Split-Path $InstallDir -Parent))
+if ($null -ne $gitFlag) {
+    Write-Host ("NOTE: built from a checkout {0} commit(s) behind origin/main - run 'git pull' and re-run to update." -f $gitFlag.Behind) -ForegroundColor Yellow
+} else {
+    Write-Host "GitHub update check: could not compare (offline, no remote, or not a git checkout)." -ForegroundColor DarkGray
+}
 Write-Host "Quest: tap Desktop Link (monitor) - auto-finds this PC on LAN. Gaming/Movies depth presets on PC."
 exit 0

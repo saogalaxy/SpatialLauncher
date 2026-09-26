@@ -1,13 +1,24 @@
 package com.spatiallauncher.app.ui;
 
+import android.app.AlertDialog;
 import android.content.Context;
+import android.content.Intent;
 import android.content.SharedPreferences;
 import android.net.Uri;
+import android.os.Handler;
+import android.os.Looper;
 import android.util.Log;
 
+import androidx.core.content.FileProvider;
+
 import com.spatiallauncher.app.BuildConfig;
+import com.spatiallauncher.app.R;
 
 import java.io.BufferedReader;
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
 import java.net.URL;
@@ -36,6 +47,11 @@ final class BetaUpdateCheck {
             "https://api.github.com/repos/saogalaxy/SpatialLauncher/releases/tags/" + RELEASE_TAG;
     private static final String RELEASE_PAGE =
             "https://github.com/saogalaxy/SpatialLauncher/releases/tag/" + RELEASE_TAG;
+
+    /** Asset naming contract: SpatialLauncher-beta-<build>.apk */
+    private static final String ASSET_PREFIX = "SpatialLauncher-beta-";
+    private static final String DOWNLOAD_BASE =
+            "https://github.com/saogalaxy/SpatialLauncher/releases/download/" + RELEASE_TAG + "/";
 
     /** Published asset is named SpatialLauncher-beta-<build>.apk. */
     private static final Pattern ASSET_BUILD =
@@ -96,9 +112,107 @@ final class BetaUpdateCheck {
             return;
         }
         Log.i(TAG, "new beta available: " + local + " -> " + remote);
-        PanelAlerts.show(app, app.getString(
-                com.spatiallauncher.app.R.string.beta_update_available, local, remote)
-                + "  " + RELEASE_PAGE);
+        String asset = ASSET_PREFIX + remote + ".apk";
+        String url = DOWNLOAD_BASE + asset;
+        offerInstall(app, local, remote, url);
+    }
+
+    /** Confirm, then download and hand off to the system installer. */
+    private static void offerInstall(Context app, String local, String remote, String url) {
+        new Handler(Looper.getMainLooper()).post(() -> {
+            try {
+                new AlertDialog.Builder(app)
+                        .setTitle(app.getString(R.string.beta_update_title))
+                        .setMessage(app.getString(R.string.beta_update_available, local, remote))
+                        .setPositiveButton(R.string.beta_update_install,
+                                (d, w) -> startDownload(app, local, remote, url))
+                        .setNegativeButton(R.string.beta_update_later, null)
+                        .show();
+            } catch (Throwable t) {
+                Log.w(TAG, "cannot show update dialog", t);
+            }
+        });
+    }
+
+    private static void startDownload(Context app, String local, String remote, String url) {
+        new Thread(() -> {
+            File apk = null;
+            try {
+                File dir = new File(app.getCacheDir(), "updates");
+                if (!dir.exists() && !dir.mkdirs()) {
+                    throw new IOException("cannot create " + dir);
+                }
+                apk = new File(dir, ASSET_PREFIX + remote + ".apk");
+                PanelAlerts.show(app, app.getString(R.string.beta_update_downloading, remote));
+                download(url, apk);
+                Log.i(TAG, "downloaded " + apk.length() + " bytes");
+                launchInstaller(app, apk, remote);
+            } catch (Exception e) {
+                Log.w(TAG, "beta update failed", e);
+                PanelAlerts.show(app, app.getString(R.string.beta_update_failed, e.getMessage()));
+            }
+        }, "BetaUpdateInstall").start();
+    }
+
+    private static void download(String url, File dest) throws IOException {
+        HttpURLConnection c = null;
+        try {
+            c = (HttpURLConnection) new URL(url).openConnection();
+            c.setConnectTimeout(TIMEOUT_MS);
+            c.setReadTimeout(0);
+            c.setInstanceFollowRedirects(true);
+            c.setRequestProperty("User-Agent", "SpatialLauncher-BetaUpdateCheck");
+            if (c.getResponseCode() != 200) {
+                throw new IOException("HTTP " + c.getResponseCode());
+            }
+            try (InputStream in = c.getInputStream();
+                 FileOutputStream out = new FileOutputStream(dest)) {
+                byte[] buf = new byte[65536];
+                int n;
+                long total = 0;
+                while ((n = in.read(buf)) > 0) {
+                    out.write(buf, 0, n);
+                    total += n;
+                }
+                out.flush();
+                if (total < 1024) {
+                    throw new IOException("download too small (" + total + " bytes)");
+                }
+            }
+        } finally {
+            if (c != null) {
+                c.disconnect();
+            }
+        }
+    }
+
+    /**
+     * Hand the APK to the system installer. Needs the user to have allowed
+     * installs from this app, so point them at that setting when it is off.
+     */
+    private static void launchInstaller(Context app, File apk, String remote) {
+        try {
+            Uri uri = FileProvider.getUriForFile(
+                    app, app.getPackageName() + ".beta.updates", apk);
+            Intent install = new Intent(Intent.ACTION_INSTALL_PACKAGE);
+            install.setDataAndType(uri, "application/vnd.android.package-archive");
+            install.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            app.startActivity(install);
+            PanelAlerts.show(app, app.getString(R.string.beta_update_installing, remote));
+        } catch (Exception e) {
+            Log.w(TAG, "install handoff failed", e);
+            // Most likely the app is not allowed to install packages yet.
+            try {
+                Intent settings = new Intent(
+                        android.provider.Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                        Uri.parse("package:" + app.getPackageName()));
+                settings.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                app.startActivity(settings);
+                PanelAlerts.show(app, app.getString(R.string.beta_update_allow_installs));
+            } catch (Exception ignored) {
+                PanelAlerts.show(app, app.getString(R.string.beta_update_failed, e.getMessage()));
+            }
+        }
     }
 
     private static String fetch(String endpoint) {
@@ -170,17 +284,6 @@ final class BetaUpdateCheck {
             return Long.parseLong(remote.trim()) <= Long.parseLong(local.trim());
         } catch (NumberFormatException e) {
             return false;
-        }
-    }
-
-    /** Opens the rolling beta release in the system browser. */
-    static void openReleasePage(Context context) {
-        try {
-            context.startActivity(new android.content.Intent(
-                    android.content.Intent.ACTION_VIEW, Uri.parse(RELEASE_PAGE))
-                    .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK));
-        } catch (Exception e) {
-            Log.w(TAG, "cannot open release page", e);
         }
     }
 }

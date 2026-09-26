@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Downloaded beta APKs live in cacheDir/updates/ and are shared with the
+     system package installer through a content:// URI. -->
+<paths>
+    <cache-path
+        name="beta_updates"
+        path="updates/" />
+</paths>
