@@ -30,12 +30,26 @@ Beta builds check the rolling release once every 6 hours on panel start and show
 an in-app banner when the published marker is newer than the running one. It is
 gated on the `.beta` package name, so the store build never runs it.
 
-There is **no in-app installer**: the banner links to the release page and the
-user downloads and sideloads. Installing in place would need
-`REQUEST_INSTALL_PACKAGES`, which the app deliberately does not declare.
+The banner offers **Install** / **Later**. **Install** downloads the published
+asset and hands it to the Android package installer, falling back to the
+unknown-sources settings screen if that handoff is refused. This is why the beta
+lane declares `REQUEST_INSTALL_PACKAGES` and a `FileProvider` in `src/beta` -
+both are absent from the release APK, which has no in-app installer.
 
 `BETA_BUILD` is defined for every build type (defaulting to `0`) so the release
 lane compiles; only the beta lane overrides it.
+
+## What the installers build
+
+| Installer | Builds | Installs to |
+| --- | --- | --- |
+| `tools/easy_install.ps1` | `:app:assembleBeta` | Quest, `com.sptiallauncher.app.beta` |
+| `tools/desktop_easy_install.ps1` | `dotnet publish -c Release -r win-x64 --self-contained` | PC, `%LOCALAPPDATA%\SpatialLauncherDesktop\app` |
+| Meta Store (manual) | `:app:assembleRelease` | Quest, `com.sptiallauncher.app` |
+
+The installers target separate packages/locations on purpose, so they co-install
+and never overwrite a Store build. Pass `-BetaBuild <n>` to
+`tools/easy_install.ps1` to build with the same marker as a published asset.
 
 ## Verify
 

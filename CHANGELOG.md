@@ -2,14 +2,45 @@
 
 All notable changes to **Spatial Launcher** (Quest app + Windows Desktop) are recorded here.
 
-- **Beta builds now notice new builds on GitHub.** The beta panel checks a rolling
-  `beta` GitHub release every 6 hours and raises an in-app banner when the
-  published marker is newer than the running one. Gated on the `.beta` package
-  name, so the store build never runs it. There is deliberately no in-app
-  installer - the banner links to the release page, because installing in place
-  would need `REQUEST_INSTALL_PACKAGES`, which the app does not declare. Build
-  markers are plain integers embedded as `BuildConfig.BETA_BUILD` and carried in
-  the published asset name; see [BETA.md](docs/BETA.md).
+- **Installers now build and push the correct target, and the Quest installer no
+  longer risks the Store app.** `tools/easy_install.ps1` used to build
+  `:app:assembleDebug` and install it over `com.sptiallauncher.app` - the same
+  package as the Meta Store build. A debug-signed APK can never replace the
+  release-signed Store app (`INSTALL_FAILED_UPDATE_INCOMPATIBLE`), so the script's
+  signature-mismatch recovery would uninstall the Store app and wipe its data. On
+  Horizon OS a sideloaded developer-signed app and a Meta-signed Store app are
+  separate tracks anyway, so the installer now targets the beta lane.
+
+  What each installer builds and installs:
+
+  | Installer | Builds | Installs to | Signing |
+  | --- | --- | --- | --- |
+  | `tools/easy_install.ps1` | `:app:assembleBeta` | Quest, `com.spatiallauncher.app.beta` | debug key (sideload) |
+  | `tools/desktop_easy_install.ps1` | `dotnet publish -c Release -r win-x64 --self-contained` | PC, `%LOCALAPPDATA%\SpatialLauncherDesktop\app` | n/a |
+  | Meta Store (manual) | `:app:assembleRelease` | Quest, `com.sptiallauncher.app` | release key |
+
+  The two installers therefore co-install rather than collide, and the Store app is
+  left untouched (verified: the Store package's `lastUpdateTime` does not change
+  across an installer run). New `-BetaBuild <n>` parameter passes
+  `-PbetaBuild=<n>` so a locally built APK can carry the same integer marker as the
+  published GitHub asset; without it the build uses the default marker. Fixed a
+  real pre-existing bug in the same script: it probed for the JDK with a bare
+  `java` after already accepting `JAVA_HOME`, so any machine with `JAVA_HOME` set
+  but no `java` on `PATH` (the Android Studio default) failed with a bogus
+  "Could not run 'java -version'". It now resolves the executable once via
+  `Get-JavaExe`. Also replaced two non-ASCII characters in console output that
+  rendered as mojibake in a default Windows console.
+
+- **Beta builds can now install in place from the release.** The beta panel checks
+  the rolling `beta` GitHub release every 6 hours and, when the published marker is
+  newer than the running one, offers **Install** / **Later**. Choosing Install
+  downloads the asset and hands it to the Android package installer, with a
+  fallback to the unknown-sources settings screen if the handoff is refused.
+  Gated on the `.beta` package name, so the store build never runs it, and
+  `REQUEST_INSTALL_PACKAGES` plus the `FileProvider` are declared in
+  `src/beta` only - verified absent from the release APK. Build markers are plain
+  integers embedded as `BuildConfig.BETA_BUILD` and carried in the published asset
+  name; see [BETA.md](docs/BETA.md).
 
 - **Stream choppiness fixed (regression from 1.0.2-beta).** Full SBS was being
   forced for H.264/AV1 on the assumption that bandwidth allowed full-res eyes. It

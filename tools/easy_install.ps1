@@ -1,10 +1,21 @@
 # Spatial Launcher Easy Installer (Quest)
-# Checks JDK / Node / headset, builds the debug APK if needed (full offline model pack
-# via downloadOfflineModels — same assets as Meta Store), installs with metavr.
+# Installs the BETA lane (com.sptiallauncher.app.beta) to a connected headset.
+#
+# The beta package is deliberately NOT the Store package. On Horizon OS a
+# sideloaded, developer-signed app and a Meta-signed Store app are separate
+# tracks, and a debug-signed APK can never replace a release-signed one
+# (INSTALL_FAILED_UPDATE_INCOMPATIBLE). Installing over com.sptiallauncher.app
+# would therefore force an uninstall that wipes the Store app's data, so this
+# script targets the beta lane and leaves the Store app untouched.
+#
+# Requires Developer Mode + USB debugging (unknown sources), because this is not
+# a Meta-signed build.
+#
 # Compatible with Windows PowerShell 5.1+
 
 param(
     [string]$Device = "",
+    [string]$BetaBuild = "",
     [switch]$SkipBuild,
     [switch]$NoLaunch
 )
@@ -12,8 +23,8 @@ param(
 $ErrorActionPreference = "Continue"
 $Root = Split-Path -Parent $PSScriptRoot
 Set-Location $Root
-$PackageId = "com.spatiallauncher.app"
-$ApkPath = Join-Path $Root "app\build\outputs\apk\debug\app-debug.apk"
+$PackageId = "com.sptiallauncher.app.beta"
+$ApkPath = Join-Path $Root "app\build\outputs\apk\beta\app-beta.apk"
 
 function Write-Step {
     param([string]$Message)
@@ -76,6 +87,19 @@ function Test-Java {
     return ($null -ne $javaCmd)
 }
 
+# Resolve the java executable once. JAVA_HOME is commonly set without java on
+# PATH (Android Studio installs do exactly that), so probing with a bare "java"
+# would fail even though Test-Java passed.
+function Get-JavaExe {
+    if ($env:JAVA_HOME) {
+        $javaHomeBin = Join-Path $env:JAVA_HOME "bin\java.exe"
+        if (Test-Path $javaHomeBin) { return $javaHomeBin }
+    }
+    $javaCmd = Get-Command java -ErrorAction SilentlyContinue
+    if ($null -ne $javaCmd) { return $javaCmd.Source }
+    return $null
+}
+
 function Invoke-NpxMetavr {
     param([string[]]$MetavrArgs)
     $all = @("-y", "metavr") + $MetavrArgs
@@ -85,19 +109,22 @@ function Invoke-NpxMetavr {
 
 Write-Host ""
 Write-Host "Spatial Launcher Easy Installer" -ForegroundColor White
-Write-Host "Looks for what is needed, builds if needed, installs to Quest." -ForegroundColor DarkGray
+Write-Host "Builds the beta APK and sideloads it to the Quest." -ForegroundColor DarkGray
 Write-Host ""
 Write-Host "STORAGE" -ForegroundColor Yellow
-Write-Host "  Sideloads to the Quest headset (not a Windows Program Files install)." -ForegroundColor DarkGray
+Write-Host "  Sideloads the BETA app (com.sptiallauncher.app.beta) - not the Store app." -ForegroundColor DarkGray
+Write-Host "  Needs Developer Mode + USB debugging, since this is not a Meta-signed build." -ForegroundColor DarkGray
+Write-Host "  Co-installs with any Store build of Spatial Launcher; that app is left alone." -ForegroundColor DarkGray
 Write-Host "  Headset needs ~1+ GB free (APK packs Piper + OPUS; Qwen/SenseVoice download on first use)." -ForegroundColor DarkGray
 Write-Host "  PC keeps build outputs under this repo folder only." -ForegroundColor DarkGray
 
 Write-Step "Checking JDK"
-if (-not (Test-Java)) {
+$javaExe = Get-JavaExe
+if ($null -eq $javaExe) {
     Fail "JDK not found. Install JDK 17+ and set JAVA_HOME, or add java to PATH. https://adoptium.net/"
 }
 try {
-    $javaVerOut = (& java -version 2>&1 | Out-String)
+    $javaVerOut = (& $javaExe -version 2>&1 | Out-String)
     $major = 0
     if ($javaVerOut -match 'version "1\.(\d+)') {
         $major = 1  # old-style 1.x numbering (e.g. 1.8) is always too old
@@ -163,14 +190,21 @@ if ($Device -ne "") {
 }
 
 if (-not $SkipBuild) {
-Write-Step "Building debug APK (first time can take several minutes)"
-$gitFlag = Get-GitHubUpdateFlag
-Show-GitHubUpdateFlag $gitFlag
-$gradlew = Join-Path $Root "gradlew.bat"
+    $marker = ""
+    if (-not [string]::IsNullOrWhiteSpace($BetaBuild)) { $marker = "-PbetaBuild=$BetaBuild" }
+    $label = if ($marker) { "beta build $BetaBuild" } else { "beta APK" }
+    Write-Step "Building $label (first time can take several minutes)"
+    $gitFlag = Get-GitHubUpdateFlag
+    Show-GitHubUpdateFlag $gitFlag
+    $gradlew = Join-Path $Root "gradlew.bat"
     if (-not (Test-Path $gradlew)) {
         Fail "gradlew.bat missing from repo root. Prefer 'git clone' over the GitHub ZIP if files are missing."
     }
-    & $gradlew ":app:assembleDebug" "--no-daemon"
+    if ($marker) {
+        & $gradlew ":app:assembleBeta" $marker "--no-daemon"
+    } else {
+        & $gradlew ":app:assembleBeta" "--no-daemon"
+    }
     if ($LASTEXITCODE -ne 0) {
         Fail "Gradle build failed. Scroll up for the error (often JDK/SDK or packaging size)."
     }
@@ -211,7 +245,9 @@ if ($installCode -ne 0) {
 
 if (-not $NoLaunch) {
     Write-Step "Launching Spatial Launcher on headset"
-    $Activity = "com.spatiallauncher.app.ui.PanelMainActivity"
+    # Best-effort only. A sideloaded package is not always immediately launchable
+    # on Horizon OS, and a failed launch must never fail the install.
+    $Activity = "com.sptiallauncher.app.ui.PanelMainActivity"
     # Fresh process so a replaced APK actually comes up.
     $stopCmd = @("app", "stop", $PackageId)
     if ($Device -ne "") { $stopCmd += @("--device", $Device) }
@@ -225,7 +261,6 @@ if (-not $NoLaunch) {
         $launched = $true
         Write-Host "  Launched: $PackageId/$Activity"
     } else {
-        Write-Host "  Activity launch failed — trying package launch…" -ForegroundColor Yellow
         $launchCmd2 = @("app", "launch", $PackageId)
         if ($Device -ne "") { $launchCmd2 += @("--device", $Device) }
         if ((Invoke-NpxMetavr -MetavrArgs $launchCmd2) -eq 0) {
@@ -234,13 +269,14 @@ if (-not $NoLaunch) {
         }
     }
     if (-not $launched) {
-        Write-Host "  Install OK but launch failed — open Spatial Launcher from the Quest library." -ForegroundColor Yellow
+        Write-Host "  Install OK but launch failed - open Spatial Launcher from the Quest library." -ForegroundColor Yellow
     }
 }
 
 Write-Host ""
 Write-Host "READY TO GO: YES" -ForegroundColor Green
-Write-Host "Spatial Launcher is on the headset." -ForegroundColor Green
+Write-Host ("Spatial Launcher BETA is on the headset (" + $PackageId + ")." ) -ForegroundColor Green
+Write-Host "Any Store build of Spatial Launcher was left untouched." -ForegroundColor DarkGray
 if ($null -ne $gitFlag) {
     Write-Host ("NOTE: built from a checkout {0} commit(s) behind origin/main - run 'git pull' and re-run to update." -f $gitFlag.Behind) -ForegroundColor Yellow
 } else {
