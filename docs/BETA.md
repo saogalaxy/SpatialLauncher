@@ -17,9 +17,9 @@ gh release upload beta "app\build\outputs\apk\beta\SpatialLauncher-beta-7.apk#Sp
 `BuildConfig.BETA_BUILD` and **must** match the number in the asset filename —
 that is how the in-app check compares builds. Quote the property in PowerShell.
 
-The `beta` tag on GitHub is a rolling release: it always carries the newest beta
-APK, and `--clobber` replaces the asset. Old assets are worth deleting so the
-download page shows one file.
+The `beta` release on GitHub always carries the newest beta APK, and `--clobber`
+replaces the asset. Old assets are worth deleting so the download page shows one
+file.
 
 > PowerShell splits an unquoted `-PbetaBuild=2026.09.1` at the dot and Gradle
 > fails with `Task '.1' not found`. Keep the marker a plain integer and quote it.
@@ -50,6 +50,19 @@ lane compiles; only the beta lane overrides it.
 The installers target separate packages/locations on purpose, so they co-install
 and never overwrite a Store build. Pass `-BetaBuild <n>` to
 `tools/easy_install.ps1` to build with the same marker as a published asset.
+
+## Publishing notes
+
+The `beta` **tag** is a snapshot, not a moving pointer: it is not re-pointed at
+`main` on each publish, so it stays at the commit it was created at while `main`
+advances. That only affects the source reference shown on the release page. The
+published **asset** is what the headset downloads and is always current. Moving
+the tag is a deliberate force-push, not part of the normal publish step:
+
+```powershell
+git tag -f beta origin/main
+git push --force origin beta
+```
 
 ## Verify
 
