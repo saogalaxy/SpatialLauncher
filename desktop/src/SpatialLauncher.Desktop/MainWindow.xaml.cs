@@ -80,7 +80,7 @@ public partial class MainWindow : Window
             if (!SessionSettingsJson.TryApply(json, _settings, out _))
                 return null;
             // Apply on the accept thread immediately so codec/path hot-swap is live
-            // before the HTTP 200 returns â€” do not wait for the UI dispatcher.
+            // before the HTTP 200 returns — do not wait for the UI dispatcher.
             _session.ApplySettings(_settings);
             Dispatcher.BeginInvoke(() =>
             {
@@ -401,10 +401,10 @@ public partial class MainWindow : Window
         _reader.SetZones(_ocrZones);
         UpdateZoneStatus();
         DrawZones();
-        StatusText.Text = "OCR zones cleared â€” default lower band.";
+        StatusText.Text = "OCR zones cleared — default lower band.";
     }
 
-    // Mono preview: one eye full-width for zone editing. Display only â€”
+    // Mono preview: one eye full-width for zone editing. Display only —
     // the stream keeps its SBS layout either way.
     private void PreviewMonoChanged(object sender, RoutedEventArgs e)
     {
@@ -970,7 +970,7 @@ public partial class MainWindow : Window
         _settings.StreamWidth = (int)StreamWidthSlider.Value;
         _settings.JpegQuality = (int)JpegQualitySlider.Value;
         _settings.SharpenPercent = (int)SharpenSlider.Value;
-        StreamWidthLabel.Text = "Stream width " + _settings.StreamWidth + " â€” capture size sent to Quest";
+        StreamWidthLabel.Text = "Stream width " + _settings.StreamWidth + " — capture size sent to Quest";
         if (_settings.StreamCodec is StreamCodec.H264 or StreamCodec.Av1)
         {
             int kbps = 4000 + (Math.Clamp(_settings.JpegQuality, 50, 98) - 50) * 300;
@@ -981,14 +981,14 @@ public partial class MainWindow : Window
         }
         else
         {
-            JpegQualityLabel.Text = "JPEG quality " + _settings.JpegQuality + " â€” higher = sharper, bigger frames";
+            JpegQualityLabel.Text = "JPEG quality " + _settings.JpegQuality + " — higher = sharper, bigger frames";
         }
-        SharpenLabel.Text = "Sharpen " + _settings.SharpenPercent + " â€” edge crispness before encode";
-        DepthStrengthLabel.Text = "3D pop " + (int)DepthStrengthSlider.Value + "% â€” how far things stick out";
-        ConvergenceLabel.Text = "Focus plane " + (int)ConvergenceSlider.Value + "% â€” lower if eyestrain / screen feels too close";
-        DepthHzLabel.Text = "Depth refresh " + _settings.DepthHz + " Hz â€” how often depth updates";
-        DepthSmoothLabel.Text = "Motion ghosting " + _settings.DepthTemporalSmoothPercent + "% â€” lower = cleaner moving people";
-        EdgeCleanLabel.Text = "Edge smear clean " + _settings.EdgeCleanPercent + "% â€” higher reduces halos around people";
+        SharpenLabel.Text = "Sharpen " + _settings.SharpenPercent + " — edge crispness before encode";
+        DepthStrengthLabel.Text = "3D pop " + (int)DepthStrengthSlider.Value + "% — how far things stick out";
+        ConvergenceLabel.Text = "Focus plane " + (int)ConvergenceSlider.Value + "% — lower if eyestrain / screen feels too close";
+        DepthHzLabel.Text = "Depth refresh " + _settings.DepthHz + " Hz — how often depth updates";
+        DepthSmoothLabel.Text = "Motion ghosting " + _settings.DepthTemporalSmoothPercent + "% — lower = cleaner moving people";
+        EdgeCleanLabel.Text = "Edge smear clean " + _settings.EdgeCleanPercent + "% — higher reduces halos around people";
         _settings.OcrSmoothnessPercent = (int)OcrSmoothSlider.Value;
         _settings.TtsSpeedPercent = (int)TtsSpeedSlider.Value;
         _settings.AdvertiseOnLan = LanAdvertiseCheck.IsChecked == true;
@@ -1015,7 +1015,7 @@ public partial class MainWindow : Window
         else if (_reader.IsRunning)
         {
             _reader.Stop();
-            ShareCaptionText.Text = "(off â€” enable Captions / OCR)";
+            ShareCaptionText.Text = "(off — enable Captions / OCR)";
         }
     }
 
@@ -1070,7 +1070,7 @@ public partial class MainWindow : Window
         string active = _session.Audio.ActiveSinkName ?? "";
         if (_settings.AudioMode == AudioOutputMode.Headset && !string.IsNullOrEmpty(active))
         {
-            AudioSinkHint.Text = "Headset on Â· Opus-mirroring '" + active
+            AudioSinkHint.Text = "Headset on · Opus-mirroring '" + active
                 + "' to Quest. PC speakers stay on.";
         }
         else if (_settings.AudioMode == AudioOutputMode.Headset)
@@ -1107,12 +1107,12 @@ public partial class MainWindow : Window
     {
         PipelineStatus.Text = _mode.PipelineLabel(_useOpus)
                               + (_settings.CaptionsEnabled || _settings.TtsEnabled
-                                  ? $"\nOCR={_reader.OcrEngineName} Â· TTS={_reader.TtsBackendName}"
-                                  : "\nCaptions/OCR off Â· 3D/cast only")
-                              + $" Â· Depth={_settings.DepthPreset} @{_settings.DepthHz}Hz"
-                              + $" Â· {_session.DepthDeviceLabel}"
-                              + $" Â· {_session.DepthModelStatus}"
-                              + $" Â· stream {_settings.StreamWidth}px "
+                                  ? $"\nOCR={_reader.OcrEngineName} · TTS={_reader.TtsBackendName}"
+                                  : "\nCaptions/OCR off · 3D/cast only")
+                              + $" · Depth={_settings.DepthPreset} @{_settings.DepthHz}Hz"
+                              + $" · {_session.DepthDeviceLabel}"
+                              + $" · {_session.DepthModelStatus}"
+                              + $" · stream {_settings.StreamWidth}px "
                               + (_settings.StreamCodec switch
                               {
                                   StreamCodec.H264 => "MPEG",
@@ -1122,9 +1122,9 @@ public partial class MainWindow : Window
                               + $" q{_settings.JpegQuality} sharp{_settings.SharpenPercent}"
                               + (_settings.AudioMode == AudioOutputMode.Headset
                                     ? (!string.IsNullOrEmpty(_session.Audio.ActiveSinkName)
-                                        ? " Â· audioâ†’Quest (Opus " + _session.Audio.ActiveSinkName + ")"
-                                        : " Â· audioâ†’Quest (Opus)")
-                                    : " Â· audioâ†’PC");
+                                        ? " · audio→Quest (Opus " + _session.Audio.ActiveSinkName + ")"
+                                        : " · audio→Quest (Opus)")
+                                    : " · audio→PC");
         RefreshAudioHint();
     }
 
