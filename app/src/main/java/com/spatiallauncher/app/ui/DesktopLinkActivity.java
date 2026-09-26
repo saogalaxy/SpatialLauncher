@@ -48,7 +48,7 @@ import java.util.ArrayDeque;
 
 /**
  * Thin Quest viewer for Spatial Launcher Desktop: LAN auto-find + JPEG/MPEG SBS +
- * Horizon SIDE_BY_SIDE. No Quest depth / OCR / Listen / Piper on this path —
+ * Horizon SIDE_BY_SIDE. No Quest depth / OCR / Listen / Piper on this path â€”
  * PC owns those pipelines.
  */
 public class DesktopLinkActivity extends AppCompatActivity implements SurfaceHolder.Callback {
@@ -154,7 +154,7 @@ public class DesktopLinkActivity extends AppCompatActivity implements SurfaceHol
     private int pendingAuGen;
     private volatile boolean waitForIdr = true;
     private Thread h264DecodeThread;
-    /** JPEG uses lockCanvas; MPEG/AV1 use MediaCodec — switching without a surface recycle blacks the view. */
+    /** JPEG uses lockCanvas; MPEG/AV1 use MediaCodec â€” switching without a surface recycle blacks the view. */
     private enum SurfaceProducer { NONE, CANVAS, MEDIA_CODEC }
     private volatile SurfaceProducer surfaceProducer = SurfaceProducer.NONE;
     /**
@@ -168,7 +168,7 @@ public class DesktopLinkActivity extends AppCompatActivity implements SurfaceHol
     private View.OnHoverListener surfaceHoverReveal;
     private volatile String pendingRedirectUrl;
     private volatile byte[] pendingAv1C;
-    /** Wall clock of last JPEG/AU received — watchdog reconnects if this stalls. */
+    /** Wall clock of last JPEG/AU received â€” watchdog reconnects if this stalls. */
     private volatile long lastMediaTick;
 
     @Override
@@ -207,12 +207,8 @@ public class DesktopLinkActivity extends AppCompatActivity implements SurfaceHol
         presetMoviesBtn = findViewById(R.id.desktop_link_preset_movies);
         findViewById(R.id.desktop_link_min).setOnClickListener(v -> minimizeChrome());
         findViewById(R.id.desktop_link_exit).setOnClickListener(v -> finish());
-        Button usbBtn = findViewById(R.id.desktop_link_usb);
-        if (usbBtn != null) {
-            usbBtn.setOnClickListener(v -> connectUsb());
-        }
         // Reader controls (on-screen: controller key events are eaten by the
-        // system here — B arrives as Back, A never arrives).
+        // system here â€” B arrives as Back, A never arrives).
         speakScreenBtn = findViewById(R.id.desktop_link_speak_screen);
         continuousToggle = findViewById(R.id.desktop_link_continuous);
         if (speakScreenBtn != null) {
@@ -262,11 +258,10 @@ public class DesktopLinkActivity extends AppCompatActivity implements SurfaceHol
 
         String saved = getSharedPreferences(PREFS, MODE_PRIVATE)
                 .getString(KEY_URL, "");
-        // A saved localhost URL is only meaningful while an adb forward is up.
-        // Without one it points at the headset itself and every connect fails,
-        // so drop it and let LAN discovery find the PC again.
+        // A loopback URL points at the headset itself, so it can never reach a
+        // PC. Drop it on launch and let LAN discovery find the PC again.
         if (isLoopbackUrl(saved)) {
-            Log.i(TAG, "dropping saved loopback URL (no adb forward): " + saved);
+            Log.i(TAG, "dropping saved loopback URL: " + saved);
             getSharedPreferences(PREFS, MODE_PRIVATE).edit().remove(KEY_URL).apply();
             saved = "";
         }
@@ -307,7 +302,7 @@ public class DesktopLinkActivity extends AppCompatActivity implements SurfaceHol
     };
 
     /** If the TCP pump thread dies, reclaim a PC viewer slot and reconnect.
-     * Never force-reconnect while the worker is alive — stall gaps during codec /
+     * Never force-reconnect while the worker is alive â€” stall gaps during codec /
      * surface handoff look like silence and were killing mode switches. */
     private final Runnable streamWatchdogRunnable = new Runnable() {
         @Override
@@ -319,7 +314,7 @@ public class DesktopLinkActivity extends AppCompatActivity implements SurfaceHol
             if (streamDesired && !reconnectScheduled && now >= reconnectGraceUntil) {
                 boolean workerAlive = worker != null && worker.isAlive();
                 if (!workerAlive) {
-                    Log.w(TAG, "watchdog reconnect — pump thread dead");
+                    Log.w(TAG, "watchdog reconnect â€” pump thread dead");
                     setStatus(getString(R.string.desktop_link_reconnecting));
                     forceReconnect();
                 }
@@ -329,69 +324,14 @@ public class DesktopLinkActivity extends AppCompatActivity implements SurfaceHol
     };
 
     /**
-     * USB link: the PC forwards its :8765 over adb, so the stream lives at
-     * Quest localhost. Same path as LAN discovery from here on; audio has no
-     * UDP forward and stays on Wi-Fi.
-     */
-    private void connectUsb() {
-        String next = "http://127.0.0.1:8765/" + codecPathSuffix(selectedCodec);
-        urlInput.setText(next);
-        getSharedPreferences(PREFS, MODE_PRIVATE).edit().putString(KEY_URL, next).apply();
-        setStatus(getString(R.string.desktop_link_usb_hint));
-        Log.i(TAG, "USB connect -> " + next);
-        probeUsbLink();
-        boolean workerAlive = worker != null && worker.isAlive();
-        if (!streamDesired || !workerAlive) {
-            forceReconnect();
-        }
-    }
-
-    /**
-     * True for a URL the headset would be dialing on itself. Only valid while an
-     * adb forward is active; otherwise it is a dead end that hides LAN discovery.
+     * True for a URL the headset would be dialing on itself. It can never reach
+     * a PC, so a saved one is dead weight that hides LAN discovery.
      */
     private static boolean isLoopbackUrl(String url) {
         if (url == null) return false;
         String u = url.trim().toLowerCase(java.util.Locale.US);
         return u.startsWith("http://127.") || u.startsWith("http://localhost")
                 || u.startsWith("http://[::1]") || u.startsWith("http://[::]");
-    }
-
-    /** Live indicator: can we actually reach the PC through the USB forward? */
-    private void probeUsbLink() {
-        new Thread(() -> {
-            HttpURLConnection c = null;
-            try {
-                c = (HttpURLConnection) new URL("http://127.0.0.1:8765/status").openConnection();
-                c.setConnectTimeout(2500);
-                c.setReadTimeout(2500);
-                c.setRequestMethod("GET");
-                if (c.getResponseCode() != 200) {
-                    setStatus(getString(R.string.desktop_link_usb_hint));
-                    return;
-                }
-                ByteArrayOutputStream bos = new ByteArrayOutputStream();
-                InputStream in = c.getInputStream();
-                byte[] buf = new byte[2048];
-                int n;
-                while ((n = in.read(buf)) >= 0) bos.write(buf, 0, n);
-                String body = bos.toString("UTF-8");
-                boolean live = body.contains("\"sessionActive\":true");
-                if (body.contains("\"ok\":true")) {
-                    setStatus(live ? getString(R.string.desktop_link_usb_live)
-                            : getString(R.string.desktop_link_usb_forward_only));
-                } else {
-                    setStatus(getString(R.string.desktop_link_usb_hint));
-                }
-            } catch (Exception e) {
-                Log.w(TAG, "USB probe failed", e);
-                setStatus(getString(R.string.desktop_link_usb_hint));
-            } finally {
-                if (c != null) {
-                    c.disconnect();
-                }
-            }
-        }, "DesktopLinkUsbProbe").start();
     }
 
     private void startDiscovery(boolean autoConnect) {
@@ -572,7 +512,7 @@ public class DesktopLinkActivity extends AppCompatActivity implements SurfaceHol
     /**
      * lockCanvas and MediaCodec cannot share one SurfaceView producer. On codec
      * switches, replace the SurfaceView so BLAST starts clean (visibility toggles
-     * are unreliable on Horizon when going canvas→MediaCodec).
+     * are unreliable on Horizon when going canvasâ†’MediaCodec).
      */
     private void ensureSurfaceProducer(SurfaceProducer next) {
         synchronized (surfaceRecreateLock) {
@@ -596,16 +536,16 @@ public class DesktopLinkActivity extends AppCompatActivity implements SurfaceHol
             surfaceReady = true;
             return;
         }
-        // Cold start: first MediaCodec use on the layout SurfaceView — keep it.
+        // Cold start: first MediaCodec use on the layout SurfaceView â€” keep it.
         if (surfaceProducer == SurfaceProducer.NONE && next == SurfaceProducer.MEDIA_CODEC && surfaceOk) {
             surfaceProducer = next;
             surfaceReady = true;
-            Log.i(TAG, "surface producer cold→MEDIA_CODEC");
+            Log.i(TAG, "surface producer coldâ†’MEDIA_CODEC");
             return;
         }
         // Same producer already active: never tear down the SurfaceView on mode switch.
         // Waiting out a brief invalid surface is enough; recreate was stacking pumps
-        // (MEDIA_CODEC→MEDIA_CODEC gen unchanged → black / interrupted av1c).
+        // (MEDIA_CODECâ†’MEDIA_CODEC gen unchanged â†’ black / interrupted av1c).
         if (surfaceProducer == next) {
             long waitUntil = System.currentTimeMillis() + 5000;
             while (wantStream && !Thread.currentThread().isInterrupted()
@@ -622,11 +562,11 @@ public class DesktopLinkActivity extends AppCompatActivity implements SurfaceHol
                 return;
             }
             surfaceReady = false;
-            Log.w(TAG, "surface still invalid for " + next + " — pump will retry (no recreate)");
+            Log.w(TAG, "surface still invalid for " + next + " â€” pump will retry (no recreate)");
             return;
         }
         SurfaceProducer from = surfaceProducer;
-        Log.i(TAG, "surface producer " + from + "→" + next + " (recreate)");
+        Log.i(TAG, "surface producer " + from + "â†’" + next + " (recreate)");
         releaseDecoder();
         final int genBefore = surfaceGeneration;
         final Object done = new Object();
@@ -680,7 +620,7 @@ public class DesktopLinkActivity extends AppCompatActivity implements SurfaceHol
             surfaceReady = true;
         } else {
             surfaceReady = false;
-            Log.w(TAG, "surface recreate incomplete " + from + "→" + next
+            Log.w(TAG, "surface recreate incomplete " + from + "â†’" + next
                     + " gen=" + surfaceGeneration + "/" + genBefore);
         }
     }
@@ -738,7 +678,7 @@ public class DesktopLinkActivity extends AppCompatActivity implements SurfaceHol
             return;
         }
         // Fixed-size buffers are for lockCanvas (JPEG). MediaCodec needs the native
-        // stream resolution — pinning to panel size softens MPEG/AV1 in 3D.
+        // stream resolution â€” pinning to panel size softens MPEG/AV1 in 3D.
         if (surfaceProducer == SurfaceProducer.MEDIA_CODEC || !allowLockCanvas) {
             return;
         }
@@ -800,7 +740,7 @@ public class DesktopLinkActivity extends AppCompatActivity implements SurfaceHol
         }
     }
 
-    /** Call when the stream first goes live — tuck settings away fast. */
+    /** Call when the stream first goes live â€” tuck settings away fast. */
     private void hideChromeSoonAfterLive() {
         main.removeCallbacks(hideChromeRunnable);
         main.postDelayed(hideChromeRunnable, CHROME_LIVE_HIDE_MS);
@@ -823,7 +763,7 @@ public class DesktopLinkActivity extends AppCompatActivity implements SurfaceHol
         streamDesired = true;
         reconnectGraceUntil = System.currentTimeMillis() + RECONNECT_GRACE_MS;
         lastMediaTick = System.currentTimeMillis();
-        // Do NOT set wantStream=true here — orphaned pumps must stay stopped until startStream.
+        // Do NOT set wantStream=true here â€” orphaned pumps must stay stopped until startStream.
         stopStreamJoin();
         updateConnectButtonLabel();
         setStatus(getString(R.string.desktop_link_reconnecting));
@@ -901,8 +841,8 @@ public class DesktopLinkActivity extends AppCompatActivity implements SurfaceHol
             }
         }
         releaseDecoder();
-        // Keep surfaceProducer as-is. Resetting to NONE made JPEG→AV1 look like a
-        // cold start and skip the canvas→MediaCodec recycle, which drops the stream.
+        // Keep surfaceProducer as-is. Resetting to NONE made JPEGâ†’AV1 look like a
+        // cold start and skip the canvasâ†’MediaCodec recycle, which drops the stream.
         if (stereoApplied) {
             HorizonStereoComposition.set(surfaceView, false);
             stereoApplied = false;
@@ -927,7 +867,7 @@ public class DesktopLinkActivity extends AppCompatActivity implements SurfaceHol
     }
 
     private void updateConnectButtonLabel() {
-        // Find/Connect UI removed — monitor icon auto-connects; label unused.
+        // Find/Connect UI removed â€” monitor icon auto-connects; label unused.
     }
 
     private void probeSessionStatus(String streamUrl) {
@@ -976,7 +916,7 @@ public class DesktopLinkActivity extends AppCompatActivity implements SurfaceHol
         lastMediaTick = System.currentTimeMillis();
         reconnectGraceUntil = System.currentTimeMillis() + RECONNECT_GRACE_MS;
         linkCodec = detectCodec(url);
-        // Arm before stereo setFixedSize → surfaceChanged, which used to lockCanvas
+        // Arm before stereo setFixedSize â†’ surfaceChanged, which used to lockCanvas
         // the MediaCodec surface with a leftover JPEG and poison BLAST.
         setCanvasDrawAllowed(linkCodec == LinkCodec.JPEG);
         updateConnectButtonLabel();
@@ -996,7 +936,7 @@ public class DesktopLinkActivity extends AppCompatActivity implements SurfaceHol
             worker = new Thread(() -> pumpMjpeg(url, gen), "DesktopLinkMjpeg");
         }
         worker.start();
-        // Opus UDP: start once; keep across video reconnect / codec / Gaming↔Movies.
+        // Opus UDP: start once; keep across video reconnect / codec / Gamingâ†”Movies.
         if (!audioReceiver.isRunning()) {
             try {
                 audioReceiver.start();
@@ -1084,7 +1024,7 @@ public class DesktopLinkActivity extends AppCompatActivity implements SurfaceHol
         int failStreak = 0;
         while (wantStream && streamGen == gen && !Thread.currentThread().isInterrupted()) {
             running = true;
-            // Prefer the latest advertised URL in case PC switched codecs —
+            // Prefer the latest advertised URL in case PC switched codecs â€”
             // but never let a stale beacon undo the codec we just selected.
             String fresh = discoverPc(900);
             if (fresh != null && !fresh.isEmpty() && discoveryMatchesSelectedCodec(fresh)) {
@@ -1153,7 +1093,7 @@ public class DesktopLinkActivity extends AppCompatActivity implements SurfaceHol
         int failStreak = 0;
         while (wantStream && streamGen == gen && !Thread.currentThread().isInterrupted()) {
             running = true;
-            // Prefer the latest advertised URL in case PC switched codecs —
+            // Prefer the latest advertised URL in case PC switched codecs â€”
             // but never let a stale beacon undo the codec we just selected.
             String fresh = discoverPc(900);
             if (fresh != null && !fresh.isEmpty() && discoveryMatchesSelectedCodec(fresh)) {
@@ -1186,7 +1126,7 @@ public class DesktopLinkActivity extends AppCompatActivity implements SurfaceHol
                 break;
             }
             if (pendingRedirectUrl != null) {
-                // Path/codec change — drop decoder so the next mime can configure cleanly.
+                // Path/codec change â€” drop decoder so the next mime can configure cleanly.
                 releaseDecoder();
                 urlString = pendingRedirectUrl;
                 pendingRedirectUrl = null;
@@ -1256,8 +1196,8 @@ public class DesktopLinkActivity extends AppCompatActivity implements SurfaceHol
             String label = codecLabel(codec);
             noteMedia();
             setStatus(stereoToggle.isChecked()
-                    ? getString(R.string.desktop_link_live_3d) + " · " + label
-                    : getString(R.string.desktop_link_live) + " · " + label);
+                    ? getString(R.string.desktop_link_live_3d) + " Â· " + label
+                    : getString(R.string.desktop_link_live) + " Â· " + label);
             main.post(() -> {
                 hideChromeSoonAfterLive();
                 refreshRemoteSettings();
@@ -1299,7 +1239,7 @@ public class DesktopLinkActivity extends AppCompatActivity implements SurfaceHol
                 setStatus(label + " surface not ready");
                 return;
             }
-            // Reuse a live decoder — releasing every HTTP reconnect left the Quest
+            // Reuse a live decoder â€” releasing every HTTP reconnect left the Quest
             // BLAST surface "already connected" and mode/codec switches went black.
             if (!ensureDecoder(codec)) {
                 setStatus(label + " decoder unavailable");
@@ -1518,7 +1458,7 @@ public class DesktopLinkActivity extends AppCompatActivity implements SurfaceHol
                             urlInput.setText(next);
                             getSharedPreferences(PREFS, MODE_PRIVATE).edit().putString(KEY_URL, next).apply();
                         });
-                        Log.i(TAG, "stream redirect HTTP " + code + " → " + next);
+                        Log.i(TAG, "stream redirect HTTP " + code + " â†’ " + next);
                     }
                 }
                 if (!codec.isEmpty()) {
@@ -1569,7 +1509,7 @@ public class DesktopLinkActivity extends AppCompatActivity implements SurfaceHol
             if (configureDecoderLocked(codec, wantMime, surface)) {
                 return true;
             }
-            Log.w(TAG, "decoder configure failed — recovering surface");
+            Log.w(TAG, "decoder configure failed â€” recovering surface");
         }
         if (!recoverMediaCodecSurface()) {
             return false;
@@ -1586,7 +1526,7 @@ public class DesktopLinkActivity extends AppCompatActivity implements SurfaceHol
     private boolean configureDecoderLocked(LinkCodec codec, String mime, Surface surface) {
         MediaCodec decoder = null;
         try {
-            // SBS stream is typically ~1920x540–1080; allow adaptive size.
+            // SBS stream is typically ~1920x540â€“1080; allow adaptive size.
             MediaFormat format = MediaFormat.createVideoFormat(mime, 1920, 1080);
             format.setInteger(MediaFormat.KEY_MAX_INPUT_SIZE, 2 * 1024 * 1024);
             try {
@@ -1691,7 +1631,7 @@ public class DesktopLinkActivity extends AppCompatActivity implements SurfaceHol
             return;
         }
         try {
-            // Never block waiting for an input slot — drop and stay on the latest AU.
+            // Never block waiting for an input slot â€” drop and stay on the latest AU.
             int inIndex = codec.dequeueInputBuffer(0);
             if (inIndex < 0) {
                 waitForIdr = true;
@@ -1706,7 +1646,7 @@ public class DesktopLinkActivity extends AppCompatActivity implements SurfaceHol
                 Log.w(TAG, "AU too large for input buffer");
                 codec.queueInputBuffer(inIndex, 0, 0, 0, 0);
             } else {
-                // With csd-0 set, do not mark in-band AUs as CODEC_CONFIG — that
+                // With csd-0 set, do not mark in-band AUs as CODEC_CONFIG â€” that
                 // confuses QTI AV1. Sequence headers stay in the elementary stream.
                 buf.put(au);
                 codec.queueInputBuffer(inIndex, 0, au.length, System.nanoTime() / 1000L, 0);
@@ -1743,7 +1683,7 @@ public class DesktopLinkActivity extends AppCompatActivity implements SurfaceHol
             videoDecoder = null;
             videoDecoderMime = null;
             try {
-                // Detach BLAST consumer before stop/release — prevents
+                // Detach BLAST consumer before stop/release â€” prevents
                 // "connect: already connected" on the next configure.
                 codec.setOutputSurface(null);
             } catch (Exception ignored) {
@@ -1819,7 +1759,7 @@ public class DesktopLinkActivity extends AppCompatActivity implements SurfaceHol
                     } else {
                         jpeg.write(b);
                         if (prev == 0xFF && b == 0xD9) {
-                            // Keep only the newest JPEG — never queue. That is what
+                            // Keep only the newest JPEG â€” never queue. That is what
                             // causes multi-second lag on Full SBS.
                             byte[] data = jpeg.toByteArray();
                             noteMedia();
@@ -1895,7 +1835,7 @@ public class DesktopLinkActivity extends AppCompatActivity implements SurfaceHol
             latestFrame = bmp;
         }
         // Draw on the stream thread. Posting every JPEG to the UI queue
-        // was backing up and making MJPEG look like 10–20 fps.
+        // was backing up and making MJPEG look like 10â€“20 fps.
         redrawLatest();
     }
 
@@ -1928,8 +1868,8 @@ public class DesktopLinkActivity extends AppCompatActivity implements SurfaceHol
                 return;
             }
 
-            // With Horizon SIDE_BY_SIDE, left half of the surface → left eye and
-            // right half → right eye. Draw the full SBS frame edge-to-edge (same as
+            // With Horizon SIDE_BY_SIDE, left half of the surface â†’ left eye and
+            // right half â†’ right eye. Draw the full SBS frame edge-to-edge (same as
             // PanelMainActivity cast). Manually splitting + letterboxing caused the
             // right eye to go black when the canvas size raced stereo composition.
             boolean stereo = stereoApplied
@@ -2197,7 +2137,7 @@ public class DesktopLinkActivity extends AppCompatActivity implements SurfaceHol
                 int code = conn.getResponseCode();
                 conn.disconnect();
                 if (code == 200) {
-                    setStatus(getString(R.string.desktop_link_live_3d) + " · PC depth " + depth + "%");
+                    setStatus(getString(R.string.desktop_link_live_3d) + " Â· PC depth " + depth + "%");
                     if (reconnectForCodec) {
                         reconnectGraceUntil = System.currentTimeMillis() + RECONNECT_GRACE_MS;
                         lastMediaTick = System.currentTimeMillis();
@@ -2207,7 +2147,7 @@ public class DesktopLinkActivity extends AppCompatActivity implements SurfaceHol
                             if (!matched) {
                                 Log.w(TAG, "PC codec not confirmed yet; reconnecting anyway to " + codec);
                             }
-                            Log.i(TAG, "codec switch → " + codec + " matched=" + matched);
+                            Log.i(TAG, "codec switch â†’ " + codec + " matched=" + matched);
                             forceReconnect();
                         });
                     }
@@ -2274,7 +2214,7 @@ public class DesktopLinkActivity extends AppCompatActivity implements SurfaceHol
 
     /**
      * Reader controls while linked (on-screen buttons: controller key events
-     * never arrive here — B is eaten by the system as Back, A never arrives).
+     * never arrive here â€” B is eaten by the system as Back, A never arrives).
      * Speak reads one OCR pass of the current frame (manual one-shot; the
      * pipeline covers continuous). Gated on a live stream.
      */

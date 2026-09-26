@@ -146,10 +146,8 @@
             <TextBlock TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" FontSize="10" Margin="0,6,0,0"
                        Text="Change depth/quality from Quest Desktop Link controls while streaming — no need to leave fullscreen on PC."/>
             <Button Content="Open SBS Viewer (optional)" Margin="0,8,0,0" Height="28" Click="OpenViewer_Click"/>
-            <Button x:Name="UsbLinkButton" Content="Enable USB link" Margin="0,8,0,0" Height="28" Click="UsbLink_Click"
-                    ToolTip="Forward Quest USB localhost:8765 to this PC (video + settings; audio stays on Wi-Fi)"/>
-            <TextBlock x:Name="UsbLinkStatus" TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" FontSize="10" Margin="0,4,0,0"
-                       Text="USB: not forwarded — plug in Quest 3 with USB debugging on."/>
+            <TextBlock TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" FontSize="10" Margin="0,8,0,0"
+                       Text="PC to Quest: this app over Wi-Fi (LAN auto-detect), or Meta Quest Link casting."/>
           </StackPanel>
         </ScrollViewer>
       </Grid>

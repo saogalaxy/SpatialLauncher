@@ -43,20 +43,11 @@ flowchart LR
 3. Paste URL only if discovery fails (firewall / AP isolation).  
 4. Allow **TCP 8765**, **UDP 8766** (discovery), **UDP 8767** (audio) on the Windows Firewall LAN profile. PC speakers stay on while Headset mirrors — mute speakers for Quest-only.
 
-### USB link (no Wi-Fi for video)
+### USB
 
-1. PC: plug in Quest 3 (USB debugging on, authorize the RSA prompt), **Enable USB link**
-   in Quest Link settings. The forward is Quest `localhost:8765` → PC **8768**, kept
-   off the LAN port 8765 so USB and LAN can run at the same time (needs `adb` —
-   PATH, `%LOCALAPPDATA%\Android\Sdk`, `ANDROID_HOME`, or Program Files copy).
-2. Quest: Desktop Link chrome → **USB** connects to `http://127.0.0.1:8765/...`
-   with the current codec. Reader/speak endpoints ride the same forward.
-3. Audio stays on Wi-Fi (Opus is UDP and cannot adb-forward). Without Wi-Fi
-   there is no headset audio; video, settings, and reader still work.
-
-The Quest only accepts a saved `localhost` URL while a forward is actually up.
-If one is left over from a previous USB session, Desktop Link drops it on launch
-and falls back to LAN discovery, so a stale entry cannot strand LAN mode.
+Not supported. PC → Quest video goes over Wi-Fi (this app, LAN auto-detect) or
+Meta Quest Link casting. A saved `localhost` URL is dropped on launch on the
+headset, since it can never reach a PC and would otherwise hide LAN discovery.
 
 Quest button/slider help: [HELP.md](HELP.md) § Desktop Link.
 

@@ -44,14 +44,6 @@
                 android:textStyle="bold" />
 
             <Button
-                android:id="@+id/desktop_link_usb"
-                android:layout_width="wrap_content"
-                android:layout_height="36dp"
-                android:layout_marginStart="6dp"
-                android:minWidth="0dp"
-                android:text="@string/desktop_link_usb" />
-
-            <Button
                 android:id="@+id/desktop_link_min"
                 android:layout_width="wrap_content"
                 android:layout_height="36dp"
