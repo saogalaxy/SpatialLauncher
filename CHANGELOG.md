@@ -2,6 +2,14 @@
 
 All notable changes to **Spatial Launcher** (Quest app + Windows Desktop) are recorded here.
 
+- **Store version code bumped 4 -> 5.** The Store rejected the first upload with
+  "An APK has already been uploaded with version code 4", because it requires a
+  strictly higher code for every subsequent upload. `versionName` stays `1.0.2`;
+  only the code moves. Re-verified on the rebuilt artifact: `versionCode='5'`,
+  signed with the same release key as the installed Store build, v2 signature
+  scheme, arm64-only, `minSdk 29` / `targetSdk 34`, and still free of both
+  `REQUEST_INSTALL_PACKAGES` and the beta `FileProvider`.
+
 - **Installers now build and push the correct target, and the Quest installer no
   longer risks the Store app.** `tools/easy_install.ps1` used to build
   `:app:assembleDebug` and install it over `com.sptiallauncher.app` - the same
