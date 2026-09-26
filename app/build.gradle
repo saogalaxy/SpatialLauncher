@@ -14,6 +14,10 @@ android {
         ndk {
             abiFilters "arm64-v8a"
         }
+        // Defined for every lane so the release build compiles; only the beta
+        // lane overrides it. BetaUpdateCheck is gated at runtime on the .beta
+        // package name, so this value is never read in a store build.
+        buildConfigField "String", "BETA_BUILD", "\"0\""
     }
 
     sourceSets {
@@ -33,6 +37,10 @@ android {
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_17
         targetCompatibility JavaVersion.VERSION_17
+    }
+    buildFeatures {
+        // Needed for the beta lane's BETA_BUILD marker (BetaUpdateCheck).
+        buildConfig true
     }
 
     aaptOptions {
@@ -105,6 +113,11 @@ android {
             applicationIdSuffix ".beta"
             versionNameSuffix "-beta"
             debuggable true
+            // Monotonic marker so BetaUpdateCheck can tell a newer beta build
+            // from the one running. Bump with -PbetaBuild=20260926-02; it is
+            // also embedded in the published asset name.
+            buildConfigField "String", "BETA_BUILD",
+                    "\"${project.hasProperty('betaBuild') ? project.property('betaBuild') : 'local'}\""
         }
         release {
             debuggable false

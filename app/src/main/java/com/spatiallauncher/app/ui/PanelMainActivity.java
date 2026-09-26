@@ -387,6 +387,8 @@ public class PanelMainActivity extends AppCompatActivity {
         WebView.enableSlowWholeDocumentDraw();
         setContentView(R.layout.activity_panel_main);
         PanelAlerts.bindBanner(findViewById(R.id.panel_message_bar));
+        // Beta lane only; no-op for the store build. Never blocks startup.
+        BetaUpdateCheck.maybeCheck(this);
 
         packageManager = getPackageManager();
         libraryStore = new GameLibraryStore(this);

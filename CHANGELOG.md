@@ -2,6 +2,15 @@
 
 All notable changes to **Spatial Launcher** (Quest app + Windows Desktop) are recorded here.
 
+- **Beta builds now notice new builds on GitHub.** The beta panel checks a rolling
+  `beta` GitHub release every 6 hours and raises an in-app banner when the
+  published marker is newer than the running one. Gated on the `.beta` package
+  name, so the store build never runs it. There is deliberately no in-app
+  installer - the banner links to the release page, because installing in place
+  would need `REQUEST_INSTALL_PACKAGES`, which the app does not declare. Build
+  markers are plain integers embedded as `BuildConfig.BETA_BUILD` and carried in
+  the published asset name; see [BETA.md](docs/BETA.md).
+
 - **Stream choppiness fixed (regression from 1.0.2-beta).** Full SBS was being
   forced for H.264/AV1 on the assumption that bandwidth allowed full-res eyes. It
   does not: at StreamWidth 1920 that made each frame 3840x1080 (~4.1 MP) instead of

@@ -2,6 +2,7 @@
 <resources>
     <string name="app_name">Spatial Launcher</string>
     <string name="panel_alerts_channel">Launcher status</string>
+    <string name="beta_update_available">New beta build available: %1$s → %2$s. Download from the GitHub release page.</string>
     <string name="setting_force_stereo">Force stereo render</string>
     <string name="setting_depth_strength">Depth strength</string>
     <string name="setting_convergence">Convergence</string>
