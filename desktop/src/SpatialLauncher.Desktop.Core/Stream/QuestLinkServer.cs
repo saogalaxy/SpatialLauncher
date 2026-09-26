@@ -19,7 +19,12 @@ public sealed class QuestLinkServer : IDisposable
     public const int DefaultPort = 8765;
 
     private TcpListener? _listener;
+    private TcpListener? _extraListener;
     private Thread? _thread;
+    private Thread? _extraThread;
+
+    /// <summary>Extra port the adb USB forward lands on, when one is open.</summary>
+    public int? UsbPort { get; private set; }
     private Thread? _encodeThread;
     private volatile bool _running;
     private readonly object _frameLock = new();
@@ -105,20 +110,47 @@ public sealed class QuestLinkServer : IDisposable
         }
     }
 
-    public void Start(int port = DefaultPort)
+    public void Start(int port = DefaultPort, int? extraPort = null)
     {
         Stop();
         _port = port;
         _listener = new TcpListener(IPAddress.Any, port);
         _listener.Start();
+        // A second port lets the adb USB forward land somewhere other than the
+        // LAN port; both feed the same handler so USB and LAN can run together.
+        TcpListener? extra = null;
+        if (extraPort is > 0 && extraPort != port)
+        {
+            try
+            {
+                extra = new TcpListener(IPAddress.Any, extraPort.Value);
+                extra.Start();
+                UsbPort = extraPort.Value;
+            }
+            catch (SocketException ex)
+            {
+                UsbPort = null;
+                StatusChanged?.Invoke($"USB port {extraPort} unavailable: {ex.Message}");
+            }
+        }
+        else
+        {
+            UsbPort = null;
+        }
+        _extraListener = extra;
         AdvertiseUrl = BuildAdvertiseUrl(port, _codec);
         _running = true;
         _encodeError = null;
         _lastKeyTick = 0;
         _encodeThread = new Thread(EncodeLoop) { IsBackground = true, Name = "SldEncode" };
         _encodeThread.Start();
-        _thread = new Thread(AcceptLoop) { IsBackground = true, Name = "SldQuestLink" };
+        _thread = new Thread(() => AcceptLoop(_listener)) { IsBackground = true, Name = "SldQuestLink" };
         _thread.Start();
+        if (_extraListener != null)
+        {
+            _extraThread = new Thread(() => AcceptLoop(_extraListener)) { IsBackground = true, Name = "SldQuestLinkUsb" };
+            _extraThread.Start();
+        }
         StatusChanged?.Invoke($"Quest Link streaming · {CodecDisplayName(_codec)} · " + AdvertiseUrl);
     }
 
@@ -131,9 +163,13 @@ public sealed class QuestLinkServer : IDisposable
             Monitor.PulseAll(_frameLock);
         try { _listener?.Stop(); } catch { /* ignore */ }
         _listener = null;
+        try { _extraListener?.Stop(); } catch { /* ignore */ }
+        _extraListener = null;
         try { _thread?.Join(400); } catch { /* ignore */ }
-        try { _encodeThread?.Join(400); } catch { /* ignore */ }
+        try { _extraThread?.Join(400); } catch { /* ignore */ }
         _thread = null;
+        _extraThread = null;
+        UsbPort = null;
         _encodeThread = null;
         lock (_encodeLock)
         {
@@ -265,13 +301,13 @@ public sealed class QuestLinkServer : IDisposable
         _ => "JPEG"
     };
 
-    private void AcceptLoop()
+    private void AcceptLoop(TcpListener? listener)
     {
-        while (_running && _listener != null)
+        while (_running && listener != null)
         {
             try
             {
-                var client = _listener.AcceptTcpClient();
+                var client = listener.AcceptTcpClient();
                 client.NoDelay = true;
                 // Wi‑Fi JPEG/AU writes need headroom; 500ms left half-dead viewers
                 // holding slots so the headset could not reclaim a stream.

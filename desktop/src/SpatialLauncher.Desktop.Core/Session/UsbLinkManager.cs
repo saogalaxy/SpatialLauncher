@@ -4,13 +4,25 @@ namespace SpatialLauncher.Desktop.Core.Session;
 
 /// <summary>
 /// Quest USB link: TCP port forward over adb so the headset reaches the PC
-/// stream without Wi-Fi (Quest connects to its own localhost:8765).
+/// stream without Wi-Fi.
+///
+/// The forward is device 8765 -> host <see cref="UsbHostPort"/>, deliberately a
+/// different port from the LAN server's 8765. Sharing one port does not work on
+/// Windows: adb binds 127.0.0.1:8765 for the forward, which stops the server
+/// binding 0.0.0.0:8765 ("Only one usage of each socket address"), and whichever
+/// starts second loses. The headset still dials its own localhost:8765, so this
+/// is invisible on the Quest side.
+///
 /// Video + settings/reader HTTP ride the forward; Opus audio is UDP and
 /// cannot adb-forward, so headset audio stays on Wi-Fi.
 /// </summary>
 public static class UsbLinkManager
 {
+    /// <summary>Port the headset dials on its own localhost (adb remote side).</summary>
     public const int Port = 8765;
+
+    /// <summary>Host port the forward lands on, kept clear of the LAN port.</summary>
+    public const int UsbHostPort = 8768;
 
     public static string? FindAdb()
     {
@@ -60,14 +72,14 @@ public static class UsbLinkManager
         string? serial = ParseDeviceSerial(devicesOut);
         if (serial == null)
             return (false, "No USB device — plug in Quest 3 (USB debugging on) and authorize it.");
-        var (fwdExit, fwdErr) = await RunAsync(adb, $"-s {serial} forward tcp:{Port} tcp:{Port}");
+        var (fwdExit, fwdErr) = await RunAsync(adb, $"-s {serial} forward tcp:{Port} tcp:{UsbHostPort}");
         if (fwdExit != 0)
             return (false, "adb forward failed: " + fwdErr.Trim());
         return (true, $"USB link ready ({serial}) — on Quest use USB connect. Audio stays on Wi-Fi.");
     }
 
     /// <summary>
-    /// Live check: device still attached AND the tcp:8765 forward still listed.
+    /// Live check: device still attached AND the forward still listed.
     /// </summary>
     public static async Task<(bool on, string detail)> CheckForwardAsync()
     {
@@ -85,7 +97,8 @@ public static class UsbLinkManager
         {
             string line = raw.Trim();
             if (line.StartsWith(serial, StringComparison.Ordinal)
-                && line.Contains($"tcp:{Port}", StringComparison.Ordinal))
+                && line.Contains($"tcp:{Port}", StringComparison.Ordinal)
+                && line.Contains($"tcp:{UsbHostPort}", StringComparison.Ordinal))
                 return (true, serial);
         }
         return (false, "forward missing");

@@ -1,6 +1,19 @@
 # Changelog
 
 All notable changes to **Spatial Launcher** (Quest app + Windows Desktop) are recorded here.
+
+- **USB and LAN no longer fight over port 8765.** The adb forward pointed at the
+  same host port the LAN server binds, so enabling one could stop the other from
+  listening at all ("Only one usage of each socket address") — whichever started
+  second lost. The forward is now Quest `localhost:8765` → PC **8768**, and the
+  server opens 8768 alongside 8765 unconditionally, so both transports stay live
+  together and enabling USB never restarts the server or drops LAN viewers.
+  Verified: LAN `:8765` and USB `:8768` both answering 200 at the same time.
+- **A stale USB URL can no longer strand LAN mode.** Desktop Link restored a saved
+  `127.0.0.1` URL forever, so after one USB session every later launch tried to
+  reach the headset's own loopback with no forward behind it and simply could not
+  connect. A saved loopback URL is now dropped on launch and LAN discovery takes
+  over.
 Format: newest first. Dates are local (US).
 
 ## Unreleased → 1.0.2 (versionCode 4, 2026-09-19)

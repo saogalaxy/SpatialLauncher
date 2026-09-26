@@ -262,6 +262,14 @@ public class DesktopLinkActivity extends AppCompatActivity implements SurfaceHol
 
         String saved = getSharedPreferences(PREFS, MODE_PRIVATE)
                 .getString(KEY_URL, "");
+        // A saved localhost URL is only meaningful while an adb forward is up.
+        // Without one it points at the headset itself and every connect fails,
+        // so drop it and let LAN discovery find the PC again.
+        if (isLoopbackUrl(saved)) {
+            Log.i(TAG, "dropping saved loopback URL (no adb forward): " + saved);
+            getSharedPreferences(PREFS, MODE_PRIVATE).edit().remove(KEY_URL).apply();
+            saved = "";
+        }
         urlInput.setText(saved);
         boolean stereoOn = getSharedPreferences(PREFS, MODE_PRIVATE).getBoolean(KEY_STEREO, true);
         stereoToggle.setChecked(stereoOn);
@@ -336,6 +344,17 @@ public class DesktopLinkActivity extends AppCompatActivity implements SurfaceHol
         if (!streamDesired || !workerAlive) {
             forceReconnect();
         }
+    }
+
+    /**
+     * True for a URL the headset would be dialing on itself. Only valid while an
+     * adb forward is active; otherwise it is a dead end that hides LAN discovery.
+     */
+    private static boolean isLoopbackUrl(String url) {
+        if (url == null) return false;
+        String u = url.trim().toLowerCase(java.util.Locale.US);
+        return u.startsWith("http://127.") || u.startsWith("http://localhost")
+                || u.startsWith("http://[::1]") || u.startsWith("http://[::]");
     }
 
     /** Live indicator: can we actually reach the PC through the USB forward? */

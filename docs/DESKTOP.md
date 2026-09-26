@@ -46,12 +46,17 @@ flowchart LR
 ### USB link (no Wi-Fi for video)
 
 1. PC: plug in Quest 3 (USB debugging on, authorize the RSA prompt), **Enable USB link**
-   in Quest Link settings (forwards Quest `localhost:8765` → PC; needs `adb` —
+   in Quest Link settings. The forward is Quest `localhost:8765` → PC **8768**, kept
+   off the LAN port 8765 so USB and LAN can run at the same time (needs `adb` —
    PATH, `%LOCALAPPDATA%\Android\Sdk`, `ANDROID_HOME`, or Program Files copy).
 2. Quest: Desktop Link chrome → **USB** connects to `http://127.0.0.1:8765/...`
    with the current codec. Reader/speak endpoints ride the same forward.
 3. Audio stays on Wi-Fi (Opus is UDP and cannot adb-forward). Without Wi-Fi
    there is no headset audio; video, settings, and reader still work.
+
+The Quest only accepts a saved `localhost` URL while a forward is actually up.
+If one is left over from a previous USB session, Desktop Link drops it on launch
+and falls back to LAN discovery, so a stale entry cannot strand LAN mode.
 
 Quest button/slider help: [HELP.md](HELP.md) § Desktop Link.
 

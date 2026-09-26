@@ -13,6 +13,12 @@ public sealed class MirrorSession : IDisposable
     private readonly FrameCaptureService _capture = new();
     private readonly QuestLinkServer _questLink = new();
     private readonly DiscoveryAdvertiser _discovery = new();
+
+    /// <summary>
+    /// Host port for the adb USB forward. Opened alongside the LAN port so both
+    /// transports can be live at once.
+    /// </summary>
+    private int? _usbHostPort = UsbLinkManager.UsbHostPort;
     private readonly AudioLinkStreamer _audio = new();
     private DepthEstimator? _depth;
     private UserSettings _settings = new();
@@ -126,6 +132,18 @@ public sealed class MirrorSession : IDisposable
     /// Start or heal Quest Link HTTP + LAN advertise without tearing down capture
     /// (quick resume after Quest drop / Stop Session).
     /// </summary>
+    /// <summary>
+    /// Also make sure the adb USB forward's host port is open. Kept separate from
+    /// the LAN port because a same-port forward collides with the LAN listener.
+    /// The port is opened unconditionally, so enabling USB never has to restart
+    /// the server and drop LAN viewers.
+    /// </summary>
+    public void EnsureUsbPortListening(int usbHostPort)
+    {
+        _usbHostPort = usbHostPort;
+        EnsureLinkListening(_settings);
+    }
+
     public void EnsureLinkListening(UserSettings? settings = null)
     {
         if (settings != null)
@@ -140,7 +158,7 @@ public sealed class MirrorSession : IDisposable
         {
             try
             {
-                _questLink.Start();
+                _questLink.Start(_questLink.Port, _usbHostPort);
                 StatusChanged?.Invoke("Quest Link listening · " + _questLink.AdvertiseUrl);
             }
             catch (Exception ex)

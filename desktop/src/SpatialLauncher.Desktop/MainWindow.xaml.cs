@@ -309,6 +309,9 @@ public partial class MainWindow : Window
         UsbLinkStatus.Text = "USB: setting up forward…";
         try
         {
+            // Open the USB host port before the forward, so the forward always
+            // has somewhere to land.
+            _session.EnsureUsbPortListening(SpatialLauncher.Desktop.Core.Session.UsbLinkManager.UsbHostPort);
             var (ok, message) = await SpatialLauncher.Desktop.Core.Session.UsbLinkManager.EnsureForwardAsync();
             if (ok)
                 await RefreshUsbStatusAsync();
