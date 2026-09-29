@@ -116,6 +116,21 @@ public sealed class Av1FrameEncoder : IDisposable
             input.AddBuffer(inBuf);
             input.SampleTime = time;
             input.SampleDuration = duration;
+            if (_forceKey)
+            {
+                try
+                {
+                    // Ask for a real IDR at the 2 Hz cadence (same as H.264).
+                    // Previously wantKey only armed config-OBU prepend, so
+                    // recovery after motion/scene changes waited on the
+                    // encoder's default GOP — visible as lingering smear.
+                    input.Set(SampleAttributeKeys.CleanPoint, 1);
+                }
+                catch
+                {
+                    // optional
+                }
+            }
 
             if (_asyncMft)
                 return FinalizeAu(EncodeAsyncUnlocked(input));
@@ -457,7 +472,10 @@ public sealed class Av1FrameEncoder : IDisposable
                     MediaFactory.MFSetAttributeRatio(outType, MediaTypeAttributeKeys.FrameRate, fps, 1u);
                     outType.Set(MediaTypeAttributeKeys.AvgBitrate, (uint)bitrate);
                     outType.Set(MediaTypeAttributeKeys.InterlaceMode, (uint)VideoInterlaceMode.Progressive);
-                    outType.Set(MediaTypeAttributeKeys.AllSamplesIndependent, 1u);
+                    // Do NOT set AllSamplesIndependent — same lesson as H.264:
+                    // on MFTs that honor it, every AU becomes a sync sample
+                    // (all-intra), which spreads the bitrate across 72 keyframes
+                    // a second and collapses heavy-action quality to mush.
                     candidate.SetOutputType(0, outType, 0);
 
                     using var inType = MediaFactory.MFCreateMediaType();

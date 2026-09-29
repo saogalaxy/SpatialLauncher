@@ -975,7 +975,9 @@ public partial class MainWindow : Window
         {
             int kbps = 4000 + (Math.Clamp(_settings.JpegQuality, 50, 98) - 50) * 300;
             if (_settings.StreamCodec == StreamCodec.H264)
-                kbps = Math.Max(6000, kbps + 2000);
+                kbps = Math.Max(6000, kbps + 5000);
+            else if (_settings.StreamCodec == StreamCodec.Av1)
+                kbps = Math.Max(4000, kbps + 2000);
             string codecName = _settings.StreamCodec == StreamCodec.Av1 ? "AV1" : "H.264";
             JpegQualityLabel.Text = "Video quality " + _settings.JpegQuality + " (~" + kbps + " kbps " + codecName + ")";
         }

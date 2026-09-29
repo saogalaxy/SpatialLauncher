@@ -168,8 +168,12 @@ public sealed class QuestLinkServer : IDisposable
                 byte[]? bytes;
                 if (_codec == StreamCodec.H264)
                 {
-                    // MPEG needs more bits than AV1 at the same perceived sharpness.
-                    int kbps = Math.Max(6000, JpegQualityToBitrateKbps(JpegQuality) + 2000);
+                    // MPEG needs more bits than AV1 at the same perceived sharpness,
+                    // and heavy action spikes P-frames several times over the average:
+                    // without headroom the CBR controller clamps QP and the picture
+                    // macroblocks. At q85 this is ~19.5 Mbps for 1080p72 (~0.13 bpp),
+                    // comfortably inside LAN Wi-Fi headroom.
+                    int kbps = Math.Max(6000, JpegQualityToBitrateKbps(JpegQuality) + 5000);
                     _h264.Ensure(src.Width, src.Height, kbps);
                     long now = Environment.TickCount64;
                     // Key ~2 Hz. Every-frame "key" + AllSamplesIndependent was
@@ -196,7 +200,9 @@ public sealed class QuestLinkServer : IDisposable
                 }
                 else if (_codec == StreamCodec.Av1)
                 {
-                    int kbps = Math.Max(4000, JpegQualityToBitrateKbps(JpegQuality));
+                    // Same motion headroom as MPEG, scaled for AV1 efficiency
+                    // (~30% fewer bits at equal quality): q85 lands ~16.5 Mbps.
+                    int kbps = Math.Max(4000, JpegQualityToBitrateKbps(JpegQuality) + 2000);
                     try
                     {
                         _av1.Ensure(src.Width, src.Height, kbps);
