@@ -9,10 +9,11 @@ android {
         minSdk 29
         // Meta Store: apps created after 2026-03-01 must target 34 (VRC Packaging.1/4).
         targetSdk 34
-        // Bumped 4 -> 5: the Store already holds a code-4 upload, and the Store
-        // requires a strictly higher code for every subsequent upload.
-        versionCode 5
-        versionName "1.0.2"
+        // Code 5 also shipped with versionName 1.0.2, which the Store does not
+        // surface as an update. So this upload ticks both: code 6, name 1.0.3.
+        // (Codes only ever increase: 4 and 5 are both consumed.)
+        versionCode 6
+        versionName "1.0.3"
         ndk {
             abiFilters "arm64-v8a"
         }

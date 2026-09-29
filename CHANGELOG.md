@@ -2,6 +2,14 @@
 
 All notable changes to **Spatial Launcher** (Quest app + Windows Desktop) are recorded here.
 
+- **Store release ticked to 1.0.3 (code 6).** Code 5 uploaded fine but kept
+  `versionName 1.0.2`, which the Store does not surface as an update - same
+  display version, no update pushed. Since codes 4 and 5 are both consumed, this
+  upload moves both: `versionCode='6'`, `versionName='1.0.3'`. Re-verified on the
+  rebuilt artifact: same release key as the installed Store build, v2 signature
+  scheme, arm64-only, `minSdk 29` / `targetSdk 34`, and still free of both
+  `REQUEST_INSTALL_PACKAGES` and the beta `FileProvider`.
+
 - **Store version code bumped 4 -> 5.** The Store rejected the first upload with
   "An APK has already been uploaded with version code 4", because it requires a
   strictly higher code for every subsequent upload. `versionName` stays `1.0.2`;
