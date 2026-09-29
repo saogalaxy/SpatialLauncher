@@ -2,6 +2,20 @@
 
 All notable changes to **Spatial Launcher** (Quest app + Windows Desktop) are recorded here.
 
+- **Fixed AV1 breaking (partial image, tiling, green strip) when a window is
+  selected or resized.** Window captures have arbitrary aspects, so the SBS and
+  encoded frame dimensions changed mid-stream. The Quest AV1 decoder is
+  configured once per connection (`csd-0` fetched once from `/status`; in-band
+  sequence headers arrive as plain AUs and QTI AV1 does not cleanly reconfigure
+  on them), so new-size frames decoded at the old stride: partial render, the
+  window repeating, and a green strip — worst in the right eye, whose offset is
+  half the width. The desktop now pins the encoded SBS size per session: the
+  first frame latches the canvas (re-latched on an explicit full-SBS toggle)
+  and anything else is aspect-fit letterboxed onto it, so the encoder never
+  recreates mid-session and the decoder never sees new dimensions. Monitor
+  sources are unaffected (their size never changes, so the fast path returns the
+  frame untouched).
+
 - **Fixed heavy-action quality on MPEG/AV1 (desktop) — bitrate headroom.**
   At quality 85 both codecs ran too lean for 1080p72 high-motion content (MPEG
   ~16.5 Mbps, AV1 ~14.5 Mbps — roughly 0.1 bits/pixel/frame), so the CBR

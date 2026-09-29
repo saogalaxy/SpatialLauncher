@@ -25,6 +25,15 @@ public sealed class MirrorSession : IDisposable
     private float[,]? _cachedDepth;
     private bool _questLinkStatusHooked;
     private bool _audioHooked;
+    /// <summary>
+    /// Encoded frame size is pinned per session (see PinSbsSize). Window captures
+    /// have arbitrary aspects, so without this the encoded dimensions change
+    /// mid-stream whenever a window is selected or resized.
+    /// </summary>
+    private int _canvasW;
+    private int _canvasH;
+    private bool _canvasFullSbs;
+    private bool _canvasSet;
 
     public event Action<Bitmap>? SbsFrameReady;
     public event Action<string>? StatusChanged;
@@ -201,6 +210,7 @@ public sealed class MirrorSession : IDisposable
             ? $"Session started · {_settings.DepthPreset} · {_depth.ModelLabel} · {_depth.DeviceLabel}"
             : "Session started · luminance depth fallback (CPU/RAM — installer did not load DA-V2 ONNX)";
         StatusChanged?.Invoke(depthMsg + $" · present {FramePacing.TargetFps} Hz");
+        _canvasSet = false; // fresh session pins its own encoded size on first frame
         _capture.Start(source);
         _processing = true;
         _questLink.SessionActive = true;
@@ -326,6 +336,7 @@ public sealed class MirrorSession : IDisposable
                 {
                     sbs = SbsStereoRenderer.RenderFlat(frame, fullSbs);
                 }
+                sbs = PinSbsSize(sbs, fullSbs);
 
                 long uiNow = Environment.TickCount64;
                 bool sendUi = uiNow - lastUiTick >= 200;
@@ -360,6 +371,33 @@ public sealed class MirrorSession : IDisposable
             }
             FramePacing.WaitRemainder(sw);
         }
+    }
+
+    /// <summary>
+    /// Pin the encoded SBS size for the session. The Quest AV1 decoder is
+    /// configured once per connection (csd-0 fetched once from /status; in-band
+    /// sequence headers are fed as plain AUs and QTI AV1 does not cleanly
+    /// reconfigure on them), so a mid-stream dimension change decodes at the old
+    /// stride: partial image, tiling/repeat, green fill — worst in the right eye,
+    /// whose offset is half the width. Window captures have arbitrary aspects, so
+    /// selecting or resizing a window changes dimensions; the full-SBS toggle does
+    /// too, hence the re-latch on toggle change. Letterboxing keeps the encoder
+    /// (and decoder) on one size for the whole session; H264 survives in-band SPS
+    /// changes, but this keeps both codecs on the same stable path.
+    /// </summary>
+    private Bitmap PinSbsSize(Bitmap sbs, bool fullSbs)
+    {
+        if (!_canvasSet || fullSbs != _canvasFullSbs)
+        {
+            _canvasW = Math.Max(2, sbs.Width & ~1);
+            _canvasH = Math.Max(2, sbs.Height & ~1);
+            _canvasFullSbs = fullSbs;
+            _canvasSet = true;
+            return sbs;
+        }
+        if (sbs.Width == _canvasW && sbs.Height == _canvasH)
+            return sbs;
+        return SbsStereoRenderer.FitToCanvas(sbs, _canvasW, _canvasH);
     }
 
     /// <summary>

@@ -73,6 +73,27 @@ public static class SbsStereoRenderer
     }
 
     /// <summary>
+    /// Fit an SBS frame to a fixed session canvas, letterboxing with black bars
+    /// when sizes differ. Takes ownership of <paramref name="sbs"/> in all cases:
+    /// returns it untouched when it already matches, otherwise returns a new
+    /// canvas bitmap and disposes the input.
+    /// </summary>
+    public static Bitmap FitToCanvas(Bitmap sbs, int canvasW, int canvasH)
+    {
+        if (sbs.Width == canvasW && sbs.Height == canvasH)
+            return sbs;
+        var canvas = new Bitmap(canvasW, canvasH, PixelFormat.Format32bppArgb);
+        using var g = Graphics.FromImage(canvas);
+        g.Clear(Color.Black);
+        float s = Math.Min((float)canvasW / sbs.Width, (float)canvasH / sbs.Height);
+        int dw = Math.Max(1, (int)(sbs.Width * s));
+        int dh = Math.Max(1, (int)(sbs.Height * s));
+        g.DrawImage(sbs, (canvasW - dw) / 2, (canvasH - dh) / 2, dw, dh);
+        sbs.Dispose();
+        return canvas;
+    }
+
+    /// <summary>
     /// Movies path: depth-ordered forward warp (fewer ghosts) + horizontal hole inpaint.
     /// Approximates iw3 forward_fill + light_inpaint without the ML weights.
     /// </summary>
