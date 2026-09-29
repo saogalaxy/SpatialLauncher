@@ -2,21 +2,21 @@
 
 All notable changes to **Spatial Launcher** (Quest app + Windows Desktop) are recorded here.
 
-- **Fixed AV1 glitches and heavy-action quality on MPEG/AV1 (desktop).** Two
-  causes. First, the AV1 encoder set `AllSamplesIndependent` on its output type,
-  which tells MFTs that honor it to encode every frame as a sync sample
-  (all-intra) - the exact failure the H.264 path already documents ("collapses
-  quality to mushy ~300-byte frames"). At 72 fps that spreads the bitrate across
-  72 keyframes a second, so detail-heavy and high-motion content pixelated. The
-  flag is removed, and AV1 now requests a real IDR via `CleanPoint` at the same
-  2 Hz cadence as H.264; previously the AV1 "key" path only prepended config
-  OBUs and never asked for an IDR, so recovery after motion waited on the
-  encoder's default GOP (lingering smear). Second, both codecs ran too lean for
-  1080p72 high-motion content (q85 was ~16.5 Mbps MPEG / ~14.5 Mbps AV1, roughly
-  0.1 bits/pixel/frame), so the CBR controller clamped QP and macroblocked
-  whenever P-frames spiked. Motion headroom is now +5000 kbps for H.264 and
-  +2000 kbps for AV1 (q85 lands ~19.5 / ~16.5 Mbps), and the quality slider label
-  shows the true rate. The 500 ms key cadence is unchanged.
+- **Fixed heavy-action quality on MPEG/AV1 (desktop) — bitrate headroom.**
+  At quality 85 both codecs ran too lean for 1080p72 high-motion content (MPEG
+  ~16.5 Mbps, AV1 ~14.5 Mbps — roughly 0.1 bits/pixel/frame), so the CBR
+  controller clamped QP and macroblocked whenever P-frames spiked. Motion
+  headroom is now +5000 kbps for H.264 and +2000 kbps for AV1 (q85 lands ~19.5 /
+  ~16.5 Mbps, inside LAN Wi-Fi capacity), and the quality slider label shows the
+  true rate. The 500 ms key cadence is unchanged.
+- **Reverted: AV1 `AllSamplesIndependent` removal (it broke AV1 setup).** The
+  previous entry removed that flag on the theory it forced all-intra encoding.
+  In practice this GPU's AV1 MFT rejected the output type without it at setup
+  with `MF_E_UNSUPPORTED_D3D_TYPE`, so AV1 produced zero frames and the headset
+  got no picture. The flag is restored with a comment so it is not removed
+  again, and the accompanying `CleanPoint` IDR request (which never executed,
+  since setup failed first) is reverted too. AV1 is back to its exact prior
+  behavior plus the new bitrate headroom above.
 
 - **Store release ticked to 1.0.3 (code 6).** Code 5 uploaded fine but kept
   `versionName 1.0.2`, which the Store does not surface as an update - same
